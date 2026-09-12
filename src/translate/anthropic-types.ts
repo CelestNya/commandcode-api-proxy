@@ -164,8 +164,7 @@ export type AnthropicSSEEventType =
   | "message_delta"
   | "message_stop"
   | "ping"
-  | "error"
-  | "signature_delta";
+  | "error";
 
 export interface AnthropicSSERecord {
   event: AnthropicSSEEventType;

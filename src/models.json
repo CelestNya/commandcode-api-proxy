@@ -222,6 +222,8 @@
     "deepseek/deepseek-v4-pro": ["high", "max"],
     "deepseek/deepseek-v4-flash": ["high", "max"],
     "deepseek/deepseek-v4-flash-vision-exp": ["high", "max"],
+    "deepseek/deepseek-v4-flash-fast": ["high", "max"],
+    "deepseek/deepseek-v4.1-flash": ["high", "max"],
     "zai-org/GLM-5.3": ["high", "max"],
     "z-ai/glm-5.3-flash": ["high", "max"],
     "zai-org/GLM-5.2": ["high", "max"],

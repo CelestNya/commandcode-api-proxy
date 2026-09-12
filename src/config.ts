@@ -1,16 +1,11 @@
-import { readAuthKey } from "@/auth.js";
-
 interface CliArgs {
   host?: string;
   port?: string;
-  "api-key"?: string;
-  "setup-opencode"?: boolean;
 }
 
 export interface Config {
   host: string;
   port: number;
-  apiKey: string | null;
   ccApiBase: string;
   ccVersion: string;
   logLevel: string;
@@ -83,7 +78,6 @@ export function loadConfig(): Config {
 
   const host = cli.host || process.env.HOST || "127.0.0.1";
   const port = parseInt(cli.port || process.env.PORT || "8787", 10);
-  const apiKey = cli["api-key"] || process.env.CC_API_KEY || readAuthKey();
   const ccApiBase = process.env.CC_API_BASE || DEFAULT_CC_API_BASE;
   const ccVersion = process.env.CC_CLI_VERSION || cachedVersion || DEFAULT_CC_VERSION;
   const logLevel = process.env.LOG_LEVEL || "info";
@@ -106,7 +100,6 @@ export function loadConfig(): Config {
   return {
     host,
     port,
-    apiKey,
     ccApiBase,
     ccVersion,
     logLevel,

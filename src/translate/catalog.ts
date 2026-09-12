@@ -35,6 +35,9 @@ const CLOSED_ORG_SET = new Set(CLOSED_MODEL_ORGS.map((o) => o.toLowerCase()));
 /** New models land on the API long before anyone updates models.json, so the
  * catalog refreshes much more aggressively than the CLI version check. */
 const CATALOG_TTL_MS = 60 * 60 * 1000;
+/** After a failed refresh, wait this long before trying the API again. Without
+ * it an unreachable API would stall every request for the 5s fetch timeout. */
+const CATALOG_FAILURE_RETRY_MS = 30 * 1000;
 
 function buildCatalog(models: CatalogModel[]): ModelCatalog {
   return {
@@ -74,6 +77,7 @@ export function isClosedModel(id: string): boolean {
 
 let current: ModelCatalog = getStaticCatalog();
 let lastFetchAt = 0;
+let lastAttemptAt = 0;
 let inflight: Promise<ModelCatalog> | null = null;
 
 export function getCatalog(): ModelCatalog {
@@ -109,9 +113,20 @@ export async function refreshCatalog(
   apiKey: string,
   opts?: { force?: boolean },
 ): Promise<ModelCatalog> {
-  if (!opts?.force && Date.now() - lastFetchAt < CATALOG_TTL_MS) return current;
+  const now = Date.now();
+  // Dedupe first: a refresh already running must be awaited, never
+  // short-circuited by the throttle below.
   if (inflight) return inflight;
+  if (!opts?.force) {
+    // A successful refresh is good for a full TTL. Until one lands, retry the
+    // API at the (much shorter) failure interval instead, so a proxy that
+    // started without a key — or hit a transient outage — still converges on
+    // the live model list without stalling every request.
+    if (lastFetchAt > 0 && now - lastFetchAt < CATALOG_TTL_MS) return current;
+    if (lastFetchAt === 0 && now - lastAttemptAt < CATALOG_FAILURE_RETRY_MS) return current;
+  }
 
+  lastAttemptAt = now;
   inflight = (async () => {
     try {
       const apiModels = await fetchApiModels(apiBase, apiKey);
@@ -164,5 +179,6 @@ export async function refreshCatalog(
 export function __resetCatalogForTests(): void {
   current = getStaticCatalog();
   lastFetchAt = 0;
+  lastAttemptAt = 0;
   inflight = null;
 }

@@ -1,84 +1,29 @@
 #!/usr/bin/env node
 
+// Personal build: the API key is always passed through from the client's own
+// Authorization header. There is no stored key, no auth subcommand, and no
+// first-run prompt — a request without a key simply gets a 401.
+
 import { loadConfig, fetchLatestCliVersion } from "@/config.js";
 import { createServer } from "@/server.js";
-import { saveApiKey, promptForApiKey, readAuthKey, deleteAuth } from "@/auth.js";
-import { setupOpenCodeConfig } from "@/setup/opencode.js";
-import { setupClaudeCodeConfig } from "@/setup/claude-code.js";
 import { logger, initLogger } from "@/logger.js";
 import { getProxyVersion } from "@/version.js";
 
-const args = process.argv.slice(2);
-
-if (args[0] === "auth") {
-  const sub = args[1];
-  if (sub === "login") {
-    const force = args.includes("--force");
-    const existing = readAuthKey();
-    if (existing && !force) {
-      console.log("\n  You are already logged in. Use `auth login --force` to overwrite.\n");
-      process.exit(0);
-    }
-    console.log("\n  Get your API key from https://commandcode.ai/settings\n");
-    const key = await promptForApiKey();
-    if (!key) {
-      console.error("  FATAL: API key is required.\n");
-      process.exit(1);
-    }
-    saveApiKey(key);
-    console.log("  ✓ API key saved to ~/.config/commandcode-api-proxy/auth.json\n");
-  } else if (sub === "logout") {
-    deleteAuth();
-    console.log("\n  ✓ API key removed\n");
-  } else {
-    console.error("\n  Usage: commandcode-api-proxy auth <login|logout>\n");
-  }
-  process.exit(0);
-}
-
-if (args.includes("--setup-opencode")) {
-  await setupOpenCodeConfig();
-  process.exit(0);
-}
-
-if (args.includes("--setup-claude-code")) {
-  const force = args.includes("--force");
-  await setupClaudeCodeConfig(force);
-  process.exit(0);
-}
-
 const config = loadConfig();
 initLogger(config.logLevel);
-
-logger.info(
-  `API key source: ${process.env.CC_API_KEY ? "env CC_API_KEY" : config.apiKey ? "auth.json" : "none"} (length: ${config.apiKey?.length ?? 0})`,
-);
 
 if (!process.env.CC_CLI_VERSION) {
   const latest = await fetchLatestCliVersion();
   if (latest) config.ccVersion = latest;
 }
 
-if (!config.apiKey) {
-  console.log("\n  No Command Code API key found.");
-  console.log("  You can get one from https://commandcode.ai/settings\n");
-  const key = await promptForApiKey();
-  if (!key) {
-    console.error("  FATAL: API key is required.\n");
-    process.exit(1);
-  }
-  saveApiKey(key);
-  config.apiKey = key;
-  console.log("  ✓ API key saved to ~/.config/commandcode-api-proxy/auth.json\n");
-}
-
 const server = createServer(config);
 
 server.listen(config.port, config.host, () => {
-  console.log(`\n  Command Code API Proxy v${getProxyVersion()}`);
+  console.log(`\n  Command Code API Proxy v${getProxyVersion()} (personal build)`);
   console.log(`  ${"=".repeat(50)}`);
   console.log(`  Listening on  http://${config.host}:${config.port}`);
-  console.log(`  Auth: ${config.apiKey ? "ENABLED (Bearer token or x-api-key)" : "DISABLED"}`);
+  console.log(`  Auth: passthrough (client's own key on every request)`);
   console.log("");
   console.log("  Endpoints:");
   console.log("    GET  /health");

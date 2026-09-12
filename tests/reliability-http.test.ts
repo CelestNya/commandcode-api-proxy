@@ -183,7 +183,9 @@ describe.each(paths)("real HTTP reliability: %s", (path) => {
     let text = "";
     for await (const chunk of res) text += chunk;
     expect(text).toContain("Inconsistent upstream tool arguments");
-    expect(text).toContain(path === "/v1/messages" ? "event: error" : "[upstream error]");
+    // Each protocol reports failure through its own terminal error record: an
+    // `error` event for Anthropic, the error envelope for OpenAI.
+    expect(text).toContain(path === "/v1/messages" ? "event: error" : '"upstream_error"');
   });
 
   it.each([true, false])(

@@ -331,7 +331,9 @@ describe("OpenAIStreamEncoder", () => {
     };
 
     for (const [from, to] of Object.entries(map)) {
-      const chunks = encoder.emit({
+      // 每种 reason 用新编码器：finish 是终态，同流的第二个 finish 会被守卫吞掉
+      const enc = new OpenAIStreamEncoder("test-model");
+      const chunks = enc.emit({
         type: "finish",
         data: { finishReason: from as string },
       });
@@ -346,6 +348,32 @@ describe("OpenAIStreamEncoder", () => {
     expect(encoder.finished).toBe(false);
     encoder.emit({ type: "error", data: { message: "boom" } });
     expect(encoder.finished).toBe(true);
+  });
+
+  // Regression: an upstream failure used to be smuggled into delta.content
+  // with finish_reason:"stop". Clients read that as a normal assistant reply
+  // and treated the turn as successful, so the failure was silently swallowed
+  // and never retried. Errors must travel as the OpenAI error envelope, which
+  // the AI SDK maps to a stream error part (finishReason "error").
+  it("reports an upstream error via the error envelope, not as content", () => {
+    encoder.emit({ type: "start", data: {} });
+    const chunks = encoder.emit({ type: "error", data: { message: "idle timeout" } }) as any[];
+
+    const envelope = chunks.find((c) => c && typeof c === "object" && "error" in c);
+    expect(envelope).toBeDefined();
+    expect(envelope.error.message).toContain("idle timeout");
+
+    // No chunk may carry the failure text as assistant content...
+    const contentText = chunks
+      .flatMap((c) => c.choices?.[0]?.delta?.content ?? [])
+      .join("");
+    expect(contentText).not.toContain("idle timeout");
+    // ...and none may claim the turn finished normally.
+    const finishReasons = chunks
+      .flatMap((c) => c.choices ?? [])
+      .map((ch) => ch.finish_reason)
+      .filter(Boolean);
+    expect(finishReasons).not.toContain("stop");
   });
 
   // Regression: parallel tool-call-delta streams without an explicit `index`

@@ -19,6 +19,7 @@ import type {
   CCRequestBody,
   CCToolChoice,
   CCEvent,
+  UsageData,
 } from "@/translate/types.js";
 import { resolveAnthropicModel } from "@/translate/anthropic-models.js";
 import { resolveEffortForModel } from "@/translate/models.js";
@@ -40,6 +41,12 @@ const ANTHROPIC_STOP_REASON_MAP: Record<string, AnthropicStopReason> = {
   model_context_window_exceeded: "model_context_window_exceeded",
 };
 const INITIAL_OUTPUT_TOKENS = 1;
+/**
+ * CC returns no thinking-block signature, but Anthropic's contract requires one
+ * on every thinking block. Clients round-trip it without verifying, so a fixed
+ * placeholder is safe.
+ */
+const THINKING_SIGNATURE = "_cc_proxy_placeholder";
 
 // ── Request translator ──
 
@@ -256,6 +263,8 @@ export class AnthropicStreamEncoder {
   private started = false;
   private pinged = false;
   private sawFinish = false;
+  /** finish 事件里归一后的用量（含缓存命中），供服务层落统计日志 */
+  lastUsage?: UsageData;
 
   constructor(private readonly model: string) {
     this.messageId = `msg_${crypto.randomUUID()}`;
@@ -266,6 +275,10 @@ export class AnthropicStreamEncoder {
   }
 
   emit(event: CCEvent): AnthropicSSERecord[] {
+    // 终态守卫：error/finish 已发出 message_stop，message_stop 之后不允许
+    // 再有任何记录——行为不端的上游（终态后继续发事件）到此全部吞掉，
+    // 否则客户端会看到重复收尾和 stop 后的块记录。
+    if (this.sawFinish) return [];
     if (event.type === "start") {
       this.blockIndex = 0;
       this.currentBlockType = null;
@@ -291,7 +304,7 @@ export class AnthropicStreamEncoder {
         event: "error",
         data: { type: "error", error: { type: "api_error", message: msg } },
       });
-      records.push({ event: "message_stop", data: {} });
+      records.push({ event: "message_stop", data: { type: "message_stop" } });
       return records;
     }
 
@@ -338,6 +351,7 @@ export class AnthropicStreamEncoder {
 
     const finishReason = (event.data.finishReason as string) ?? "stop";
     const usage = extractUsage(event.data as Record<string, unknown>);
+    this.lastUsage = usage;
 
     // CC's `start` event carries no usage — input/output token counts are only
     // known at `finish`. Anthropic's SDK merges `message_delta.usage` over the
@@ -360,7 +374,7 @@ export class AnthropicStreamEncoder {
       },
     });
 
-    records.push({ event: "message_stop", data: {} });
+    records.push({ event: "message_stop", data: { type: "message_stop" } });
     return records;
   }
 
@@ -492,10 +506,13 @@ export class AnthropicStreamEncoder {
     if (this.currentBlockType === null) return;
 
     if (this.currentBlockType === "thinking") {
-      records.push({
-        event: "signature_delta",
-        data: { type: "signature_delta", signature: "_cc_proxy_placeholder" },
-      } as AnthropicSSERecord);
+      // `signature_delta` is a *delta type*, not a Messages API event name.
+      // Emitting it as a top-level event makes strict clients (which parse
+      // each record against a union keyed on `type`) abort the whole stream,
+      // surfacing to the user as a turn that stops with no message.
+      records.push(
+        this.makeDelta({ type: "signature_delta", signature: THINKING_SIGNATURE }),
+      );
     }
 
     records.push({
@@ -560,7 +577,7 @@ export class AnthropicStreamEncoder {
         usage: { input_tokens: 0, output_tokens: 0 },
       },
     });
-    records.push({ event: "message_stop", data: {} });
+    records.push({ event: "message_stop", data: { type: "message_stop" } });
     return records;
   }
 }
@@ -612,7 +629,7 @@ export function buildAnthropicResponse(
     content.push({
       type: "thinking",
       thinking: thinkingContent,
-      signature: "_cc_proxy_placeholder",
+      signature: THINKING_SIGNATURE,
     });
   }
   if (textContent) content.push({ type: "text", text: textContent });

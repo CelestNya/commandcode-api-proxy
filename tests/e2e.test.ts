@@ -3,6 +3,9 @@ import http from "node:http";
 import { Readable } from "node:stream";
 import { loadConfig } from "@/config.js";
 import { createServer } from "@/server.js";
+import { __resetCatalogForTests } from "@/translate/catalog.js";
+import { UpstreamError } from "@/upstream.js";
+import { mockCcModelsFetch } from "./helpers.js";
 import type { CCEvent } from "@/translate/types.js";
 
 // ──────────────────────────────────────────
@@ -188,10 +191,11 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     expect(body.error.message).toBe("Invalid JSON body");
   });
 
-  // Regression: an upstream `error` event already emits a terminal chunk with
-  // finish_reason:"stop". The server MUST NOT synthesize a second finish
-  // chunk on stream end (which would emit duplicate finish_reason chunks).
-  it("streaming: upstream error event does not produce duplicate finish chunks", async () => {
+  // Regression: an upstream `error` event ends the generation. The server MUST
+  // NOT also synthesize a finish chunk on stream end — the error envelope is
+  // already terminal, and a trailing finish_reason:"stop" would contradict it
+  // by telling the client the turn succeeded.
+  it("streaming: upstream error event emits one error envelope and no finish chunk", async () => {
     const errorEvents: CCEvent[] = [
       { type: "start", data: {} },
       { type: "error", data: { message: "CC upstream exploded" } },
@@ -217,16 +221,25 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     expect(text).toContain("[DONE]");
     const lines = text.split("\n").filter((l) => l.startsWith("data: ") && !l.includes("[DONE]"));
     const parsed = lines.map((l) => JSON.parse(l.replace("data: ", "")));
-    // Exactly ONE chunk with finish_reason set (from the error case).
+
+    // The failure is reported through the error envelope exactly once.
+    const envelopes = parsed.filter((c) => c.error);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0].error.message).toContain("CC upstream exploded");
+    // No chunk claims a normal finish, and none leaks the error as content.
     const finishChunks = parsed.filter((c) => c.choices?.[0]?.finish_reason);
-    expect(finishChunks).toHaveLength(1);
+    expect(finishChunks).toHaveLength(0);
+    const contentText = parsed
+      .flatMap((c) => c.choices?.[0]?.delta?.content ?? [])
+      .join("");
+    expect(contentText).not.toContain("CC upstream exploded");
   });
 
   // Regression: a stream-level error (TCP failure, idle timeout, encoder
-  // throw) used to emit a non-chunk `{error:{...}}` envelope alongside a
-  // valid chunk, which some clients parsed as a tool call named "error".
-  // Now pumpStream emits only uniform valid chunks.
-  it("streaming: stream-level error surfaces as a uniform chunk (no out-of-band error envelope)", async () => {
+  // throw) must reach the client as a protocol error, not as assistant text.
+  // While the failure was wrapped in delta.content the client counted the turn
+  // as successful and never retried it.
+  it("streaming: stream-level error surfaces as an error envelope", async () => {
     // Build a stream that emits one event, then errors out. Attach an
     // error listener up-front so destroy(err) doesn't trigger Node's
     // unhandled-exception path (pumpStream's for-await handles the read
@@ -259,21 +272,120 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     const text = await res.text();
     const lines = text.split("\n").filter((l) => l.startsWith("data: ") && !l.includes("[DONE]"));
     const parsed = lines.map((l) => JSON.parse(l.replace("data: ", "")));
-    // Every emitted data record must be a valid chat.completion.chunk — no
-    // bare `{error:...}` envelope mixed in.
-    for (const chunk of parsed) {
+    // Chunks emitted before the failure stay valid chat.completion.chunks.
+    const chunkRecords = parsed.filter((c) => !c.error);
+    for (const chunk of chunkRecords) {
       expect(chunk.object).toBe("chat.completion.chunk");
     }
-    // The error text should appear as delta.content (visible to the user)
-    // and the stream should still terminate with finish_reason:"stop".
-    const errorChunk = parsed.find(
-      (c) =>
-        typeof c.choices?.[0]?.delta?.content === "string" &&
-        c.choices[0].delta.content.includes("simulated TCP RST"),
-    );
-    expect(errorChunk).toBeDefined();
+    // The failure arrives as an error envelope so the caller can retry, and it
+    // never masquerades as assistant content or as a normal finish.
+    const envelopes = parsed.filter((c) => c.error);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0].error.message).toContain("simulated TCP RST");
+    const contentText = parsed
+      .flatMap((c) => c.choices?.[0]?.delta?.content ?? [])
+      .join("");
+    expect(contentText).not.toContain("simulated TCP RST");
     const finishChunks = parsed.filter((c) => c.choices?.[0]?.finish_reason);
-    expect(finishChunks).toHaveLength(1);
+    expect(finishChunks).toHaveLength(0);
+  });
+});
+
+// ──────────────────────────────────────────
+// E2E: dynamic model catalog
+// ──────────────────────────────────────────
+
+describe("E2E: dynamic model catalog", () => {
+  let server: http.Server;
+  let baseUrl: string;
+  const port = 19008;
+
+  beforeAll(async () => {
+    // No server-held key: the startup catalog refresh is skipped, which is
+    // exactly the state a proxy lands in when auth is configured after launch.
+    const config = { ...loadConfig(), port, apiKey: null as string | null, host: "127.0.0.1" };
+    server = createServer(config);
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  let catalogFetchSpy: ReturnType<typeof mockCcModelsFetch> | undefined;
+
+  afterEach(() => {
+    sendToCCSpy.mockReset();
+    // Restore ONLY the fetch spy. A blanket restoreAllMocks() would also wipe
+    // the vi.mock factory's collectEvents implementation, breaking every test
+    // that runs after this block.
+    catalogFetchSpy?.mockRestore();
+    catalogFetchSpy = undefined;
+    __resetCatalogForTests();
+  });
+
+  // Regression: a bare model name present only in the provider API used to be
+  // forwarded verbatim, and CC rewrites an unprefixed name to
+  // `anthropic:<name>`, failing the request with 403 FORBIDDEN. On exactly that
+  // rejection the catalog must be refreshed from the request's own key and the
+  // request retried, so the name resolves to its full org-prefixed id.
+  it("retries a 403-rejected bare model name after learning it from the provider API", async () => {
+    catalogFetchSpy = mockCcModelsFetch([
+      { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", context_length: 1000000 },
+    ]);
+    // First attempt: CC rejects the unresolved bare name. Retry: succeeds.
+    sendToCCSpy
+      .mockRejectedValueOnce(
+        new UpstreamError(
+          'CC API 403: {"message":"Model/provider not recognized: anthropic:deepseek-v4.1-flash"}',
+          403,
+          false,
+        ),
+      )
+      .mockResolvedValueOnce({ stream: fakeStream() });
+
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer client-key" },
+      body: JSON.stringify({
+        model: "deepseek-v4.1-flash",
+        messages: [{ role: "user", content: "Hi" }],
+        stream: false,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(sendToCCSpy).toHaveBeenCalledTimes(2);
+    // The retry carries the resolved id, not the bare name.
+    const retryBody = sendToCCSpy.mock.calls[1][0] as { params: { model: string } };
+    expect(retryBody.params.model).toBe("deepseek/deepseek-v4.1-flash");
+  });
+
+  // A model that genuinely does not exist stays unknown after the refresh, so
+  // the original 403 must surface rather than being retried forever.
+  it("does not retry a 403 for a model that the provider API does not know", async () => {
+    catalogFetchSpy = mockCcModelsFetch([
+      { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", context_length: 1000000 },
+    ]);
+    sendToCCSpy.mockRejectedValue(
+      new UpstreamError(
+        'CC API 403: {"message":"Model/provider not recognized: anthropic:no-such-model"}',
+        403,
+        false,
+      ),
+    );
+
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer client-key" },
+      body: JSON.stringify({
+        model: "no-such-model",
+        messages: [{ role: "user", content: "Hi" }],
+        stream: false,
+      }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(sendToCCSpy).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -8,8 +8,11 @@ import {
   AnthropicStreamEncoder,
   buildAnthropicResponse,
 } from "@/translate/anthropic.js";
-import { refreshCatalog, getCatalog } from "@/translate/catalog.js";
-import type { CCEvent } from "@/translate/types.js";
+import { getCatalog } from "@/translate/catalog.js";
+import { discoverModel } from "@/translate/models.js";
+import { extractUsage } from "@/translate/util.js";
+import { recordUsage, snapshot as usageSnapshot } from "@/usage-stats.js";
+import type { CCEvent, CCRequestBody } from "@/translate/types.js";
 import { formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
 import { logger } from "@/logger.js";
@@ -85,25 +88,19 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
 // Auth
 // ──────────────────────────────────────────
 
+/**
+ * Pure passthrough: the caller's own key travels with every request. There is
+ * no stored fallback key — a request without one gets a 401.
+ */
 function extractApiKey(req: http.IncomingMessage): string | null {
-  let key: string | null = null;
   const auth = req.headers.authorization;
   if (auth) {
     const m = auth.match(/^Bearer\s+(.+)$/i);
-    if (m) key = m[1];
+    if (m) return m[1];
   }
-  if (!key) {
-    const xApiKey = req.headers["x-api-key"] as string | undefined;
-    if (xApiKey) key = xApiKey;
-  }
-  // If the client sent "proxy-managed" or no key, fall back to the proxy's configured key
-
-  if (!key || key === "proxy-managed" || key === "placeholder") {
-    logger.debug(`client key sentinel, using config key (length: ${config.apiKey?.length ?? 0})`);
-    return config.apiKey;
-  }
-  logger.debug(`using client's own key (length: ${key.length})`);
-  return key;
+  const xApiKey = req.headers["x-api-key"] as string | undefined;
+  if (xApiKey) return xApiKey;
+  return null;
 }
 
 // ──────────────────────────────────────────
@@ -239,10 +236,61 @@ async function pumpStream(
 // Route handlers
 // ──────────────────────────────────────────
 
+/**
+ * Whether an upstream failure means "CC did not recognize this model name".
+ *
+ * CC rewrites an unprefixed name to `anthropic:<name>` and answers 403 with
+ * `Model/provider not recognized`. That is the one failure a catalog refresh
+ * can actually fix, so it is also the only case worth retrying — matching on
+ * the message keeps unrelated 403s (auth, quota) from triggering a retry.
+ */
+function isUnknownModelError(err: unknown): boolean {
+  if (!(err instanceof UpstreamError) || err.statusCode !== 403) return false;
+  return /model\/provider not recognized/i.test(err.message);
+}
+
+/**
+ * Send a generation, retrying once if CC rejects the model name as unknown.
+ *
+ * A bare name the catalog has not learned yet is forwarded verbatim, and CC
+ * answers 403 on the invented `anthropic:` prefix even when the model does
+ * exist upstream. On exactly that failure we refresh the catalog and rebuild
+ * the request so the name resolves to its full id. The happy path costs
+ * nothing extra: no fetch, no rebuild, no second attempt.
+ *
+ * `buildBody` is a thunk because the retry must re-resolve the model after the
+ * catalog changes.
+ */
+async function sendToCCWithModelDiscovery(
+  buildBody: () => CCRequestBody,
+  model: string,
+  options: {
+    apiBase: string;
+    apiKey: string;
+    ccVersion: string;
+    timeoutMs: number;
+    idleTimeoutMs: number;
+  },
+  signal: AbortSignal,
+): Promise<NodeJS.ReadableStream> {
+  try {
+    return (await sendToCC(buildBody(), options, signal)).stream;
+  } catch (err) {
+    if (!isUnknownModelError(err)) throw err;
+    const learned = await discoverModel(model, options.apiBase, options.apiKey);
+    // Still unknown → the model genuinely doesn't exist; report the original.
+    if (!learned) throw err;
+    logger.info(`Model catalog learned "${model}"; retrying with the resolved id`);
+    return (await sendToCC(buildBody(), options, signal)).stream;
+  }
+}
+
 function handleHealth(_req: http.IncomingMessage, res: http.ServerResponse): void {
   sendJson(res, 200, {
     status: "ok",
     version: getProxyVersion(),
+    // 自代理启动以来的累计用量/缓存统计（缓存量与缓存率）
+    cache: usageSnapshot(),
   });
 }
 
@@ -324,13 +372,14 @@ async function handleChatCompletions(
     logger.info(`[Incoming Request] No tools were sent by the client!`);
   }
 
-  const ccBody = toCCRequest(openAIReq);
-
   const abort = abortOnClientDisconnect(res);
 
   try {
-    const result = await sendToCC(
-      ccBody,
+    const stream = await sendToCCWithModelDiscovery(
+      // Rebuilt per attempt so a retry re-resolves the model against the
+      // refreshed catalog.
+      () => toCCRequest(openAIReq),
+      model,
       {
         apiBase: config.ccApiBase,
         apiKey,
@@ -340,7 +389,6 @@ async function handleChatCompletions(
       },
       abort.signal,
     );
-    const stream = result.stream;
 
     if (isStream) {
       res.writeHead(200, {
@@ -370,11 +418,14 @@ async function handleChatCompletions(
         res.write(formatSSEDone());
         res.end();
       }
+      recordUsage(model, encoder.lastUsage);
       // The response abort signal covers both streaming and JSON clients.
     } else {
       const events = await collectEvents(stream);
       const response = buildNonStreamingResponse(events, model, encoder.id);
       sendJson(res, 200, response);
+      recordUsage(model, extractUsage((events.find((e) => e.type === "finish")?.data ??
+        {}) as Record<string, unknown>));
     }
   } catch (err) {
     handleUpstreamError(res, err, "openai");
@@ -415,13 +466,15 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
   const model = anthropicReq.model;
 
   const encoder = new AnthropicStreamEncoder(model);
-  const ccBody = anToCCRequest(anthropicReq);
 
   const abort = abortOnClientDisconnect(res);
 
   try {
-    const result = await sendToCC(
-      ccBody,
+    const stream = await sendToCCWithModelDiscovery(
+      // Rebuilt per attempt so a retry re-resolves the model against the
+      // refreshed catalog.
+      () => anToCCRequest(anthropicReq),
+      model,
       {
         apiBase: config.ccApiBase,
         apiKey,
@@ -431,7 +484,6 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
       },
       abort.signal,
     );
-    const stream = result.stream;
 
     if (isStream) {
       res.writeHead(200, {
@@ -461,12 +513,15 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
         },
       );
       if (!res.writableEnded && !res.destroyed) res.end();
+      recordUsage(model, encoder.lastUsage);
       // The response abort signal already covers mid-stream disconnects.
     } else {
       const events = await collectEvents(stream);
       const response = buildAnthropicResponse(events, model, encoder.messageId);
       res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
       res.end(JSON.stringify(response));
+      recordUsage(model, extractUsage((events.find((e) => e.type === "finish")?.data ??
+        {}) as Record<string, unknown>));
     }
   } catch (err) {
     handleUpstreamError(res, err, "anthropic");
@@ -589,13 +644,9 @@ export function createServer(cfg: Config): http.Server {
   config = cfg;
   corsOrigin = cfg.corsOrigin;
 
-  // Refresh the model catalog from the CC provider API in background (only if
-  // we have a key to use). On failure the static fallback stays in place.
-  if (cfg.apiKey) {
-    refreshCatalog(cfg.ccApiBase, cfg.apiKey).catch(() => {
-      /* keep defaults */
-    });
-  }
+  // No startup catalog refresh: there is no stored key to fetch with. The
+  // catalog learns models lazily via sendToCCWithModelDiscovery when CC
+  // rejects a name, keyed by the caller's own credentials.
 
   const routes: RouteEntry[] = [
     { method: "GET", path: "/health", handler: handleHealth },

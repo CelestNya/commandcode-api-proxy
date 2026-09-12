@@ -223,6 +223,8 @@ export class OpenAIStreamEncoder {
   private readonly created: number;
   private toolCallIndex = 0;
   private sawFinish = false;
+  /** finish 事件里归一后的用量（含缓存命中），供服务层落统计日志 */
+  lastUsage?: UsageData;
   // Map a CC toolCallId to the OpenAI streaming `index` we assigned it.
   // Without this, parallel tool-call-delta streams without an explicit
   // `index` field would all be assigned index 0 and the client would merge
@@ -278,6 +280,9 @@ export class OpenAIStreamEncoder {
   }
 
   emit(event: CCEvent): object[] {
+    // 终态守卫：finish/error 已收尾（finish chunk 或 error 信封），其后上游
+    // 再发的一切事件到此吞掉，防止重复 finish 或终态后的内容块。
+    if (this.sawFinish) return [];
     const chunks: object[] = [];
     const id = this.id;
     const created = this.created;
@@ -400,6 +405,7 @@ export class OpenAIStreamEncoder {
       case "finish": {
         this.sawFinish = true;
         const usage = extractUsage(event.data as Record<string, unknown>);
+        this.lastUsage = usage;
         const finishReason = (event.data.finishReason as string) ?? "stop";
         chunks.push({
           id,
@@ -437,33 +443,27 @@ export class OpenAIStreamEncoder {
   }
 
   /**
-   * Build a uniform error→content+finish chunk pair. Used both by `emit()`
-   * for upstream error events and by the server's pumpStream catch for
-   * stream-level errors (TCP failure, idle timeout, encoder throw). Both
-   * paths surface errors as valid chat.completion.chunk records so the
-   * client always sees a uniform stream shape instead of a mix of valid
-   * chunks and an ad-hoc `{error:...}` envelope.
+   * Build the OpenAI error envelope for a failed generation. Used both by
+   * `emit()` for upstream error events and by the server's pumpStream catch
+   * for stream-level errors (TCP failure, idle timeout, encoder throw).
+   *
+   * The envelope — not a content chunk — is what signals failure. The AI SDK's
+   * OpenAI-compatible chunk schema is a union of the normal chunk shape and
+   * `{error: {...}}`; `doStream` turns the error arm into a stream error part
+   * and sets finishReason "error", which is what lets the caller retry. Wrapping
+   * the message in delta.content instead makes the client read the failure as a
+   * normal assistant reply and report a successful turn, so the error is
+   * silently swallowed.
    */
   private errorChunks(message: string): object[] {
-    const id = this.id;
-    const created = this.created;
     logger.error(`[CC upstream error] ${message}`);
     return [
       {
-        id,
-        object: "chat.completion.chunk",
-        created,
-        model: this.model,
-        choices: [
-          { index: 0, delta: { content: `[upstream error] ${message}` }, finish_reason: null },
-        ],
-      },
-      {
-        id,
-        object: "chat.completion.chunk",
-        created,
-        model: this.model,
-        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        error: {
+          message,
+          type: "upstream_error",
+          code: "upstream_error",
+        },
       },
     ];
   }

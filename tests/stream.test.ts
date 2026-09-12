@@ -83,10 +83,14 @@ describe("formatAnthropicSSE", () => {
     expect(result).toContain("\n\n");
   });
 
-  it("message_stop uses empty data", () => {
-    const result = formatAnthropicSSE("message_stop", {});
+  // Regression: message_stop used to be special-cased to `data: {}`. The SDK
+  // validates every record against the same union keyed on `type`, so an empty
+  // payload fails as "No matching discriminator" and kills the turn exactly at
+  // stream end — which is also why every tool call died before executing.
+  it("message_stop carries its type discriminator", () => {
+    const result = formatAnthropicSSE("message_stop", { type: "message_stop" });
     expect(result).toContain("event: message_stop");
-    expect(result).toContain("data: {}");
+    expect(result).toContain('data: {"type":"message_stop"}');
   });
 
   it("content_block_delta formats correctly", () => {

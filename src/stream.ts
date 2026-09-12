@@ -59,8 +59,11 @@ export function formatSSEDone(): string {
 }
 
 export function formatAnthropicSSE(eventType: string, data: unknown): string {
-  if (eventType === "message_stop") {
-    return "event: message_stop\ndata: {}\n\n";
+  // 客户端对每条记录按 type 做联合判别，缺 type 的记录（如曾经的
+  // message_stop 空载荷）会让整条流验证失败，因此这里兜底补齐。
+  let payload = data as Record<string, unknown>;
+  if (!payload || typeof payload !== "object" || payload.type === undefined) {
+    payload = { ...(payload as object), type: eventType };
   }
-  return `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+  return `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
 }

@@ -304,19 +304,70 @@ describe("AnthropicStreamEncoder", () => {
     expect(usage.cache_read_input_tokens).toBe(7424);
   });
 
-  it("thinking block emits signature_delta on close", () => {
+  it("thinking block closes with a signature_delta nested in content_block_delta", () => {
     const encoder = new AnthropicStreamEncoder("m");
     encoder.emit({ type: "start", data: {} });
 
     const chunks = encoder.emit({ type: "reasoning-delta", data: { text: "Let me think..." } });
-    // After reasoning-delta, current block type is "thinking"
-    // But no signature_delta yet — that only comes on close
-    expect(chunks.every((c) => c.event !== "signature_delta")).toBe(true);
+    // After reasoning-delta, current block type is "thinking".
+    // The signature only arrives when the block closes.
+    expect(chunks.some((c) => c.event === "content_block_delta")).toBe(true);
 
     const finish = encoder.emit({ type: "finish", data: { finishReason: "stop" } });
-    const sig = finish.find((c) => c.event === "signature_delta");
+    // The signature must travel as the *delta* of a content_block_delta.
+    // `signature_delta` is a delta type, not a Messages API event name:
+    // emitting it top-level makes strict clients reject the whole stream
+    // ("Invalid discriminator value. Expected 'message_start' | ...").
+    const sig = finish.find(
+      (c) =>
+        c.event === "content_block_delta" &&
+        (c.data.delta as { type?: string } | undefined)?.type === "signature_delta",
+    );
     expect(sig).toBeDefined();
-    expect((sig!.data as { signature: string })?.signature).toBe("_cc_proxy_placeholder");
+    expect((sig!.data.delta as { signature: string }).signature).toBe("_cc_proxy_placeholder");
+    expect(sig!.data.index).toBe(0);
+  });
+
+  it("emits only Messages API event names across a full thinking+text turn", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    const records = [
+      ...encoder.emit({ type: "start", data: {} }),
+      ...encoder.emit({ type: "reasoning-delta", data: { text: "thinking" } }),
+      ...encoder.emit({ type: "text-delta", data: { text: "answer" } }),
+      ...encoder.emit({ type: "finish", data: { finishReason: "stop" } }),
+    ];
+
+    // Every SSE record is parsed against a discriminated union keyed on the
+    // event name. `signature_delta` is not a member of that union, so a stray
+    // top-level record of that type is a hard validation failure for the
+    // client, not a recoverable warning.
+    const allowed = new Set([
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "content_block_stop",
+      "error",
+      "message_delta",
+      "message_stop",
+      "ping",
+    ]);
+    expect(records.map((r) => r.event).filter((e) => !allowed.has(e))).toEqual([]);
+  });
+
+  // Regression: message_stop was emitted as `data: {}`, which has no `type`
+  // discriminator. The client parses every record against a union keyed on
+  // `type`, so the stream died exactly at turn end — visibly for plain turns
+  // and as "tool execution interrupted" for tool-call turns.
+  it("carries a type discriminator on every record, including message_stop", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    const records = [
+      ...encoder.emit({ type: "start", data: {} }),
+      ...encoder.emit({ type: "text-delta", data: { text: "answer" } }),
+      ...encoder.emit({ type: "finish", data: { finishReason: "stop" } }),
+      ...encoder.finishRecords("end_turn"),
+    ];
+    const missing = records.filter((r) => (r.data as { type?: string }).type !== r.event);
+    expect(missing.map((r) => r.event)).toEqual([]);
   });
 
   it("error before content emits message_start then error", () => {

@@ -1,7 +1,7 @@
 // Model resolution, aliasing, and discovery against the CC provider API.
 
 import modelsData from "@/models.json" with { type: "json" };
-import { getCatalog } from "@/translate/catalog.js";
+import { getCatalog, refreshCatalog } from "@/translate/catalog.js";
 
 const BUILTIN_MODELS: string[] = modelsData.builtin;
 const SHORT_ALIASES: Record<string, string> = modelsData.shortAliases;
@@ -34,6 +34,39 @@ export function resolveModel(model: string): string {
     if (last.toLowerCase() === lower) return id;
   }
   return model;
+}
+
+/**
+ * Whether a request model name would reach CC unresolvable.
+ *
+ * A bare name (no "/") that matches neither an alias nor any known model is
+ * the dangerous case: CC treats an unprefixed name as `anthropic:<name>` and
+ * rejects it with 403 FORBIDDEN, even when the model exists upstream. Full ids
+ * and aliases pass through untouched, so they never need a discovery refresh.
+ */
+export function needsCatalogDiscovery(model: string): boolean {
+  if (!model || model === "default" || model.includes("/")) return false;
+  if (SHORT_ALIASES[model] ?? SHORT_ALIASES[model.toLowerCase()]) return false;
+  return resolveModel(model) === model;
+}
+
+/**
+ * Teach the catalog a bare model name it doesn't know yet.
+ *
+ * Returns true only when the refresh actually made the name resolvable. A name
+ * that stays unknown does not exist upstream, so callers should surface the
+ * original failure instead of retrying blindly. Refreshes are TTL-guarded and
+ * their failures are throttled, so repeated misses cannot stampede the API.
+ */
+export async function discoverModel(
+  model: string,
+  apiBase: string,
+  apiKey: string,
+): Promise<boolean> {
+  if (!needsCatalogDiscovery(model)) return false;
+  // Refresh failures are non-fatal: the name simply stays unresolved.
+  await refreshCatalog(apiBase, apiKey).catch(() => undefined);
+  return !needsCatalogDiscovery(model);
 }
 
 /**
