@@ -1,9 +1,17 @@
 @echo off
 rem Build the tray manager with the .NET Framework compiler Windows ships,
-rem then assemble the portable package: release\CCProxy\ (exe + embedded node + dist).
-rem Usage: build.cmd
+rem then assemble a portable package and publish it to the hot-swap folder.
+rem
+rem Outputs (version-stamped, so a hot update is unambiguous):
+rem   release\CCProxy\                                  local staging package
+rem   <Desktop>\CCProxy-Release\CCProxy-<ver>\          this build, ready to drop in
+rem   <Desktop>\CCProxy-Release\CCProxy-current\        symlink-free copy of the newest
+rem The previous version folder is kept, so there is always a known-good
+rem artifact to fall back to if a hot update misbehaves.
+rem
+rem Usage: build.cmd [version]      (default: read TrayVersion from Tray.cs)
 
-setlocal
+setlocal enabledelayedexpansion
 set CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe
 if not exist "%CSC%" set CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe
 if not exist "%CSC%" (
@@ -12,18 +20,34 @@ if not exist "%CSC%" (
 )
 
 set OUTDIR=%~dp0
+set ROOT=%~dp0..
+
+rem ---- version: argument, else TrayVersion from source (single source of truth) ----
+set VER=%~1
+if "%VER%"=="" (
+  for /f "tokens=2 delims==" %%V in ('findstr /r /c:"TrayVersion =" "%OUTDIR%Tray.cs"') do (
+    set "LINE=%%V"
+  )
+  set "LINE=!LINE: =!"
+  set "LINE=!LINE:"=!"
+  set "LINE=!LINE:;=!"
+  set VER=!LINE!
+)
+if "%VER%"=="" (
+  echo Could not determine version.
+  exit /b 1
+)
+
 "%CSC%" /nologo /target:winexe /out:"%OUTDIR%CCProxyTray.exe" ^
   /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll ^
   "%OUTDIR%Tray.cs"
-
 if errorlevel 1 (
   echo Build failed.
   exit /b 1
 )
-echo Built %OUTDIR%CCProxyTray.exe
+echo Built CCProxyTray.exe (v%VER%)
 
-rem ---- assemble portable package: release\CCProxy ----
-set ROOT=%~dp0..
+rem ---- staging package ----
 set PKG=%ROOT%\release\CCProxy
 if exist "%PKG%" rmdir /s /q "%PKG%"
 mkdir "%PKG%\node" 2>nul
@@ -43,7 +67,37 @@ if defined NODE_SRC (
   echo WARN: node.exe not found on PATH - package has no embedded node.
 )
 
-echo Packaged %PKG%
+rem ---- publish to the hot-swap folder on the Desktop ----
+rem The Desktop may be redirected (this machine: D:\Windows\Desktop), so ask
+rem the shell for the real path instead of assuming %USERPROFILE%\Desktop.
+set "DESK="
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" /v Desktop 2^>nul ^| findstr /i Desktop') do set "DESK=%%B"
+if defined DESK call set "DESK=%DESK%"
+if not defined DESK set "DESK=%USERPROFILE%\Desktop"
+if not exist "%DESK%" (
+  echo WARN: Desktop not found at "%DESK%"; skipping hot-swap publish.
+  echo Packaged %PKG%
+  exit /b 0
+)
+set SWAP=%DESK%\CCProxy-Release
+if not exist "%SWAP%" mkdir "%SWAP%"
+
+set TARGET=%SWAP%\CCProxy-%VER%
+if exist "%TARGET%" rmdir /s /q "%TARGET%"
+xcopy /e /i /y "%PKG%" "%TARGET%" >nul || goto :pack_fail
+
+rem CCProxy-current mirrors the newest build (plain copy: no symlink privileges needed)
+set CUR=%SWAP%\CCProxy-current
+if exist "%CUR%" rmdir /s /q "%CUR%"
+xcopy /e /i /y "%PKG%" "%CUR%" >nul || goto :pack_fail
+
+echo.
+echo Hot-swap artifacts:
+echo   %TARGET%
+echo   %CUR%
+echo.
+echo Existing versions kept for rollback:
+dir /b /ad "%SWAP%\CCProxy-*" 2>nul
 exit /b 0
 
 :pack_fail
