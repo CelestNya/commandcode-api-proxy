@@ -9,6 +9,10 @@ export function toolArgumentSuffix(emitted: string, canonical: string): string {
   } catch {
     // Incomplete JSON may still match after ignoring insignificant whitespace.
   }
+  // Code-point aware: emitted is iterated by Unicode code points (for...of),
+  // but canonical is indexed by UTF-16 code units. Track canonical offset in
+  // code units via char.length (1 for BMP, 2 for surrogate pairs like emoji)
+  // so emoji deltas don't misalign.
   let offset = 0;
   let inString = false;
   let escaped = false;

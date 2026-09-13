@@ -36,6 +36,43 @@ export function validateOpenAIChatRequest(body: unknown): OpenAIChatRequest {
     if (m.content === undefined && m.tool_calls === undefined) {
       throw new ValidationError(`messages[${i}] must contain either 'content' or 'tool_calls'`);
     }
+    if (m.role === "tool" && typeof m.tool_call_id !== "string") {
+      throw new ValidationError(`messages[${i}].tool_call_id must be a string when role is "tool"`);
+    }
+  }
+
+  // Top-level scalar guards — fail fast with a local 400 instead of proxying
+  // a confusing upstream 400.
+  if (req.temperature !== undefined && typeof req.temperature !== "number") {
+    throw new ValidationError("Field 'temperature' must be a number");
+  }
+  if (req.temperature !== undefined && (req.temperature < 0 || req.temperature > 2)) {
+    throw new ValidationError("Field 'temperature' must be between 0 and 2");
+  }
+  if (req.top_p !== undefined && typeof req.top_p !== "number") {
+    throw new ValidationError("Field 'top_p' must be a number");
+  }
+  if (req.top_p !== undefined && (req.top_p < 0 || req.top_p > 1)) {
+    throw new ValidationError("Field 'top_p' must be between 0 and 1");
+  }
+  if (req.max_tokens !== undefined && typeof req.max_tokens !== "number") {
+    throw new ValidationError("Field 'max_tokens' must be a number");
+  }
+  if (req.max_tokens !== undefined && (!Number.isFinite(req.max_tokens) || req.max_tokens <= 0)) {
+    throw new ValidationError("Field 'max_tokens' must be a positive number");
+  }
+  if (req.tool_choice !== undefined) {
+    const tc = req.tool_choice;
+    const validStrings = new Set(["auto", "none", "required"]);
+    if (typeof tc === "string" && !validStrings.has(tc)) {
+      throw new ValidationError(`Field 'tool_choice' string must be one of: ${[...validStrings].join(", ")}`);
+    }
+    if (typeof tc === "object" && tc !== null) {
+      const t = tc as Record<string, unknown>;
+      if (t.type !== "function") {
+        throw new ValidationError(`Field 'tool_choice.type' must be "function" when tool_choice is an object`);
+      }
+    }
   }
 
   return body as OpenAIChatRequest;
@@ -156,6 +193,20 @@ export function validateAnthropicRequest(body: unknown): AnthropicRequest {
     if (typeof t.budget_tokens === "number" && t.budget_tokens >= (req.max_tokens as number)) {
       throw new ValidationError("thinking.budget_tokens must be less than max_tokens");
     }
+    if (t.type !== undefined && t.type !== "enabled") {
+      throw new ValidationError(`Field 'thinking.type' must be "enabled" when thinking is set`);
+    }
+  }
+
+  // Top-level scalar guards (Anthropic)
+  if (req.temperature !== undefined && typeof req.temperature !== "number") {
+    throw new ValidationError("Field 'temperature' must be a number");
+  }
+  if (req.top_p !== undefined && typeof req.top_p !== "number") {
+    throw new ValidationError("Field 'top_p' must be a number");
+  }
+  if (req.top_k !== undefined && typeof req.top_k !== "number") {
+    throw new ValidationError("Field 'top_k' must be a number");
   }
 
   return body as AnthropicRequest;

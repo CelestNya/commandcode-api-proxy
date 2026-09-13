@@ -2,6 +2,7 @@
 
 import modelsData from "@/models.json" with { type: "json" };
 import { getCatalog, refreshCatalog } from "@/translate/catalog.js";
+import { logger } from "@/logger.js";
 
 const BUILTIN_MODELS: string[] = modelsData.builtin;
 const SHORT_ALIASES: Record<string, string> = modelsData.shortAliases;
@@ -92,6 +93,10 @@ export function resolveEffortForModel(
   // (undefined or the value). The empty-array guard matters: `[]` is truthy,
   // and reduce() on it below would otherwise throw.
   if (!supported || supported.length === 0 || !requested) return requested;
+
+  if (!(requested in EFFORT_RANK)) {
+    logger.warn(`Unknown reasoning_effort "${requested}" for ${canonicalModel}, clipping as "high"`);
+  }
 
   if (supported.includes(requested)) return requested;
 

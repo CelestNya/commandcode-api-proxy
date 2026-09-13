@@ -80,6 +80,9 @@ export function applyNoToolsSafeguard(
   hasTools: boolean,
 ): void {
   if (hasTools) return;
+  // Opt-out: CC_NO_TOOLS_GUARD=off disables the injection (e.g. for
+  // providers that treat system suffixes as prompt injection).
+  if (process.env.CC_NO_TOOLS_GUARD === "off") return;
 
   const noToolsInstruction =
     "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text.";
