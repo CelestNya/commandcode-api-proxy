@@ -362,6 +362,12 @@ describe("OpenAIStreamEncoder", () => {
     const envelope = chunks.find((c) => c && typeof c === "object" && "error" in c);
     expect(envelope).toBeDefined();
     expect(envelope.error.message).toContain("idle timeout");
+    // Retryability contract: the downstream client's business-error classifier
+    // only grants a retry when the envelope code is "network_error"; any other
+    // code forfeits the whole retry budget (unattended-stability regression of
+    // 2026-09-14). type stays "upstream_error" for human diagnosis.
+    expect(envelope.error.code).toBe("network_error");
+    expect(envelope.error.type).toBe("upstream_error");
 
     // No chunk may carry the failure text as assistant content...
     const contentText = chunks

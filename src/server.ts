@@ -545,10 +545,17 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
             ? []
             : encoder.finishRecords("end_turn").map((r) => formatAnthropicSSE(r.event, r.data)),
         (err) => {
+          // type:"overloaded_error" 而非 "api_error"：ZCode 的重试分类器只把
+          // overloaded_error 判为可重试（isRetryable:true + 529），其余类型
+          // 一律 retryable:false。流级错误（idle 超时/TCP 断连）是瞬态故障，
+          // 必须交给下游的 11 次重试额度恢复，message 保留根因供排查。
           const records: AnthropicSSERecord[] = [
             {
               event: "error",
-              data: { type: "error", error: { type: "api_error", message: err.message } },
+              data: {
+                type: "error",
+                error: { type: "overloaded_error", message: err.message },
+              },
             },
           ];
           if (!encoder.finished) records.push(...encoder.finishRecords("end_turn"));

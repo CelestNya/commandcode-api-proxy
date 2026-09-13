@@ -300,9 +300,13 @@ export class AnthropicStreamEncoder {
       }
       this.closeCurrentBlock(records);
       this.closeToolBlocks(records);
+      // type:"overloaded_error" 而非 "api_error"：下游 ZCode 的重试分类器对
+      // in-band error 只把 overloaded_error 判为可重试（isRetryable:true +
+      // 529），api_error 一律 retryable:false——上游 11 次重试额度全弃。
+      // 流中失败（上游停摆/生成中断）本质都是瞬态，交给下游重试恢复。
       records.push({
         event: "error",
-        data: { type: "error", error: { type: "api_error", message: msg } },
+        data: { type: "error", error: { type: "overloaded_error", message: msg } },
       });
       records.push({ event: "message_stop", data: { type: "message_stop" } });
       return records;

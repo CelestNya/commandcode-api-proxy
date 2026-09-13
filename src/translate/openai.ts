@@ -462,7 +462,10 @@ export class OpenAIStreamEncoder {
         error: {
           message,
           type: "upstream_error",
-          code: "upstream_error",
+          // code:"network_error" 是下游 ZCode 重试分类器的识别字：命中即判
+          // retryable:true（NetworkError），否则 business error 一律不重试，
+          // 上游 11 次重试额度全弃。type 保留 upstream_error 供人类排查。
+          code: "network_error",
         },
       },
     ];
@@ -475,6 +478,7 @@ export class OpenAIStreamEncoder {
       error: {
         message: err.message,
         type: "upstream_error",
+        code: "network_error",
       },
     };
   }
