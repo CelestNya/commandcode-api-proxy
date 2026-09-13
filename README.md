@@ -82,6 +82,8 @@ Equivalent env vars (lower priority than CLI flags):
 | `CC_CLI_VERSION`         | CLI version sent upstream                                                                                               |
 | `CC_UPSTREAM_TIMEOUT_MS` | Max ms for upstream to return response headers + first byte (default `600000` / 10 min). Bump for slow reasoning models |
 | `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams           |
+| `CC_MAX_BODY_BYTES`      | Max request body size (default `10485760` / 10 MiB, capped at 50 MiB). Raise for large vision/PDF payloads.             |
+| `CC_NO_TOOLS_GUARD`      | Set to `off` to disable the injected "tools are disabled" instruction for tool-less chat requests.                       |
 | `LOG_LEVEL`              | Log level (`info`, `debug`, etc.)                                                                                       |
 | `CORS_ORIGIN`            | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
 
@@ -213,6 +215,62 @@ each accepts a different subset. The proxy sends the closest valid level for the
 `max` is reachable). Models without a discrete effort set ignore the value. Pass the
 effort via OpenAI's `reasoning_effort`, or Anthropic's `thinking.budget_tokens`
 (larger budget → higher effort).
+
+## Windows tray & hot-swap
+
+The personal build ships a tray manager (`CCProxyTray.exe`) that runs the proxy as a
+child process and supervises it. It is Windows-only and optional.
+
+**Behavior**
+
+- Starting the tray starts the proxy. A crash is restarted after 3s.
+- The tray holds the proxy in a **Job Object**, so if the tray dies (even hard-killed)
+  the child is reaped too — no orphan holding the port.
+- Egress follows the **Windows system proxy** by default
+  (`HKCU\...\Internet Settings`), injected into the child as
+  `HTTPS_PROXY`/`HTTP_PROXY` + `NODE_USE_ENV_PROXY=1`. `CC_PROXY=off` forces a direct
+  connection; `CC_PROXY=<url>` overrides the URL.
+- The port is a fixed contract (`8787`). If another program holds it the tray
+  **refuses to start** rather than taking it over; if one of our own stale processes
+  holds it, that process is reaped first.
+
+**Single instance & hot-swap**
+
+Launching a new `CCProxyTray.exe` while an old one is running performs a two-phase
+handover: the newcomer signals standby, the incumbent pauses the service and releases
+the lock, the newcomer binds the port and verifies it serves traffic, then signals
+commit and the incumbent exits. If the newcomer cannot serve within 30s it signals
+abort and the incumbent resumes — **the service is never left in a vacuum**. The
+incumbent only exits on commit, and is never force-killed.
+
+**Hot-swap folder**
+
+`tray/build.cmd` builds the tray, assembles a portable package (embedded `node.exe` +
+`dist/` + `package.json`), and publishes to your Desktop:
+
+```
+<Desktop>\CCProxy-Release\CCProxy-v<version>\   this build, ready to drop in
+<Desktop>\CCProxy-Release\CCProxy-current\      copy of the newest build
+```
+
+The version comes from `package.json` — the single source of truth, also shown in the
+tray tooltip and the menu. Previous version folders are kept, so rolling back is just
+deleting `CCProxy-current`, renaming the older `CCProxy-v<version>` folder to
+`CCProxy-current`, and launching the tray.
+
+**Verifying a build without touching a running instance**
+
+```cmd
+set CC_TRAY_NS=verify
+set CC_TRAY_PORT=8897
+CCProxyTray.exe --selfcheck
+```
+
+`CC_TRAY_NS` isolates the mutex, events and log directory; `CC_TRAY_PORT` only takes
+effect for a namespaced instance (production always uses 8787). `--selfcheck` exercises
+the menu code path and **refuses to take over** when a tray is already running
+(`SELFCHECK_SKIP`). Results are written to `selfcheck.log` next to the exe, because a
+`winexe` has no console to print to.
 
 ## License
 

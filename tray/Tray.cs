@@ -34,10 +34,38 @@ namespace CCProxyTray
     static class Program
     {
         /**
-         * 内部版本号。每次产出交接用的编译产物都要递增，便于确认「正在运行的
-         * 是哪一个」，也让热更新时能一眼判断成败。与打包文件名的版本号一致。
+         * 版本号真相源为 package.json。TrayVersion 仅作编译期回退（csc 无法
+         * 读 json 时），运行时通过 ReadPackageVersion() 读取与包内
+         * package.json 一致的版本，避免 Tray.cs 与 package.json 漂移。
          */
-        public const string TrayVersion = "0.4.1-p2";
+        public const string TrayVersionFallback = "0.4.1-p2";
+
+        static string cachedVersion;
+        static string ReadPackageVersion()
+        {
+            if (cachedVersion != null) return cachedVersion;
+            try
+            {
+                // Tray exe 位于 CCProxy/ 或 CCProxy-<ver>/，package.json 在同级或 dist 上级
+                var candidates = new[] {
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "package.json"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "package.json"),
+                };
+                foreach (var p in candidates)
+                {
+                    var full = Path.GetFullPath(p);
+                    if (!File.Exists(full)) continue;
+                    var text = File.ReadAllText(full);
+                    var m = System.Text.RegularExpressions.Regex.Match(text, "\"version\"\\s*:\\s*\"([^\"]+)\"");
+                    if (m.Success) { cachedVersion = m.Groups[1].Value; return cachedVersion; }
+                }
+            }
+            catch { }
+            cachedVersion = TrayVersionFallback;
+            return cachedVersion;
+        }
+
+        public static string TrayVersion { get { return ReadPackageVersion(); } }
         // 实例命名空间：默认单实例；设置 CC_TRAY_NS 可跑隔离的测试实例，
         // 使交接协议能在不干扰生产托盘的前提下被真实验证。
         public static readonly string Ns = Environment.GetEnvironmentVariable("CC_TRAY_NS") ?? "";
@@ -207,6 +235,61 @@ namespace CCProxyTray
         static extern bool AttachConsole(int dwProcessId);
         const int ATTACH_PARENT_PROCESS = -1;
 
+        // ── 端口占用查询：GetExtendedTcpTable API（替代 netstat 文本解析）──
+        // netstat 依赖英文 "LISTENING" 文案与列格式，本地化/格式变化即失效，
+        // 且每次探测要 spawn 进程（轮询时 250ms 一次，开销大）。
+        // GetExtendedTcpTable 是 iphlpapi 的原子查询：零进程、支持 IPv4/IPv6、
+        // 直接返回占用端口的 PID。
+        [DllImport("iphlpapi.dll")]
+        static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref uint pdwSize, bool bOrder, int ulAf, int TableClass, uint Reserved);
+
+        const int AF_INET = 2;
+        const int AF_INET6 = 23;
+        const int TCP_TABLE_OWNER_PID_LISTENER = 3;
+        // MIB_TCPROW_OWNER_PID = 4 DWORD (16B)；MIB_TCP6ROW_OWNER_PID = 16B 地址 + 4 DWORD (32B)
+        const int ROW_SIZE_V4 = 16;
+        const int ROW_SIZE_V6 = 32;
+
+        /** 用 TCP 表 API 查监听指定端口的进程 PID；查不到返回 null。 */
+        public static int? PortOwnerPidApi(int port)
+        {
+            try
+            {
+                var afs = new[] { AF_INET, AF_INET6 };
+                var rowSizes = new[] { ROW_SIZE_V4, ROW_SIZE_V6 };
+                for (int k = 0; k < 2; k++)
+                {
+                    uint size = 0;
+                    GetExtendedTcpTable(IntPtr.Zero, ref size, false, afs[k], TCP_TABLE_OWNER_PID_LISTENER, 0);
+                    if (size == 0) continue;
+                    IntPtr buf = Marshal.AllocHGlobal((int)size);
+                    try
+                    {
+                        if (GetExtendedTcpTable(buf, ref size, false, afs[k], TCP_TABLE_OWNER_PID_LISTENER, 0) != 0)
+                            continue;
+                        int count = Marshal.ReadInt32(buf);
+                        long rowBase = buf.ToInt64() + 4; // 跳过 dwNumEntries
+                        for (int i = 0; i < count; i++)
+                        {
+                            long row = rowBase + (long)i * rowSizes[k];
+                            // v4: state(0) addr(4) port(8) pid(12)；v6: addr[16](0) scopeId(16) port(20) state(24) pid(28)
+                            int portOff = (k == 0) ? 8 : 20;
+                            int pidOff = (k == 0) ? 12 : 28;
+                            int rawPort = Marshal.ReadInt32((IntPtr)(row + portOff));
+                            // 端口为网络字节序（低 16 位有效），转主机序
+                            int hostPort = ((rawPort & 0xFF) << 8) | ((rawPort >> 8) & 0xFF);
+                            if (hostPort != port) continue;
+                            int pid = Marshal.ReadInt32((IntPtr)(row + pidOff));
+                            if (pid > 0) return pid;
+                        }
+                    }
+                    finally { Marshal.FreeHGlobal(buf); }
+                }
+            }
+            catch { }
+            return null;
+        }
+
         // Job Object: 托盘进程死亡（含硬杀）时回收子进程
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
@@ -292,12 +375,12 @@ namespace CCProxyTray
             {
                 if (isSuccessor)
                 {
-                    Console.WriteLine("SELFCHECK_SKIP 检测到运行中的托盘实例；自检拒绝接管，未做任何改动");
+                    SelfCheckOut("SELFCHECK_SKIP 检测到运行中的托盘实例；自检拒绝接管，未做任何改动");
                     Environment.Exit(0);
                 }
                 var probe = new TrayContext(false, true);
                 try { probe.SelfCheck(); Environment.Exit(0); }
-                catch (Exception ex) { Console.WriteLine("SELFCHECK_FAIL " + ex); Environment.Exit(2); }
+                catch (Exception ex) { SelfCheckOut("SELFCHECK_FAIL " + ex); Environment.Exit(2); }
             }
 
             if (isSuccessor)
@@ -422,8 +505,33 @@ namespace CCProxyTray
         {
             if (jobHandle != IntPtr.Zero)
             {
-                try { AssignProcessToJobObject(jobHandle, p.Handle); } catch { }
+                try
+                {
+                    if (!AssignProcessToJobObject(jobHandle, p.Handle))
+                        // 挂载失败（如托盘自身已在别人的 Job 里且不允许嵌套）：
+                    // 托盘死时该 node 不会随葬，会变孤儿占端口——必须留痕。
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        TrayLog("警告：node 子进程挂入 Job Object 失败（err=" + err +
+                                "），托盘退出后可能出现孤儿进程占用端口，请留意");
+                    }
+                }
+                catch (Exception ex) { TrayLog("警告：Job Object 挂载异常：" + ex.Message); }
             }
+        }
+
+        /// <summary>自检输出：winexe 子系统在无控制台时 Console 输出会被丢弃，
+        /// 因此同时写一份到 exe 同级的 selfcheck.log，保证结果可核验。</summary>
+        public static void SelfCheckOut(string line)
+        {
+            try { Console.WriteLine(line); } catch { }
+            try
+            {
+                var dir = AppDomain.CurrentDomain.BaseDirectory;
+                File.AppendAllText(Path.Combine(dir, "selfcheck.log"),
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ") + line + Environment.NewLine);
+            }
+            catch { }
         }
     }
 
@@ -546,19 +654,19 @@ namespace CCProxyTray
         }
 
         /// <summary>自检：真实执行「构建菜单 + 展开刷新」这段代码路径，
-        /// 把结果写到 stdout，用于验证右键菜单不会崩。</summary>
+        /// 把结果写出来，用于验证右键菜单不会崩。</summary>
         public void SelfCheck()
         {
             var strip = BuildMenu();
             RefreshCacheMenu();
-            Console.WriteLine("menu.items=" + strip.Items.Count);
-            Console.WriteLine("menu.headline=" + menuCache.Text);
-            Console.WriteLine("menu.detail=" + menuCacheDetail.Text);
+            Program.SelfCheckOut("menu.items=" + strip.Items.Count);
+            Program.SelfCheckOut("menu.headline=" + menuCache.Text);
+            Program.SelfCheckOut("menu.detail=" + menuCacheDetail.Text);
             var onOpening = typeof(ToolStripDropDown).GetMethod("OnOpening",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
             onOpening.Invoke(strip, new object[] { new System.ComponentModel.CancelEventArgs() });
-            Console.WriteLine("menu.after_opening=" + menuCache.Text);
-            Console.WriteLine("SELFCHECK_OK");
+            Program.SelfCheckOut("menu.after_opening=" + menuCache.Text);
+            Program.SelfCheckOut("SELFCHECK_OK");
         }
 
         ContextMenuStrip BuildMenu()
@@ -834,12 +942,23 @@ namespace CCProxyTray
 
         // ── 代理生命周期 ─────────────────────────────────────
 
-        /** 找出占用指定端口的进程 PID（仅 IPv4/IPv6 的 LISTENING 行）。 */
+        /**
+         * 找出监听指定端口的进程 PID。
+         * 优先走 GetExtendedTcpTable API（原子、零进程、不受系统语言影响）；
+         * API 失败（旧系统/权限异常）才退回 netstat 文本解析兜底。
+         */
         int? PortOwnerPid(int port)
+        {
+            var api = Program.PortOwnerPidApi(port);
+            if (api != null) return api;
+            return PortOwnerPidNetstat(port);
+        }
+
+        /** netstat 文本解析兜底（仅 API 失败时使用；依赖英文 LISTENING 文案）。 */
+        static int? PortOwnerPidNetstat(int port)
         {
             try
             {
-                var outText = "";
                 var psi = new ProcessStartInfo("netstat", "-ano")
                 {
                     UseShellExecute = false,
@@ -847,7 +966,7 @@ namespace CCProxyTray
                     CreateNoWindow = true,
                 };
                 var np = Process.Start(psi);
-                outText = np.StandardOutput.ReadToEnd();
+                var outText = np.StandardOutput.ReadToEnd();
                 np.WaitForExit(5000);
                 foreach (var raw in outText.Split('\n'))
                 {
@@ -890,7 +1009,24 @@ namespace CCProxyTray
             return false;
         }
 
+        // 命令行查询缓存：powershell 启动一次 1-5s，轮询场景（等端口释放/
+        // 端口守卫）反复查同一 PID 会拖慢启动。按 PID 缓存 5s 足够。
+        static readonly Dictionary<int, KeyValuePair<string, long>> cmdlineCache =
+            new Dictionary<int, KeyValuePair<string, long>>();
+        const long CMDLINE_CACHE_TICKS = 50000000; // 5s（TimeSpan.TicksPerSecond*5）
+
         static string GetCommandLineOf(int pid)
+        {
+            long now = DateTime.UtcNow.Ticks;
+            KeyValuePair<string, long> hit;
+            if (cmdlineCache.TryGetValue(pid, out hit) && now - hit.Value < CMDLINE_CACHE_TICKS)
+                return hit.Key;
+            var cmd = GetCommandLineOfUncached(pid);
+            cmdlineCache[pid] = new KeyValuePair<string, long>(cmd, now);
+            return cmd;
+        }
+
+        static string GetCommandLineOfUncached(int pid)
         {
             try
             {

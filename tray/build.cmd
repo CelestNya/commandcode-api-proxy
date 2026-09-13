@@ -22,10 +22,18 @@ if not exist "%CSC%" (
 set OUTDIR=%~dp0
 set ROOT=%~dp0..
 
-rem ---- version: argument, else TrayVersion from source (single source of truth) ----
+rem ---- version: argument, else package.json (single source of truth) ----
+rem Backslashes must be converted to forward slashes: cmd eats "\U" style
+rem sequences inside the nested quotes, which silently corrupts the path and
+rem makes node print the literal expression instead of the version.
 set VER=%~1
 if "%VER%"=="" (
-  for /f "tokens=2 delims==" %%V in ('findstr /r /c:"TrayVersion =" "%OUTDIR%Tray.cs"') do (
+  set "ROOTFS=!ROOT:\=/!"
+  for /f "delims=" %%V in ('node -p "require('!ROOTFS!/package.json').version" 2^>nul') do set "VER=%%V"
+)
+if "%VER%"=="" (
+  rem Fallback: extract TrayVersionFallback from source if node is unavailable
+  for /f "tokens=2 delims==" %%V in ('findstr /r /c:"TrayVersionFallback =" "%OUTDIR%Tray.cs"') do (
     set "LINE=%%V"
   )
   set "LINE=!LINE: =!"
@@ -82,7 +90,7 @@ if not exist "%DESK%" (
 set SWAP=%DESK%\CCProxy-Release
 if not exist "%SWAP%" mkdir "%SWAP%"
 
-set TARGET=%SWAP%\CCProxy-%VER%
+set TARGET=%SWAP%\CCProxy-v%VER%
 if exist "%TARGET%" rmdir /s /q "%TARGET%"
 xcopy /e /i /y "%PKG%" "%TARGET%" >nul || goto :pack_fail
 
