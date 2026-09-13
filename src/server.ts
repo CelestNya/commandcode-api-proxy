@@ -15,6 +15,7 @@ import { recordUsage, snapshot as usageSnapshot } from "@/usage-stats.js";
 import type { CCEvent, CCRequestBody } from "@/translate/types.js";
 import { formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
+import crypto from "node:crypto";
 import { logger } from "@/logger.js";
 import { getProxyVersion } from "@/version.js";
 import {
@@ -36,8 +37,6 @@ let corsOrigin = "*";
 // Request body parser
 // ──────────────────────────────────────────
 
-const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MiB
-
 export class BodyParseError extends Error {
   constructor(
     public readonly status: number,
@@ -48,27 +47,44 @@ export class BodyParseError extends Error {
   }
 }
 
+function getMaxBodyBytes(): number {
+  return config?.maxBodyBytes ?? 10 * 1024 * 1024;
+}
+
 function parseBody(req: http.IncomingMessage): Promise<unknown> {
+  // Fast path: Content-Length pre-check — reject without reading the stream.
+  // Use parseInt and strict string check to avoid Number("8.5") quirks.
+  const lenHeader = req.headers["content-length"];
+  if (typeof lenHeader === "string" && lenHeader.trim() !== "") {
+    const declared = Number(lenHeader);
+    if (Number.isFinite(declared) && declared > getMaxBodyBytes()) {
+      return Promise.reject(new BodyParseError(413, "Request body too large"));
+    }
+  }
+
   return new Promise((resolve, reject) => {
+    const limit = getMaxBodyBytes();
     const chunks: Buffer[] = [];
     let size = 0;
     let tooLarge = false;
-    req.on("data", (chunk: Buffer) => {
+    // Guard against the (rare) case where the stream already ended before
+    // we attach listeners (e.g. immediate `end` on already-buffered data).
+    // In that case `onData`/`onEnd` will still fire on next tick.
+    const onData = (chunk: Buffer): void => {
       if (tooLarge) return;
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > limit) {
         tooLarge = true;
-        // Tear down the underlying socket so the client stops uploading the
-        // rest of an oversized body. Without this the connection lingers
-        // until the client finishes (or its own timeout fires) — wasting
-        // bandwidth and a request slot.
-        req.destroy();
+        req.removeListener("data", onData);
+        req.removeListener("end", onEnd);
+        req.removeListener("error", onError);
+        req.resume();
         reject(new BodyParseError(413, "Request body too large"));
         return;
       }
       chunks.push(chunk);
-    });
-    req.on("end", () => {
+    };
+    const onEnd = (): void => {
       if (tooLarge) return;
       const raw = Buffer.concat(chunks).toString("utf-8");
       if (!raw) return resolve(null);
@@ -77,10 +93,16 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
       } catch {
         reject(new BodyParseError(400, "Invalid JSON body"));
       }
-    });
-    req.on("error", (err) => {
-      if (!tooLarge) reject(err);
-    });
+    };
+    const onError = (err: Error): void => {
+      if (tooLarge) return;
+      reject(err);
+    };
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+    // If the request already ended (e.g. empty body with Content-Length: 0)
+    // Node still emits 'end' after listeners attach, no extra handling needed.
   });
 }
 
@@ -147,10 +169,21 @@ function corsHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
+    "Vary": "Origin",
   };
   // Empty CORS_ORIGIN disables the header entirely (browser blocks cross-origin).
   if (origin) headers["Access-Control-Allow-Origin"] = origin;
   return headers;
+}
+
+// ──────────────────────────────────────────
+// Helpers — request id (X-Request-Id passthrough or generated)
+// ──────────────────────────────────────────
+
+function getOrCreateRequestId(req: http.IncomingMessage): string {
+  const incoming = req.headers["x-request-id"] as string | undefined;
+  if (incoming && typeof incoming === "string" && incoming.trim()) return incoming.trim().slice(0, 128);
+  return crypto.randomUUID();
 }
 
 // ──────────────────────────────────────────
@@ -258,8 +291,9 @@ function isUnknownModelError(err: unknown): boolean {
  * the request so the name resolves to its full id. The happy path costs
  * nothing extra: no fetch, no rebuild, no second attempt.
  *
- * `buildBody` is a thunk because the retry must re-resolve the model after the
- * catalog changes.
+ * Session pinning: the retry reuses the same `threadId` / `x-session-id` so
+ * CC sees one logical session, not two billable ones. Only the model field
+ * is refreshed.
  */
 async function sendToCCWithModelDiscovery(
   buildBody: () => CCRequestBody,
@@ -273,15 +307,21 @@ async function sendToCCWithModelDiscovery(
   },
   signal: AbortSignal,
 ): Promise<NodeJS.ReadableStream> {
+  const firstBody = buildBody();
+  // Pin the upstream session id: model-discovery retry must not mint a new
+  // threadId/x-session-id, otherwise CC bills two sessions for one intent.
+  const pinnedThreadId = firstBody.threadId;
   try {
-    return (await sendToCC(buildBody(), options, signal)).stream;
+    return (await sendToCC(firstBody, options, signal)).stream;
   } catch (err) {
     if (!isUnknownModelError(err)) throw err;
     const learned = await discoverModel(model, options.apiBase, options.apiKey);
     // Still unknown → the model genuinely doesn't exist; report the original.
     if (!learned) throw err;
     logger.info(`Model catalog learned "${model}"; retrying with the resolved id`);
-    return (await sendToCC(buildBody(), options, signal)).stream;
+    const retryBody = buildBody();
+    retryBody.threadId = pinnedThreadId;
+    return (await sendToCC(retryBody, options, signal)).stream;
   }
 }
 
@@ -358,18 +398,19 @@ async function handleChatCompletions(
     return sendOpenAIError(res, 401, "Unauthorized");
   }
 
+  const reqId = getOrCreateRequestId(req);
   const isStream = openAIReq.stream === true;
   const model = openAIReq.model ?? "default";
   const encoder = new OpenAIStreamEncoder(model);
 
-  logger.info(`[Incoming Request] Model: ${model}`);
-  logger.info(`[Incoming Request] Tools count: ${openAIReq.tools ? openAIReq.tools.length : 0}`);
+  logger.info(`[${reqId}] [Incoming Request] Model: ${model}`);
+  logger.info(`[${reqId}] [Incoming Request] Tools count: ${openAIReq.tools ? openAIReq.tools.length : 0}`);
   if (openAIReq.tools && openAIReq.tools.length > 0) {
     logger.info(
-      `[Incoming Request] Tools list: ${openAIReq.tools.map((t) => t.function.name).join(", ")}`,
+      `[${reqId}] [Incoming Request] Tools list: ${openAIReq.tools.map((t) => t.function.name).join(", ")}`,
     );
   } else {
-    logger.info(`[Incoming Request] No tools were sent by the client!`);
+    logger.info(`[${reqId}] [Incoming Request] No tools were sent by the client!`);
   }
 
   const abort = abortOnClientDisconnect(res);
@@ -462,11 +503,13 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
     return sendAnthropicError(res, 401, "authentication_error", "Missing API key");
   }
 
+  const reqId2 = getOrCreateRequestId(req);
   const isStream = anthropicReq.stream === true;
   const model = anthropicReq.model;
 
   const encoder = new AnthropicStreamEncoder(model);
 
+  logger.info(`[${reqId2}] [Anthropic] Model: ${model}`);
   const abort = abortOnClientDisconnect(res);
 
   try {
@@ -644,6 +687,14 @@ export function createServer(cfg: Config): http.Server {
   config = cfg;
   corsOrigin = cfg.corsOrigin;
 
+  // Warn when the proxy is exposed beyond localhost with a wildcard CORS.
+  if (cfg.host !== "127.0.0.1" && cfg.host !== "localhost" && corsOrigin === "*") {
+    logger.warn(
+      `CORS is wide-open ("*") while HOST=${cfg.host} is exposed beyond localhost.` +
+        ` Set CORS_ORIGIN to a specific origin before exposing the proxy on a network.`,
+    );
+  }
+
   // No startup catalog refresh: there is no stored key to fetch with. The
   // catalog learns models lazily via sendToCCWithModelDiscovery when CC
   // rejects a name, keyed by the caller's own credentials.
@@ -658,6 +709,17 @@ export function createServer(cfg: Config): http.Server {
 
   const server = http.createServer((req, res) => {
     if (req.method === "OPTIONS") {
+      const parsedUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      const route = routes.find((r) => r.method === "OPTIONS" || r.path === parsedUrl.pathname);
+      // Only succeed preflight for known routes; unknown paths get 404.
+      const known = routes.some((r) => r.path === parsedUrl.pathname);
+      if (!known) {
+        const isAnthropic = req.headers["anthropic-version"] !== undefined;
+        if (isAnthropic) return sendAnthropicError(res, 404, "not_found_error", "Not found");
+        return sendJson(res, 404, { error: "Not found" });
+      }
+      // Reflect the requested headers for preflight correctness.
+      void route;
       res.writeHead(204, corsHeaders());
       return res.end();
     }
@@ -690,6 +752,19 @@ export function createServer(cfg: Config): http.Server {
       if (!res.headersSent) {
         sendJson(res, 500, { error: "Internal server error" });
       }
+    }
+  });
+
+  // Surface listen errors (EADDRINUSE/EACCES) instead of crashing via
+  // uncaughtException. The caller (proxy.ts) also guards, but createServer
+  // is used directly in tests and chaos harnesses.
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      logger.error(`Port ${cfg.port} is already in use (EADDRINUSE). Is another proxy running?`);
+    } else if (err.code === "EACCES") {
+      logger.error(`Permission denied for ${cfg.host}:${cfg.port} (EACCES). Try a higher port or run with appropriate privileges.`);
+    } else {
+      logger.error(`Server error: ${err.message} (code=${err.code ?? "unknown"})`);
     }
   });
 

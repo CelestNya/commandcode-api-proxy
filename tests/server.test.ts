@@ -71,4 +71,99 @@ describe("Server", () => {
     expect(res.status).toBe(204);
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
+
+  it("emits Vary: Origin so caches key on the origin", async () => {
+    const res = await fetch(`${baseUrl}/health`);
+    expect(res.headers.get("vary")).toBe("Origin");
+  });
+
+  it("returns 404 for OPTIONS on an unknown path (no blanket preflight)", async () => {
+    const res = await fetch(`${baseUrl}/nope`, { method: "OPTIONS" });
+    expect(res.status).toBe(404);
+  });
+
+  it("tolerates an X-Request-Id header without breaking routing", async () => {
+    // No Authorization header → the 401 path runs first and no upstream call is
+    // made, keeping this test offline. The point is the custom header is
+    // accepted rather than causing a 500.
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Request-Id": "correlation-abc-123",
+      },
+      body: JSON.stringify({ model: "default", messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("Server body-size guard", () => {
+  let server: http.Server;
+  const port = 18988;
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const LIMIT = 1024;
+
+  beforeAll(async () => {
+    // A deliberately tiny limit makes the oversized path deterministic and
+    // offline: the Content-Length pre-check rejects before any upstream call.
+    const config = { ...loadConfig(), port, host: "127.0.0.1", maxBodyBytes: LIMIT };
+    server = createServer(config);
+    return new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  it("returns a JSON 413 (not a socket reset) for an oversized declared body", async () => {
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-key",
+      },
+      body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "x".repeat(LIMIT * 2) }] }),
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as any;
+    expect(body.error.message).toMatch(/too large/i);
+  });
+
+  it("keeps the connection usable after a 413 (keep-alive, no destroy)", async () => {
+    // Same socket agent reused across calls: if the server destroyed the
+    // socket, the follow-up request would fail with a reset.
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const big = JSON.stringify({ model: "m", messages: [{ role: "user", content: "y".repeat(LIMIT * 2) }] });
+    const post = (body: string): Promise<number> =>
+      new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            host: "127.0.0.1",
+            port,
+            path: "/v1/chat/completions",
+            method: "POST",
+            agent,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer test-key",
+              "Content-Length": String(Buffer.byteLength(body)),
+            },
+          },
+          (res) => {
+            res.resume();
+            res.on("end", () => resolve(res.statusCode ?? 0));
+          },
+        );
+        req.on("error", reject);
+        req.write(body);
+        req.end();
+      });
+    try {
+      expect(await post(big)).toBe(413);
+      expect(await post(big)).toBe(413);
+    } finally {
+      agent.destroy();
+    }
+  });
 });

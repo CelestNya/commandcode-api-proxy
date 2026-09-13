@@ -360,6 +360,41 @@ describe("E2E: dynamic model catalog", () => {
     expect(retryBody.params.model).toBe("deepseek/deepseek-v4.1-flash");
   });
 
+  // Regression: the retry used to rebuild the whole request, minting a fresh
+  // threadId → a second x-session-id upstream, i.e. two billable sessions for
+  // one user intent. The session id must be pinned across the retry.
+  it("pins threadId across the model-discovery retry", async () => {
+    catalogFetchSpy = mockCcModelsFetch([
+      { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", context_length: 1000000 },
+    ]);
+    sendToCCSpy
+      .mockRejectedValueOnce(
+        new UpstreamError(
+          'CC API 403: {"message":"Model/provider not recognized: anthropic:deepseek-v4.1-flash"}',
+          403,
+          false,
+        ),
+      )
+      .mockResolvedValueOnce({ stream: fakeStream() });
+
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer client-key" },
+      body: JSON.stringify({
+        model: "deepseek-v4.1-flash",
+        messages: [{ role: "user", content: "Hi" }],
+        stream: false,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(sendToCCSpy).toHaveBeenCalledTimes(2);
+    const first = sendToCCSpy.mock.calls[0][0] as { threadId: string };
+    const second = sendToCCSpy.mock.calls[1][0] as { threadId: string };
+    expect(first.threadId).toBeTruthy();
+    expect(second.threadId).toBe(first.threadId);
+  });
+
   // A model that genuinely does not exist stays unknown after the refresh, so
   // the original 403 must surface rather than being retried forever.
   it("does not retry a 403 for a model that the provider API does not know", async () => {

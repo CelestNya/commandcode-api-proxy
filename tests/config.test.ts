@@ -57,6 +57,48 @@ describe("loadConfig", () => {
     expect(config.idleTimeoutMs).toBe(120_000);
   });
 
+  it("rejects an out-of-range port and falls back to 8787", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("PORT", "99999");
+
+    const { loadConfig } = await import("@/config.js");
+    expect(loadConfig().port).toBe(8787);
+  });
+
+  it("rejects a non-numeric port and falls back to 8787", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("PORT", "abc");
+
+    const { loadConfig } = await import("@/config.js");
+    expect(loadConfig().port).toBe(8787);
+  });
+
+  it("falls back to localhost for a garbage HOST", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("HOST", "bad host\n");
+
+    const { loadConfig } = await import("@/config.js");
+    expect(loadConfig().host).toBe("127.0.0.1");
+  });
+
+  it("clamps an absurd upstream timeout to the 30-minute ceiling", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("CC_UPSTREAM_TIMEOUT_MS", "999999999");
+
+    const { loadConfig } = await import("@/config.js");
+    expect(loadConfig().upstreamTimeoutMs).toBe(30 * 60 * 1000);
+  });
+
+  it("defaults maxBodyBytes to 10 MiB and honors CC_MAX_BODY_BYTES", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("CC_MAX_BODY_BYTES", "");
+
+    const mod = await import("@/config.js");
+    expect(mod.loadConfig().maxBodyBytes).toBe(10 * 1024 * 1024);
+
+    vi.stubEnv("CC_MAX_BODY_BYTES", "20971520");
+    expect(mod.loadConfig().maxBodyBytes).toBe(20 * 1024 * 1024);
+  });
 });
 
 describe("fetchLatestCliVersion", () => {
