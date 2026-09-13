@@ -26,8 +26,50 @@ function rate(cached: number, prompt: number): number {
   return prompt > 0 ? Math.round((cached / prompt) * 1000) / 10 : 0;
 }
 
+// 持久化：每请求一行 JSON（logs/usage.jsonl），托盘据此聚合最近 24h 缓存率。
+// 行内字段固定为 ts/model/promptTokens/cachedTokens/completionTokens。
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const USAGE_LOG_DIR = path.join(
+  path.dirname(path.dirname(fileURLToPath(import.meta.url))),
+  "logs",
+);
+const USAGE_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const USAGE_LOG_KEEP_LINES = 2000;
+
+export function usageLine(model: string, usage: UsageData): string {
+  return JSON.stringify({
+    ts: new Date().toISOString(),
+    model,
+    promptTokens: usage.promptTokens ?? 0,
+    cachedTokens: usage.promptTokensDetails?.cachedTokens ?? 0,
+    completionTokens: usage.completionTokens ?? 0,
+  });
+}
+
+function persistUsageLine(line: string, dir?: string): void {
+  const dirAbs = dir ?? USAGE_LOG_DIR;
+  const file = path.join(dirAbs, "usage.jsonl");
+  try {
+    fs.mkdirSync(dirAbs, { recursive: true });
+    try {
+      if (fs.existsSync(file) && fs.statSync(file).size > USAGE_LOG_MAX_BYTES) {
+        const lines = fs.readFileSync(file, "utf8").trimEnd().split("\n");
+        fs.writeFileSync(file, lines.slice(-USAGE_LOG_KEEP_LINES).join("\n") + "\n");
+      }
+    } catch { /* 轮转失败不影响记录 */ }
+    fs.appendFileSync(file, line + "\n");
+  } catch { /* 统计不得影响请求 */ }
+}
+
 /** 记录一次请求的用量并落日志。无用量数据（上游未回报）时返回 null。 */
-export function recordUsage(model: string, usage: UsageData | undefined): CacheSnapshot | null {
+export function recordUsage(
+  model: string,
+  usage: UsageData | undefined,
+  opts?: { persist?: boolean; dir?: string },
+): CacheSnapshot | null {
   if (!usage || typeof usage.promptTokens !== "number") return null;
   const cached = usage.promptTokensDetails?.cachedTokens ?? 0;
   const out = usage.completionTokens ?? 0;
@@ -41,6 +83,7 @@ export function recordUsage(model: string, usage: UsageData | undefined): CacheS
       ` 输出 ${out} | 累计 ${snap.cachedTokens}/${snap.promptTokens} tokens` +
       `（${snap.cacheRate}%，${snap.requests} 次请求）`,
   );
+  if (opts?.persist !== false) persistUsageLine(usageLine(model, usage), opts?.dir);
   return snap;
 }
 

@@ -231,6 +231,7 @@ namespace CCProxyTray
             menuAutostart = Add(strip, "开机自启", delegate { ToggleAutostart(); });
             strip.Items.Add(new ToolStripSeparator());
             menuQuit = Add(strip, "退出（同时停止代理）", delegate { Quit(); });
+            strip.Opening += delegate { RefreshCacheMenu(); };
             return strip;
         }
 
@@ -243,6 +244,59 @@ namespace CCProxyTray
         }
 
         ToolStripMenuItem menuStart, menuStop, menuLog, menuAutostart, menuQuit;
+        ToolStripMenuItem menuCache, menuCacheDetail;
+
+        // 最近 24h 的缓存率：读 node 侧落盘的 logs\usage.jsonl 聚合。
+        // 每次展开菜单时刷新，读取/解析失败一律显示为无数据。
+        void RefreshCacheMenu()
+        {
+            try
+            {
+                var path = Path.Combine(LogDir(), "usage.jsonl");
+                if (!File.Exists(path))
+                {
+                    menuCache.Text = "24h 缓存率：无数据";
+                    menuCacheDetail.Text = " ";
+                    return;
+                }
+                var cutoff = DateTime.UtcNow.AddHours(-24);
+                double prompt = 0, cached = 0, comp = 0;
+                int n = 0;
+                var rx = new System.Text.RegularExpressions.Regex(
+                    "\"ts\":\"([^\"]+)\".*\"promptTokens\":(\\d+),\"cachedTokens\":(\\d+),\"completionTokens\":(\\d+)");
+                foreach (var line in File.ReadLines(path))
+                {
+                    var m = rx.Match(line);
+                    if (!m.Success) continue;
+                    DateTime ts;
+                    if (!DateTime.TryParse(m.Groups[1].Value, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out ts)) continue;
+                    if (ts < cutoff) continue;
+                    prompt += double.Parse(m.Groups[2].Value);
+                    cached += double.Parse(m.Groups[3].Value);
+                    comp += double.Parse(m.Groups[4].Value);
+                    n += 1;
+                }
+                if (n == 0)
+                {
+                    menuCache.Text = "24h 缓存率：无数据";
+                    menuCacheDetail.Text = " ";
+                    return;
+                }
+                var rate = prompt > 0 ? Math.Round(cached / prompt * 1000) / 10 : 0;
+                menuCache.Text = "24h 缓存率：" + rate + "%（" + n + " 次请求）";
+                menuCacheDetail.Text = "缓存 " + FmtTokens(cached) + " / " + FmtTokens(prompt)
+                    + " tokens · 输出 " + FmtTokens(comp);
+            }
+            catch { menuCache.Text = "24h 缓存率：读取失败"; menuCacheDetail.Text = " "; }
+        }
+
+        static string FmtTokens(double v)
+        {
+            if (v >= 1000000) return Math.Round(v / 1000000, 1) + "M";
+            if (v >= 1000) return Math.Round(v / 1000, 1) + "k";
+            return Math.Round(v).ToString();
+        }
 
         void RefreshMenu()
         {
