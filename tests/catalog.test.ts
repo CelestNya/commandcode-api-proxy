@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import http from "node:http";
 import {
   getCatalog,
   refreshCatalog,

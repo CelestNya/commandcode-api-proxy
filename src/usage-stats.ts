@@ -54,14 +54,22 @@ function persistUsageLine(line: string, dir?: string): void {
   const file = path.join(dirAbs, "usage.jsonl");
   try {
     fs.mkdirSync(dirAbs, { recursive: true });
-    try {
-      if (fs.existsSync(file) && fs.statSync(file).size > USAGE_LOG_MAX_BYTES) {
-        const lines = fs.readFileSync(file, "utf8").trimEnd().split("\n");
-        fs.writeFileSync(file, lines.slice(-USAGE_LOG_KEEP_LINES).join("\n") + "\n");
+    // Fire-and-forget rotation check: best-effort, never blocks request.
+    void fs.promises.stat(file).then(async (stat) => {
+      if (stat.size > USAGE_LOG_MAX_BYTES) {
+        try {
+          const raw = await fs.promises.readFile(file, "utf8");
+          const lines = raw.trimEnd().split("\n");
+          const keep = lines.slice(-USAGE_LOG_KEEP_LINES).join("\n") + "\n";
+          await fs.promises.writeFile(file, keep);
+        } catch { /* 轮转失败不影响记录 */ }
       }
-    } catch { /* 轮转失败不影响记录 */ }
+    }).catch(() => {});
+    // Synchronous append ensures tests can read immediately; cheap for 1 line.
     fs.appendFileSync(file, line + "\n");
-  } catch { /* 统计不得影响请求 */ }
+  } catch (err) {
+    logger.debug(`[usage] persist failed: ${(err as Error).message}`);
+  }
 }
 
 /** 记录一次请求的用量并落日志。无用量数据（上游未回报）时返回 null。 */

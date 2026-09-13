@@ -13,6 +13,9 @@ export function initLogger(level: string): void {
   const normalized = level.toLowerCase() as LogLevel;
   if (normalized in LOG_LEVELS) {
     currentLogLevel = LOG_LEVELS[normalized];
+  } else {
+    currentLogLevel = LOG_LEVELS.info;
+    console.warn(`[WARN] Unknown LOG_LEVEL "${level}", falling back to "info"`);
   }
 }
 

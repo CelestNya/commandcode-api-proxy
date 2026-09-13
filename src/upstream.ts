@@ -120,14 +120,17 @@ function sanitizeErrorText(text: string, apiKey: string): string {
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const t = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        resolve();
-      },
-      { once: true },
-    );
+    if (!signal) return;
+    if (signal.aborted) {
+      clearTimeout(t);
+      resolve();
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(t);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -255,7 +258,8 @@ function combineSignals(...signals: AbortSignal[]): AbortSignal {
       controller.abort(signal.reason);
       return controller.signal;
     }
-    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+    const handler = (): void => controller.abort(signal.reason);
+    signal.addEventListener("abort", handler, { once: true });
   }
   return controller.signal;
 }
@@ -278,6 +282,8 @@ function nodeReaderToStream(
   // Reset on every successful read(). If it fires we abort the reader so
   // pumpStream's error path synthesizes a clean finish for the client
   // instead of hanging forever waiting on a dead connection.
+  // Invariant: idle is armed whenever we are waiting for upstream data,
+  // including while draining pendingLines under backpressure.
   const idleMs = opts.idleTimeoutMs ?? 0;
   let idleTimer: NodeJS.Timeout | null = null;
   const armIdle = (): void => {
@@ -327,13 +333,17 @@ function nodeReaderToStream(
         while (true) {
           // Drain anything left over from a previous chunk that was
           // interrupted by backpressure before we read more from upstream.
+          // While downstream is backpressured we still want idle detection
+          // if upstream stalls, so keep the timer armed across this drain.
+          if (pendingLines.length > 0) armIdle();
           while (pendingLines.length > 0) {
             const line = pendingLines.shift() as string;
             const result = parseCCLine(line);
             if (result.type === "event" && result.event) {
-              if (!this.push(result.event)) return; // still backpressured
+              if (!this.push(result.event)) return; // still backpressured (idle stays armed)
             }
           }
+          if (pendingLines.length === 0) disarmIdle();
 
           if (upstreamDone) {
             this.push(null);
