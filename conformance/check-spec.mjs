@@ -138,7 +138,23 @@ expectSpecMentions("the empty-argument tool_use hazard is documented", "空参�
 expectSpecMentions("prefill is documented as unsupported", "不实现 Anthropic 的");
 // The load-bearing correction: in-band errors never retry, whatever their type.
 expectSpecMentions("in-band errors are documented as non-retryable", "不能**触发下游重试");
-expectSpecMentions("the proxy is documented as the only recovery layer", "代理是唯一的恢复层");
+// ...and the consequence: the boundary is message_start, not the 200 itself.
+expectSpecMentions("message_start is documented as the real boundary", "`message_start` 是真正不可逆的那一步");
+expectSpecMentions("the probe-the-first-chunk recovery path is recorded", "在发 `message_start` 之前先把上游的头探出来");
+// Production evidence that the deployed fix did not work.
+{
+  const prod = JSON.parse(
+    readFileSync(path.join(HERE, "client-probes", "observed", "production-inband-error.json"), "utf8"),
+  );
+  expect("the deployed proxy already sent overloaded_error",
+    prod.inBandError?.errorType, "overloaded_error");
+  expect("...and the client still refused to retry",
+    prod.client?.classification?.retryable, false);
+  expect("...with 11 attempts available",
+    prod.client?.classification?.maxAttempts, 11);
+  expect("...and the client disables SDK-level retry for streams",
+    prod.client?.sdkRetryDisabled, true);
+}
 {
   const probe = JSON.parse(
     readFileSync(path.join(HERE, "client-probes", "observed", "retry-classification.json"), "utf8"),
@@ -158,18 +174,6 @@ expectSpecMentions("the proxy is documented as the only recovery layer", "代理
     byVariant["F-openai-envelope-first"]?.retried, false);
   expect("the partial text still reaches the client",
     byVariant["C-content-then-error"]?.text, "partial text");
-}
-{
-  // Production evidence: the retryability fix was deployed and still did not work.
-  const prod = JSON.parse(
-    readFileSync(path.join(HERE, "client-probes", "observed", "production-inband-error.json"), "utf8"),
-  );
-  expect("the deployed proxy already sent overloaded_error",
-    prod.inBandError?.errorType, "overloaded_error");
-  expect("...and the client still refused to retry",
-    prod.client?.classification?.retryable, false);
-  expect("...with 11 attempts available",
-    prod.client?.classification?.maxAttempts, 11);
 }
 {
   const probe = JSON.parse(

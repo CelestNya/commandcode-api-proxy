@@ -188,6 +188,12 @@ OpenAI 侧 `code: "network_error"` 判为可重试。其余类型一律不重试
 | 200 + 正文后 `error` | **1 次** | ❌ 否 |
 | 200 + OpenAI `{error}` 信封（首块或内容后） | **1 次** | ❌ 否 |
 
+> **本表测的是 SDK 层**（`maxRetries: 3`）。分界线是 **`message_start` 是否已经
+> 流过**，而不是 200 是否已发出 —— 第 3 行虽然也是 200，但错误就是第一个事件，
+> 仍然被重试了。SDK 的做法是探测流的前几个 part：若在 `message_start` 之前就
+> 撞上 `error`，它抛可重试的 `APICallError`；一旦 `message_start` 处理过，同一
+> 个 `error` 就只是 `enqueue` 出来的一条流内记录，再也没有重试的机会。
+
 **机制**（源码级确认，非推测）：
 
 - Anthropic provider 只在**首块探测**阶段把错误转成可重试错误：
@@ -207,16 +213,29 @@ OpenAI 侧 `code: "network_error"` 判为可重试。其余类型一律不重试
 - OpenAI 兼容 provider 里根本没有 `isRetryable`（`grep` 零命中），错误信封同样
   只走 `enqueue`。
 
+**但真正决定生产行为的是上一层**：ZCode 对流式调用**显式传 `maxRetries: 0`**
+（反编译 `zcode.cjs` 可见，两处调用点都是 `maxRetries:0`），即**主动关掉了
+SDK 的内建重试**，改用它自己的外层循环（`model.retry.delay.resolved` 的
+`canRetry` 就是那层的决策）。所以实测表里的"4 次请求"反映的是**SDK 层**行为；
+生产上生效的是 ZCode 外层对 `retryable` 的判定 —— 而它把流内错误一律判
+`false`（见下）。
+
+> **两层都要看**：SDK 层（探针可测）与外层（只有生产日志可见）。只测一层就下
+> 结论会错 —— 这正是本节两次差点出错的地方。
+
 **在生产里复现的实例**（2026-09-14，`sess_8e9a0574` 第 79 轮）：上游停摆后代理发
 `event: error` + `type: "overloaded_error"`，ZCode 侧记为
 `ProviderBusinessError` / `exceptionKind: "provider_business"` /
 `retryable: false` / `attempt: 1`（共 11 次额度），**整轮报废**。同一时刻代理日志
 只留下 `[CC upstream error] Invalid error response format: Gateway request failed`。
 
-> **那句 `Gateway request failed` 不是 CC 说的，也不是代理说的** —— 它是
-> `@ai-sdk/gateway` 的默认文案：`createGatewayErrorFromResponse` 在响应无法解析成
-> 合法 Gateway 错误形状时，抛 `Invalid error response format: ${defaultMessage}`。
-> 排查时不要被它误导成"上游网关故障"。
+> **那句 `Gateway request failed` 有两层来源，别搞混**（记忆 `ai-sdk-stream-error-envelope`
+> 里记的是 ZCode 自己的 `Zjr()` 兜底文案，本次反编译对上了）：
+> ① `@ai-sdk/gateway` 的 `createGatewayErrorFromResponse` 在响应无法解析成合法
+> Gateway 错误形状时抛 `Invalid error response format: ${defaultMessage}`，
+> `defaultMessage` 默认就是 `"Gateway request failed"`；
+> ② CC 服务端自己也会发同名 message。**两个都不是"上游网关故障"的意思** ——
+> 前者是本地兜底文案，后者是上游自己的错误串。
 
 **这推翻了 `a3864f6` 的核心论证**。那个 commit 的结论"把流内错误标成
 `overloaded_error` 就能让下游重试"经实测**不成立**：生产日志里两次流内
@@ -226,13 +245,21 @@ OpenAI 侧 `code: "network_error"` 判为可重试。其余类型一律不重试
 
 **对重构的含义**（重要）：
 
-1. **流已开始后，代理是唯一的恢复层**。"交给下游重试"这条路不存在，所以
-   §8.7 的断流续写不是可选优化，而是**唯一的补救手段**。
-2. `overloaded_error` 标记**仍然要保留** —— 它在**路径 A**（头未发出、错误是
-   首个事件）下是有效的，也是 Anthropic 协议的正确表达。但**不要指望它救流内失败**。
-3. 若要让流内失败可重试，唯一可行方向是**不把 200 写出去**（即代理自己先探测
-   首块再决定状态码）—— 这需要缓冲首块，会改变 §2.4.1 的整个时序契约，属于
-   重构期的大决策，**不要顺手改**。
+1. **`message_start` 是真正不可逆的那一步**，比 `writeHead(200)` 更准确。既然
+   HTTP 200 之后、`message_start` 之前出错**仍可重试**，代理就有一条明确的恢复
+   路径：**在发 `message_start` 之前先把上游的头探出来**（缓冲首个事件；若首个
+   事件就是 `error`，改为返回 502/529 而不是 200）。
+2. 代价与边界：这需要缓冲首块、会改变 §2.4.1 的时序，而且**只在"首块即错误"
+   时有效**。一旦正文开始流式吐出，就没有任何可重试的余地了 —— 那时 §8.7 的续写
+   才是唯一出路。
+3. `overloaded_error` 标记**仍然要保留**：它是 Anthropic 协议的正确表达，在路径 A
+   下有效，也是第 1 条方案要用的类型。只是**不要指望它救流内失败**。
+4. 要做第 1 条，必须同时改 §2.4.1 的时序契约并补 golden，属于**重构期的独立决策**，
+   不要顺手改。
+
+> **当前实现的状态**：`res.writeHead(200)` 在拿到上游流之后**立刻**执行，所以
+> 第 1 条那条路目前**没有走通** —— 生产上的流内失败必然落到"整轮报废"。这是本次
+> 实测暴露出的、比 `a3864f6` 所修问题更根本的一处。
 
 ### 2.5 部分输出不会丢失（**实测**，推翻了一个常见假设）
 

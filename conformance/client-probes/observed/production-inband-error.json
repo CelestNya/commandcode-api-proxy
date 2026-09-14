@@ -40,7 +40,9 @@
       "lastChunkType": "start-step",
       "textDeltaChars": 0
     },
-    "outcome": "turn.failed (turnNumber 79, turnPhase processing_input)"
+    "outcome": "turn.failed (turnNumber 79, turnPhase processing_input)",
+    "sdkRetryDisabled": true,
+    "sdkRetryDisabledNote": "反编译 D:\\Program\\zcode\\resources\\glm\\zcode.cjs 确认：ZCode 对流式调用显式传 maxRetries:0（两处调用点），主动关闭 AI SDK 的内建重试，改用自己的外层循环（canRetry 见 model.retry.delay.resolved）。所以生产上生效的是外层判定，不是 SDK 层 —— 探针测的 4 次请求只代表 SDK 层行为。"
   },
   "inBandError": {
     "responseStatus": 200,
