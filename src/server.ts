@@ -129,9 +129,72 @@ function extractApiKey(req: http.IncomingMessage): string | null {
 // Response helpers
 // ──────────────────────────────────────────
 
+/**
+ * Per-response context, stashed on the response object so the shared senders can
+ * log without every handler having to thread a parameter through.
+ *
+ * Why this exists: a request rejected by local validation returns a 400 without
+ * ever touching the upstream, and nothing was written to the log. Diagnosing a
+ * downstream client's "connection failed" then turns into guesswork — you cannot
+ * tell "the proxy rejected it" from "the request never reached the proxy" from
+ * "the upstream failed". Recording the arrival and the outcome makes that
+ * question answerable from the log alone.
+ */
+interface RequestContext {
+  reqId: string;
+  method: string;
+  path: string;
+  startedAt: number;
+}
+const requestContext = new WeakMap<http.ServerResponse, RequestContext>();
+
+/**
+ * A request held longer than this is worth a line at info level even when it
+ * succeeded — a streaming answer normally takes seconds, so the threshold is
+ * about spotting outliers, not flagging the ordinary case.
+ */
+const SLOW_REQUEST_MS = 30_000;
+
+/** Note that a request arrived. Called once, before dispatch. */
+function noteRequest(req: http.IncomingMessage, res: http.ServerResponse, path: string): RequestContext {
+  const ctx: RequestContext = {
+    reqId: getOrCreateRequestId(req),
+    method: req.method ?? "?",
+    path,
+    startedAt: Date.now(),
+  };
+  requestContext.set(res, ctx);
+  logger.debug(`[${ctx.reqId}] <- ${ctx.method} ${path}`);
+  return ctx;
+}
+
+/**
+ * Log a locally-generated failure response (4xx/5xx produced by the proxy
+ * itself). Upstream failures are logged where they happen, with more detail;
+ * this covers the paths that never reach the upstream.
+ */
+function logLocalFailure(
+  res: http.ServerResponse,
+  status: number,
+  message: string,
+  kind: string,
+): void {
+  const ctx = requestContext.get(res);
+  const who = ctx ? `[${ctx.reqId}] ${ctx.method} ${ctx.path}` : "unknown request";
+  // 4xx is the client's problem, 5xx is ours; the distinction matters when
+  // scanning the log for "did the proxy do something wrong".
+  const line = `[reject] ${who} -> ${status} ${kind}: ${message}`;
+  if (status >= 500) logger.error(line);
+  else logger.warn(line);
+}
+
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   // Client may have disconnected mid-request; never write to a dead socket.
   if (res.headersSent || res.writableEnded || res.destroyed) return;
+  if (status >= 400) {
+    const message = (data as { error?: { message?: unknown } })?.error?.message;
+    logLocalFailure(res, status, String(message ?? ""), "json");
+  }
   res.writeHead(status, {
     "Content-Type": "application/json",
     ...corsHeaders(),
@@ -160,6 +223,7 @@ function sendAnthropicError(
   message: string,
 ): void {
   if (res.headersSent || res.writableEnded || res.destroyed) return;
+  if (status >= 400) logLocalFailure(res, status, message, type);
   res.writeHead(status, { "Content-Type": "application/json", ...corsHeaders() });
   res.end(JSON.stringify({ type: "error", error: { type, message } }));
 }
@@ -398,7 +462,7 @@ async function handleChatCompletions(
     return sendOpenAIError(res, 401, "Unauthorized");
   }
 
-  const reqId = getOrCreateRequestId(req);
+  const reqId = requestContext.get(res)?.reqId ?? getOrCreateRequestId(req);
   const isStream = openAIReq.stream === true;
   const model = openAIReq.model ?? "default";
   const encoder = new OpenAIStreamEncoder(model);
@@ -503,7 +567,7 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
     return sendAnthropicError(res, 401, "authentication_error", "Missing API key");
   }
 
-  const reqId2 = getOrCreateRequestId(req);
+  const reqId2 = requestContext.get(res)?.reqId ?? getOrCreateRequestId(req);
   const isStream = anthropicReq.stream === true;
   const model = anthropicReq.model;
 
@@ -734,6 +798,41 @@ export function createServer(cfg: Config): http.Server {
 
     const parsedUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const pathname = parsedUrl.pathname;
+
+    // Record arrival before anything can reject the request, so the log can
+    // always answer "did it reach the proxy?".
+    const ctx = noteRequest(req, res, pathname);
+
+    // Completion line, registered here rather than after dispatch: several
+    // paths below `return` early (404, handler rejections), and registering it
+    // later silently skipped every one of them.
+    //
+    // Logged on `finish` (the response was fully written), which is the moment
+    // the proxy is actually done with the request. `close` was the first
+    // attempt but it fires when the *connection* goes away, and on a keep-alive
+    // socket that can be much later or never — the line went missing entirely
+    // in testing. A client that aborts mid-stream emits `close` without
+    // `finish`, so both are handled; `once` on each keeps it to a single line.
+    //
+    // Level: debug for the ordinary successful request, info for anything a
+    // human would want when working out what happened (a failure, or a request
+    // that took unusually long). The default level is info, so a plain
+    // "everything worked" line would be noise, but a rejection's timing is
+    // exactly what distinguishes "the proxy refused it instantly" from "the
+    // upstream was slow" — and that question is why this logging exists.
+    let logged = false;
+    const logCompletion = (outcome: string): void => {
+      if (logged) return;
+      logged = true;
+      const ms = Date.now() - ctx.startedAt;
+      const status = res.statusCode;
+      const notable = status >= 400 || outcome !== "done" || ms >= SLOW_REQUEST_MS;
+      logger[notable ? "info" : "debug"](
+        `[${ctx.reqId}] <- ${ctx.method} ${ctx.path} ${status} ${outcome} in ${ms}ms`,
+      );
+    };
+    res.once("finish", () => logCompletion("done"));
+    res.once("close", () => logCompletion(res.writableFinished ? "done" : "client-gone"));
 
     const route = routes.find((r) => r.method === req.method && r.path === pathname);
 
