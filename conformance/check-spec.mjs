@@ -188,6 +188,15 @@ expect("out-of-range temperature rejected", validation["temperature-out-of-range
 expect("bad tool_choice rejected", validation["bad-tool-choice"]?.body?.error?.message,
   "Field 'tool_choice' string must be one of: auto, none, required");
 
+// ── 5.6 logging contract ────────────────────────────────────────────────────
+console.log("5.6 request observability");
+expectSpecMentions("arrival/outcome bracketing is documented", "每个请求都由两行");
+expectSpecMentions("the finish-not-close pitfall is recorded", "在 `finish` 而非 `close` 上触发");
+expectSpecMentions("registering before dispatch is required", "结果行必须在分发前注册");
+expectSpecMentions("request id reuse is required", "handler 复用到达时生成的 id");
+// A rejection must never be silent again — the whole point of the change.
+expectSpecMentions("local rejections must be logged", "4xx 拒绝原因");
+
 // ── upstream request shape ──────────────────────────────────────────────────
 console.log("3.2 upstream request");
 const upstreamReq = caseOf("stream/openai/clean-text")?.upstreamRequests?.[0];
