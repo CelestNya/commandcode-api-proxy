@@ -168,10 +168,13 @@ describe("resolveModel against the dynamic catalog", () => {
 describe("/v1/models endpoint with a live catalog", () => {
   it("serves open models only, with display names for Anthropic clients", async () => {
     mockFetch(API_MODELS);
-    const port = 18988;
-    const config = { ...loadConfig(), port, apiKey: API_KEY, host: "127.0.0.1" };
+    // Port 0 lets the OS pick a free one. A fixed port competed with the other
+    // test files running in parallel, which showed up as an intermittent
+    // 5-second timeout in the full suite.
+    const config = { ...loadConfig(), port: 0, apiKey: API_KEY, host: "127.0.0.1" };
     const server = createServer(config);
-    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
     try {
       // createServer refreshes in the background; wait for it to land.
       await refreshCatalog(API_BASE, API_KEY, { force: true });

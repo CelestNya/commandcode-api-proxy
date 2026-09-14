@@ -139,6 +139,12 @@ const UNSUPPORTED_CONTENT_TYPES = new Set([
   "mid_conversation_system",
 ]);
 
+/** Accepted `thinking.type` values (Messages API: enabled / disabled / adaptive). */
+const THINKING_TYPES = new Set(["enabled", "disabled", "adaptive"]);
+
+/** Accepted `output_config.effort` values — the discrete levels CC accepts. */
+const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
 const BUILT_IN_TOOL_TYPES = new Set([
   "computer_20241022",
   "bash_20241022",
@@ -190,11 +196,31 @@ export function validateAnthropicRequest(body: unknown): AnthropicRequest {
 
   if (req.thinking && typeof req.thinking === "object") {
     const t = req.thinking as Record<string, unknown>;
+    // The Messages API defines three values; a client's "thinking off" setting
+    // sends "disabled" and its adaptive setting sends "adaptive". Rejecting
+    // anything but "enabled" turned a normal setting into a 400 that looked
+    // like a connectivity failure downstream.
+    if (t.type !== undefined && !THINKING_TYPES.has(t.type as string)) {
+      throw new ValidationError(
+        `Field 'thinking.type' must be one of: ${[...THINKING_TYPES].join(", ")}`,
+      );
+    }
+    // budget_tokens only exists on the "enabled" form, and is only meaningful
+    // there; guard it against max_tokens so the upstream doesn't 400 later.
     if (typeof t.budget_tokens === "number" && t.budget_tokens >= (req.max_tokens as number)) {
       throw new ValidationError("thinking.budget_tokens must be less than max_tokens");
     }
-    if (t.type !== undefined && t.type !== "enabled") {
-      throw new ValidationError(`Field 'thinking.type' must be "enabled" when thinking is set`);
+  }
+
+  if (req.output_config !== undefined) {
+    const oc = req.output_config as Record<string, unknown>;
+    if (oc === null || typeof oc !== "object") {
+      throw new ValidationError("Field 'output_config' must be an object");
+    }
+    if (oc.effort !== undefined && !EFFORT_LEVELS.has(oc.effort as string)) {
+      throw new ValidationError(
+        `Field 'output_config.effort' must be one of: ${[...EFFORT_LEVELS].join(", ")}`,
+      );
     }
   }
 

@@ -16,7 +16,23 @@ export interface AnthropicRequest {
   top_k?: number;
   tools?: AnthropicTool[];
   tool_choice?: AnthropicToolChoice;
-  thinking?: { type: "enabled"; budget_tokens: number };
+  /**
+   * Extended-thinking control. Three values are in use across clients:
+   * `enabled` (explicit budget), `disabled` (explicitly off) and `adaptive`
+   * (let the service decide) — the latter two follow the newer Messages API
+   * shape and are what a client's "thinking off" setting sends.
+   */
+  thinking?:
+    | { type: "enabled"; budget_tokens: number }
+    | { type: "disabled" }
+    | { type: "adaptive" };
+  /**
+   * Reasoning strength, as sent by clients that express it directly instead of
+   * through a thinking budget. Takes precedence over `thinking.budget_tokens`
+   * when both are present: effort is the explicit intent, the budget is the
+   * older convention.
+   */
+  output_config?: { effort?: "low" | "medium" | "high" | "xhigh" | "max" };
   service_tier?: string;
 }
 

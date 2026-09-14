@@ -94,12 +94,24 @@ describe("validateAnthropicRequest hardening", () => {
     expect(() => validateAnthropicRequest(baseAnthropic({ top_k: "x" }))).toThrow(/top_k/);
   });
 
-  it("rejects thinking.type other than enabled", () => {
+  it("rejects an unknown thinking.type", () => {
     expect(() =>
       validateAnthropicRequest(
-        baseAnthropic({ max_tokens: 10000, thinking: { type: "disabled", budget_tokens: 100 } }),
+        baseAnthropic({ max_tokens: 10000, thinking: { type: "bogus" } as never }),
       ),
     ).toThrow(/thinking\.type/);
+  });
+
+  // "disabled" and "adaptive" are valid Messages API values — a client's
+  // thinking-off setting sends one of them. Rejecting them turned a normal
+  // setting into a 400 that downstream looked like a connectivity failure.
+  it('accepts thinking.type "disabled" and "adaptive"', () => {
+    expect(() =>
+      validateAnthropicRequest(baseAnthropic({ max_tokens: 10000, thinking: { type: "disabled" } })),
+    ).not.toThrow();
+    expect(() =>
+      validateAnthropicRequest(baseAnthropic({ max_tokens: 10000, thinking: { type: "adaptive" } })),
+    ).not.toThrow();
   });
 
   it("still enforces budget_tokens < max_tokens", () => {

@@ -43,6 +43,16 @@ const ANTHROPIC_STOP_REASON_MAP: Record<string, AnthropicStopReason> = {
 };
 const INITIAL_OUTPUT_TOKENS = 1;
 /**
+ * Level used when a client asks for thinking to be off.
+ *
+ * The upstream accepts no "off" value, so this is the closest expressible
+ * intent: the lowest level the model supports (clipping raises it to the
+ * model's floor, e.g. "high" for deepseek). Chosen deliberately over dropping
+ * the field, which would leave the upstream free to pick anything — including
+ * its default, which is what a user turning thinking off is trying to avoid.
+ */
+const DISABLED_THINKING_EFFORT = "low";
+/**
  * CC returns no thinking-block signature, but Anthropic's contract requires one
  * on every thinking block. Clients round-trip it without verifying, so a fixed
  * placeholder is safe.
@@ -166,8 +176,27 @@ function toCCPartByBlock(block: AnthropicContentBlock): CCContentPart | null {
   return null;
 }
 
-function resolveReasoningEffort(thinking: AnthropicRequest["thinking"]): string | undefined {
-  if (!thinking) return undefined;
+/**
+ * Reasoning strength the upstream should use, from whichever field the client
+ * expressed it in.
+ *
+ * Priority order, highest first:
+ *   1. `thinking.type === "disabled"` → the client asked for no extended
+ *      thinking. The upstream has no such level (measured: `none`, `disabled`,
+ *      `off`, `minimal` all 400), so this degrades to the lowest level the
+ *      model supports rather than failing the turn.
+ *   2. `output_config.effort` → the explicit level. This is what current
+ *      clients send; reading only `budget_tokens` (as this used to) silently
+ *      discarded the user's choice and sent the same level every time.
+ *   3. `thinking.budget_tokens` → the older convention, still honoured by
+ *      mapping the budget onto a level.
+ */
+function resolveReasoningEffort(req: AnthropicRequest): string | undefined {
+  const thinking = req.thinking;
+  if (thinking?.type === "disabled") return DISABLED_THINKING_EFFORT;
+  if (req.output_config?.effort) return req.output_config.effort;
+  if (!thinking || thinking.type !== "enabled") return undefined;
+
   const b = thinking.budget_tokens;
   if (b <= REASONING_THRESHOLDS.LOW) return "low";
   if (b <= REASONING_THRESHOLDS.MEDIUM) return "medium";
@@ -236,7 +265,7 @@ export function toCCRequest(
       stop: req.stop_sequences,
       tools: ccTools,
       tool_choice: resolveToolChoice(req),
-      reasoning_effort: resolveEffortForModel(resolvedModel, resolveReasoningEffort(req.thinking)),
+      reasoning_effort: resolveEffortForModel(resolvedModel, resolveReasoningEffort(req)),
     },
     threadId: crypto.randomUUID(),
   };
