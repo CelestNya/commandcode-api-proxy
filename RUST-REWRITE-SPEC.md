@@ -52,6 +52,11 @@ reqwest + tokio + windows-rs 的二进制为 1.8 MB，余量充足）。行为�
 > **最高优先级是稳定性。** 当"复刻行为"与"不引入新的不稳定"冲突时，后者优先 ——
 > 例如上游某条异常路径宁可记日志并返回明确错误，也不要静默 hang 住转发线程。
 
+> **"逐字节一致"有一处明确的例外**：§2.4.4 那条"错误被自己的收尾洗成成功"是**缺陷
+> 而非契约**，必须修掉（`error` 之后直接 `message_stop`，不补
+> `message_delta(end_turn)`）。凡属"错误被伪装成成功"的行为一律不复刻 —— 这正是
+> 本 spec 反复强调的最坏失败模式。修掉后 golden 需要相应更新。
+
 回归门（每次提交）：
 
 ```bash
@@ -193,6 +198,28 @@ OpenAI 侧 `code: "network_error"` 判为可重试。其余类型一律不重试
 > 仍然被重试了。SDK 的做法是探测流的前几个 part：若在 `message_start` 之前就
 > 撞上 `error`，它抛可重试的 `APICallError`；一旦 `message_start` 处理过，同一
 > 个 `error` 就只是 `enqueue` 出来的一条流内记录，再也没有重试的机会。
+
+**类型完全不参与判定**（`H`/`I` 两行实测）：`api_error` / `rate_limit_error` /
+`overloaded_error` 在 `message_start` 之后的表现**一模一样**（都是 1 次请求）。
+所以"换个更可重试的类型"这条路从根上就不存在。
+
+#### 2.4.4 更糟的一种形状：错误之后补终止记录会伪装成"正常说完"
+
+代理当前的流级错误处理是 `error` 之后**再补 `finishRecords("end_turn")`**
+（`src/server.ts` 的 onError 分支）。实测这条完整序列的客户端结果是：
+
+| 序列 | `finishReason` | 客户端怎么看 |
+| ---- | -------------- | ------------ |
+| `message_start` → 正文 → `error` → `message_stop` | `unknown` | 知道出错了 |
+| `message_start` → 正文 → `error` → `message_delta` → `message_stop` | **`stop`** | **当成正常结束** |
+
+也就是说 `finishRecords` 补的那条 `message_delta(delta.stop_reason="end_turn")`
+**覆盖了错误的语义**，把"中途断流"洗成"模型说完了"。这是本 spec 反复强调的
+最坏失败模式（错误被伪装成成功）在**我们自己的代码里**发生。
+
+> **待办（重构时必改）**：流级错误后**不要**补 `message_delta(end_turn)`。
+> 正确做法是 `error` 之后直接 `message_stop`，让 `finishReason` 保持非
+> `stop` 的取值。改动前需先补 golden 用例锁住新行为。
 
 **机制**（源码级确认，非推测）：
 
@@ -964,6 +991,7 @@ prefill 语义。**不要在重构里依赖 A。**
 | **CC 的服务端探测** | 请求头不像官方 CLI 会被拒（`Proxy use detected`） | 逐字复刻头集合，用 golden 的 `upstreamRequests` 断言 |
 | **重试可重试性回归** | 错误类型映射错了会导致客户端不重试 | `failure/*` 与流内错误是最高优先级复刻点。**注意 §2.4.3：流内错误在任何类型下都不会触发下游重试**，别把恢复希望押在这里 |
 | **流内失败无自动恢复** | 头已发出后上游才失败，下游不会重试，整轮报废 | 目前**无解**（§2.4.3）。若要做，唯一路径是缓冲首块后再决定状态码，属重构期大决策 |
+| **错误被自己的收尾洗成成功** | 流级错误后补 `finishRecords` → 客户端 `finishReason` 变 `stop`，"断流"看起来像"说完了"（§2.4.4，实测） | 重构时**必须**改为 `error` 后直接 `message_stop`；改动前补 golden 锁住新行为 |
 | **Windows 头文件特性** | `CreateJobObjectW` 需 `Win32_Security`，缺失时编译期报错 | 已在 DEVELOPMENT.md 记录 |
 | **`panic = "abort"` 丢回溯** | 托盘唯一诊断通道是日志文件 | 若现场排查困难，考虑改为 `unwind` 换取回溯 |
 | **别名表漂移** | `models.json` 78 条别名会随 CC 上新模型变化 | 保持 `models.json` 为唯一真相源，Rust 侧用 `include_str!` 嵌入 |

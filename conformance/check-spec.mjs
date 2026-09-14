@@ -162,6 +162,11 @@ expectSpecMentions("the probe-the-first-chunk recovery path is recorded", "Âú®Âè
   const byVariant = Object.fromEntries(probe.results.map((r) => [r.variant, r]));
   // A retry is only real if the upstream was hit more than once.
   expect("http 529 IS retried", byVariant["D-http-529"]?.retried, true);
+  expect("http 500 IS retried", byVariant["G-openai-http-500"]?.retried, true);
+  expect("http 429 IS retried", byVariant["J-http-429"]?.retried, true);
+  expect("http 401 is NOT retried", byVariant["K-http-401"]?.retried, false);
+  expect("http 403 is NOT retried", byVariant["L-http-403"]?.retried, false);
+  expect("http 400 is NOT retried", byVariant["M-http-400"]?.retried, false);
   expect("error-after-message_start is NOT retried",
     byVariant["A-message_start-then-error"]?.retried, false);
   expect("error-after-content is NOT retried",
@@ -174,6 +179,14 @@ expectSpecMentions("the probe-the-first-chunk recovery path is recorded", "Âú®Âè
     byVariant["F-openai-envelope-first"]?.retried, false);
   expect("the partial text still reaches the client",
     byVariant["C-content-then-error"]?.text, "partial text");
+  // The error type plays no part in the decision ‚Äî all three behave identically.
+  for (const v of ["A-message_start-then-error", "H-message_start-then-api_error", "I-message_start-then-rate_limit_error"]) {
+    expect(`${v} is NOT retried (type is irrelevant)`, byVariant[v]?.retried, false);
+  }
+  // The worst shape: terminators appended after the error turn it into a success.
+  const c2 = byVariant["C2-content-then-error-then-terminators"];
+  expect("appending finishRecords still yields finishReason 'stop'", c2?.finish, "stop");
+  expect("...and the error part is still delivered", c2?.errorPart, true);
 }
 {
   const probe = JSON.parse(

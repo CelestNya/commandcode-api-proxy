@@ -44,11 +44,15 @@ const MSG_START = (id) => [
   },
 ];
 const ERR = (type, msg) => ["error", { type: "error", error: { type, message: msg } }];
+const MSG_DELTA = (stop) => [
+  "message_delta",
+  { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 0 } },
+];
 const STOP = ["message_stop", { type: "message_stop" }];
 
 const VARIANTS = {
   "A-message_start-then-error": (id) => sse([MSG_START(id), ERR("overloaded_error", "[upstream-error] idle timeout"), STOP]),
-  // 首块即错误：id 未用到，但仍按同一签名以便统一调用
+  // 首块探测读的是流的**前两个事件**：先 message_start 再 error 与直接 error 不同
   "B-error-first": (_id) => sse([ERR("overloaded_error", "[upstream-error] idle timeout"), STOP]),
   "C-content-then-error": (id) => sse([
     MSG_START(id),
@@ -57,7 +61,20 @@ const VARIANTS = {
     ERR("overloaded_error", "[upstream-error] idle timeout"),
     STOP,
   ]),
+  // 代理当前的真实形状：error 之后还跟 finishRecords("end_turn") 的收尾三件套
+  "C2-content-then-error-then-terminators": (id) => sse([
+    MSG_START(id),
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial text" } }],
+    ["content_block_stop", { type: "content_block_stop", index: 0 }],
+    ERR("overloaded_error", "[upstream-error] idle timeout"),
+    MSG_DELTA("end_turn"),
+    STOP,
+  ]),
   "D-http-529": () => null, // 特殊处理：非 200
+  // 非 overloaded 的 in-band 类型，用来确认「类型完全不影响重试」这个结论
+  "H-message_start-then-api_error": (id) => sse([MSG_START(id), ERR("api_error", "[upstream-error] idle timeout"), STOP]),
+  "I-message_start-then-rate_limit_error": (id) => sse([MSG_START(id), ERR("rate_limit_error", "slow down"), STOP]),
   // OpenAI 方言：代理发的是纯 {error:{...}} 信封（code: network_error）
   "E-openai-envelope-after-content": () =>
     oaiSSE([
@@ -68,6 +85,21 @@ const VARIANTS = {
   "F-openai-envelope-first": () =>
     oaiSSE([{ error: { message: "[upstream-error] idle timeout", type: "upstream_error", code: "network_error" } }]),
   "G-openai-http-500": () => null, // 特殊处理
+  // HTTP 层状态码矩阵：能否重试是 SDK 写死的分类
+  "J-http-429": () => null,
+  "K-http-401": () => null,
+  "L-http-403": () => null,
+  "M-http-400": () => null,
+};
+
+// HTTP 状态码用例 → 返回的 JSON 体（按各协议的错误形状）
+const HTTP_CASES = {
+  "D-http-529": { status: 529, body: { type: "error", error: { type: "overloaded_error", message: "overloaded" } } },
+  "G-openai-http-500": { status: 500, body: { error: { message: "server exploded", type: "proxy_error" } } },
+  "J-http-429": { status: 429, body: { type: "error", error: { type: "rate_limit_error", message: "slow down" } } },
+  "K-http-401": { status: 401, body: { type: "error", error: { type: "authentication_error", message: "bad key" } } },
+  "L-http-403": { status: 403, body: { type: "error", error: { type: "permission_error", message: "not recognized" } } },
+  "M-http-400": { status: 400, body: { type: "error", error: { type: "invalid_request_error", message: "bad field" } } },
 };
 
 const OPENAI_VARIANTS = new Set([
@@ -75,7 +107,6 @@ const OPENAI_VARIANTS = new Set([
   "F-openai-envelope-first",
   "G-openai-http-500",
 ]);
-
 const results = [];
 
 function serve(variantName) {
@@ -83,14 +114,10 @@ function serve(variantName) {
   return new Promise((resolve) => {
     const srv = http.createServer((_req, res) => {
       requests += 1;
-      if (variantName === "D-http-529") {
-        res.writeHead(529, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "[upstream-error] idle timeout" } }));
-        return;
-      }
-      if (variantName === "G-openai-http-500") {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: { message: "[upstream-error] idle timeout", type: "upstream_error", code: "network_error" } }));
+      const httpCase = HTTP_CASES[variantName];
+      if (httpCase) {
+        res.writeHead(httpCase.status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(httpCase.body));
         return;
       }
       res.writeHead(200, { "Content-Type": "text/event-stream" });
