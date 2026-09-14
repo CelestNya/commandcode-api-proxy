@@ -46,7 +46,11 @@ reqwest + tokio + windows-rs 的二进制为 1.8 MB，余量充足）。行为�
 | **必须** | 生产端口 8787 契约不变；托盘交接语义不变 | 隔离命名空间 `CC_TRAY_NS` 验证 |
 | **应当** | 单文件 exe < 10 MB | `ls -la target/release/ccproxy.exe` |
 | **应当** | 内存占用显著低于 Node（当前 Node 常驻约 60-80 MB RSS） | 任务管理器 |
+| **应当** | **统计写入失败不影响转发**：写线程 panic / 磁盘满 / 通道满时，请求仍正常完成 | 故障注入测试（见 6.5） |
 | **可选** | `cargo-deny check` 无 advisories | CI |
+
+> **最高优先级是稳定性。** 当"复刻行为"与"不引入新的不稳定"冲突时，后者优先 ——
+> 例如上游某条异常路径宁可记日志并返回明确错误，也不要静默 hang 住转发线程。
 
 回归门（每次提交）：
 
@@ -130,11 +134,111 @@ OpenAI 侧 `code: "network_error"` 判为可重试。其余类型一律不重试
 **这是最高价值的复刻点**：搞错这里，用户看到的是"模型无响应"，而不是可重试的
 错误。
 
-### 2.5 终止记录合成
+#### 2.4.1 错误时机决定一切（`res.writeHead(200)` 是分界线）
+
+复刻时必须区分两条路径，它们的处理方式完全不同：
+
+| | 路径 A：头发出**之前** | 路径 B：头发出**之后** |
+| -- | -------------------- | -------------------- |
+| 触发 | 连接失败 / 401 / 403 / 429 / 5xx / 建连超时 | TCP 断开 / idle 超时 / encoder 抛错 / 上游 `error` 事件 |
+| 捕获点 | 路由 handler 的 `catch` → `handleUpstreamError` | `pumpStream` 内部的 `catch` → `onError` 回调 |
+| 可用手段 | **真实 HTTP 状态码 + JSON 信封** | **只能往流里追加记录**（200 已在线上，改不了） |
+| 客户端行为 | 按状态码判断 → **会重试** | 流内 error part → **不重试** |
+
+**关键结论**：
+
+1. **一旦 `writeHead(200)` 执行，状态码就不可撤销** —— 不能再返回 502/429，
+   只能追加流内容。所以"开始推流"不是稳定的标志，而是**退路的终点**。
+2. **中途错误标什么类型都不触发重试**（AI SDK 只在"首个 chunk 即错误"时才
+   转成可重试的 `APICallError`）。这是**正确设计**：已吐出半截内容再重试会让
+   用户看到重复内容。
+3. 因此 `overloaded_error` / `code: network_error` 的标记**只对路径 A 有效** ——
+   即上游用 `200` + 首个事件就是 `error` 的情况（Anthropic 的 overloaded 就是
+   这样返回的，Vercel 源码有专门注释处理此场景）。
+4. 路径 B 结束后**仍要发 `[DONE]` 并 `res.end()`**（OpenAI 路径），让客户端
+   正常停止迭代而非挂起。实测 golden 中 `stream/openai/error-after-content`
+   的记录序列为：role chunk → content chunk → error 信封 → `[DONE]`。
+
+#### 2.4.2 路径 B 的两种信封不混用
+
+- **OpenAI**：发**纯 `{error:{...}}` 信封**，不掺内容块。
+  理由（`src/translate/openai.ts:446-457` 原文）：AI SDK 的 OpenAI 兼容 chunk
+  schema 是"正常 chunk 形状 ∪ `{error:{...}}`"的联合，`doStream` 把 error 分支
+  变成 stream error part 并置 `finishReason = "error"`。
+  **若把错误包进 `delta.content`，客户端会当成正常助手回复，报告成功轮次，
+  错误被静默吞掉** —— 这是最难查的失败模式。
+- **Anthropic**：发 `event: error` + `{"type":"error","error":{...}}`，
+  其后跟 `message_stop`。
+
+### 2.5 流式输出的四条硬约束
+
+> 这四条都是**客户端静默失败**类问题（表现为对话无声中断、签名丢失、用量显示 0），
+> 不报错、难定位。第 1 条尤其反直觉：两个主流 SDK 的判别依据是相反的。
+
+**约束 1：SSE 的 `event:` 名与载荷里的 `type` 必须始终一致且都存在。**
+
+实测（现有实现 107 条记录）：`type` 缺失 0 条，`event`/`type` 不一致 0 条 ——
+但这是靠纪律维持的，**没有任何机制保证**。Rust 侧必须让两者由**同一个构造函数
+产出**，从类型上杜绝分离设置。
+
+理由是两个主流 SDK 的判别依据**相反**：
+
+| SDK | 判别依据 | 缺 `event:` | 缺 `type` |
+| --- | -------- | ----------- | --------- |
+| `@anthropic-ai/sdk` (TS/Python) | **只看 `event:` 名**（白名单） | **静默丢弃** | Python 回填；TS 丢弃 |
+| Vercel AI SDK | **只看 JSON `type`**（Zod 联合） | 正常 | schema 失败 → error part |
+
+> **现有注释的机制描述有误**（`src/translate/anthropic.ts:517-520`）：它说顶层
+> `signature_delta` 会让"严格客户端按 `type` 联合判别而中断整个流"。实际机制是
+> —— **TS SDK 的白名单不匹配，记录被静默丢弃**，签名没落地，思考块的
+> `signature` 变成空串。**结论（必须嵌套）正确，但理由错了。**
+> 静默丢失比报错难查得多，所以这个区别值得写清楚。
+
+**约束 2：事件之间必须有终止空行 —— EOF 会丢弃挂起事件。**
+
+WHATWG 规范原文：*"Once the end of the file is reached, any pending data must be
+discarded."* 若 `res.end()` 紧跟在最后一行 `data:` 后而**没有那个空行**，
+客户端会**静默丢弃最后一个事件** —— 可能就是 `message_stop`，直接表现为
+"对话无声中断"。
+
+现有 `formatSSE` 始终输出 `\n\n` 终止符（正确）。**阻塞式实现重写写循环时这是
+最易漏的一处**：必须保证每条记录完整写出 `event:` 行 + `data:` 行 + 空行，
+且 flush 发生在空行之后。
+
+**约束 3：`[DONE]` 必须是裸的、独立的，不能附加任何内容。**
+
+OpenAI Node SDK 用**相等**判断（`data === '[DONE]'`），Python SDK 用**前缀**判断
+（`startswith('[DONE]')`）。因此 `[DONE] `（带空格）会让 Node 侧尝试
+`JSON.parse("[DONE] ")` 并抛出 `SyntaxError`。
+
+**约束 4：`message_delta.usage` 的字段是"覆盖"而非"累加"。**
+
+Anthropic SDK 源码注释：*"The remaining usage counters are cumulative whole-message
+totals that are omitted when they don't apply, so it should overwrite when present
+and never add."*
+
+两个直接后果：
+
+- `message_start` 里报 `input_tokens: 0` 且 `message_delta` 里**省略**
+  `input_tokens`，客户端最终会一直显示 0 —— 所以 CC 的 `start` 事件不带 usage
+  时，**必须在 `message_delta` 补上全部三个字段**（现有实现如此，正确）。
+- 反之，**未知时省略字段，而不是填 0** —— 填 `cache_read_input_tokens: 0` 会
+  **覆盖掉正确的值**。现有实现的 `...(cachedTokens != null ? {...} : {})` 条件
+  展开是正确的，Rust 侧要保留这个"省略 ≠ 填零"的语义。
+
+### 2.6 终止记录合成
 
 上游未发 `finish` 就关闭连接时，服务层必须合成终止记录（`finishRecords` /
 `finishChunks`），且**仅在未终态时**。上游在终态后继续发事件时，编码器必须吞掉，
 不得产生第二个终止记录。
+
+**另一个待验证的边界**：Anthropic 的 `finalText()` 在"有 `message_start` 但
+没有任何内容块"时会抛错（`stream ended without producing a content block with
+type=text`）。现有非流式路径会合成一个空文本块，但**流式路径的 `finishRecords`
+不会** —— 这可能是"极短回复导致客户端报错"的隐藏成因。
+
+> **处理方式**：先用真 SDK 复现确认（不要在未证实前改动），复现成功再决定是
+> 合成空块还是保持现状。已记入第 9 节风险。
 
 ---
 
@@ -313,7 +417,43 @@ Anthropic 侧由 `thinking.budget_tokens` 映射 effort（budget 越大 effort �
 - 读错误体期间断开 → 不重试
 - **保留**：不允许在客户端取消时伪造"成功结束"
 
-### 5.5 日志
+### 5.5 并发模型：线程，不用 tokio（已决策）
+
+**结论：阻塞式 thread-per-connection，全项目零 async。**
+
+理由：本代理是**纯 I/O 转发器**，并发形状是"少量长连接"而非"海量短连接"。
+实测生产速率约 1 请求/37 秒，同时活跃对话 1-3 个。tokio 解决的是"单线程上
+海量并发 I/O"问题，而这里的目标机器有 16 逻辑核（另一台 N100 是 4 核），直接
+用 OS 线程就够了 —— 每个线程阻塞在自己的连接上，互不影响。
+
+选线程模型的实质收益不是性能，而是**消除整类复杂度**：
+
+| 消除项 | 说明 |
+| ------ | ---- |
+| channel + 后台任务 | 问题 2 那套 spawn_blocking / flush 契约的复杂度全部消失 |
+| 取消安全 | 不再需要判断哪些 future 可安全 drop 在 `.await` 处 |
+| Send + 'static 约束 | 状态共享只需 `Arc` + `Mutex`/`RwLock` |
+| 阻塞 API 的包装 | rusqlite 是同步的，线程模型下天然可用 |
+| tokio worker 阻塞风险 | 不再存在"阻塞几个 worker 就拖慢整个代理"的失效模式 |
+
+实测依赖栈：`tiny_http + ureq + rusqlite(bundled)` 编译通过，二进制 **2196 KB**。
+
+**唯一的例外考量**：SSE 流式路径在阻塞模型下需要手写超时与断开检测（见第 9 节
+风险）。这部分方案由专项研究确定，不凭印象设计。
+
+**HTTP 栈选型**：
+
+| 层 | 选型 | 理由 |
+| -- | ---- | ---- |
+| 服务端 | `tiny_http` | API 形态就是"请求进、响应出"，与需求对齐；不强制 async |
+| 客户端 | `ureq` | 阻塞式，支持 TLS 与流式读取 |
+| 存储 | `rusqlite`（bundled） | 同步，与线程模型天然契合 |
+| 序列化 | `serde_json` | 见第 5 节 |
+
+**特别说明**：DEVELOPMENT.md 中"4. Async rules (tokio)"整节作废，替换为线程
+模型规范（线程安全、锁的持有范围、阻塞边界）。
+
+### 5.6 日志
 
 当前 `proxy.log` 中 98% 是 `[usage]` 行，属于工程债。重构后：
 
@@ -364,17 +504,70 @@ Anthropic 侧由 `thinking.budget_tokens` 映射 effort（budget 越大 effort �
 - 轮转不得有 `readFile`/`writeFile` 互覆竞态（当前真实存在）
 - 轮转不得丢失已写入的行
 
-### 6.4 存储引擎选择（未决）
+### 6.4 存储引擎：rusqlite + WAL（已决策）
 
-`node:sqlite` 已实测内嵌可用，Rust 侧可选 `rusqlite`（bundled）。两条路：
+**结论：使用 `rusqlite`（`bundled` feature），WAL 模式。**
 
-| 方案 | 明细 | 聚合 | 迁移成本 |
-| ---- | ---- | ---- | -------- |
-| JSONL 扩字段 | 纯文本可 grep | 全量扫，10 万行后托盘菜单会卡 | 低 |
-| rusqlite | 表存储 | 索引查询 | 需迁移旧 JSONL |
+实测增长速率（生产数据，22.4 小时样本）：
 
-Rust 重构是引入 sqlite 的自然时机（无额外依赖成本，`rusqlite` bundled 约 +1 MB）。
-**但需用户决策后实施。**
+| 指标 | 实测值 |
+| ---- | ------ |
+| 速率 | **2330 行/天，299 KB/天** |
+| 单行均值 | 131 字节 |
+| 1 年 | 106 MB，85 万行 |
+| 3 年 | 319 MB，255 万行 |
+
+选 rusqlite 的理由：
+
+1. **量级已越过 JSONL 的舒适区。** 85 万行/年时，任何聚合都要全量解析 106 MB
+   文本，秒级延迟。当前托盘用 `File.ReadLines` 全量扫 `usage.jsonl` 算 24h 缓存率
+   —— 1 年后会明显卡住右键菜单。
+2. **Rust 让 sqlite 的代价近乎为零。** 实测阻塞栈（tiny_http + ureq + rusqlite
+   bundled）二进制 **2196 KB**，对比 Node 版 88 MB。
+3. **WAL 的并发语义恰好匹配。** **代理是唯一写入者**，WebUI 与托盘都是读者。
+   WAL 模式下"单写多读、互不阻塞"正是所需语义，无需自写锁逻辑。
+4. JSONL 的"纯文本可手工抢救"优势对用量统计不成立 —— 这是可观测性数据，不是
+   计费依据。配 `VACUUM INTO` 定期快照即可覆盖。
+
+**明确否决"JSONL 分片 + sqlite 索引"的混合方案**：sqlite 的 WAL 本身就是
+append-only 日志，再叠一层 JSONL 是两条链路维护同一个事实。
+
+关键配置：
+
+```rust
+conn.pragma_update(None, "journal_mode", "WAL")?;
+conn.pragma_update(None, "synchronous", "NORMAL")?;   // WAL 下 NORMAL 已足够安全
+conn.pragma_update(None, "busy_timeout", 5000)?;      // 读者撞上写入时重试而非报错
+```
+
+### 6.5 写入与转发的解耦（已决策）
+
+**原则：SQL 写入与请求转发必须低耦合。** 写入绝不能阻塞或失败拖垮转发路径。
+
+架构：**请求路径只做一次非阻塞投递，写入由专用线程独占完成。**
+
+```
+请求线程 ──send(UsageRecord)──► 有界 channel ──► 写入线程（独占 Connection）
+   │                                                    │
+   └── 转发继续，不等回执 ◄────────────────────────────┘
+```
+
+- 通道**必须有界**（建议 1024）：写线程若卡住，满了之后 `try_send` 直接丢弃并
+  计数告警，绝不阻塞请求线程。这是"稳定性优先"的直接体现 —— 统计丢了可以补，
+  转发卡了不行。
+- 写入线程批量提交（**200ms 或 100 条，先到先提交**），降低 WAL 的 fsync 开销。
+- 提供显式 `flush()` 供**测试**与**进程退出**使用；生产热路径不调用。
+- 崩溃时可能丢最后几条 —— 对用量统计可接受，明确记录此取舍。
+
+**注意**：Node 版当前是 `appendFileSync` 同步写，且代码注释说明是为了让测试能
+立即读取。Rust 版改为 channel 后，测试必须用 `flush()` 而非等待，这个差异要写进
+测试规范。
+
+### 6.6 旧数据迁移（已决策）
+
+现有生产 `usage.jsonl`（2178 行）**迁移**：一次性导入脚本，旧行缺的新字段
+（`reqId` / `wire` / `durationMs` 等）填默认值。反正 schema 要扩字段，顺手补齐
+比丢弃重开更省事。
 
 ---
 
