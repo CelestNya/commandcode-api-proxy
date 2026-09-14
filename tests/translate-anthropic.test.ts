@@ -381,16 +381,17 @@ describe("AnthropicStreamEncoder", () => {
 
   // Retryability contract: the downstream client's classifier treats an
   // in-band anthropic error as retryable ONLY when error.type is
-  // "overloaded_error" (hardcoded isRetryable:true + 529). Any other type
-  // forfeits its entire retry budget — the unattended-stability regression
-  // of 2026-09-14. The message keeps the real root cause.
+  // "overloaded_error" (hardcoded isRetryable:true + 529); api_error forfeits
+  // the entire retry budget — the unattended-stability regression of
+  // 2026-09-14. The real origin is preserved as a message tag instead.
   it("in-band error uses the retryable overloaded_error marker", () => {
     const encoder = new AnthropicStreamEncoder("m");
     const records = encoder.emit({ type: "error", data: { message: "Boom!" } });
     const errRecord = records.find((r) => r.event === "error");
     const err = errRecord!.data.error as { type: string; message: string };
     expect(err.type).toBe("overloaded_error");
-    expect(err.message).toBe("Boom!");
+    // Tag says where it came from; the underlying text stays intact.
+    expect(err.message).toBe("[upstream-error] Boom!");
   });
 
   it("message_start includes full usage shape", () => {

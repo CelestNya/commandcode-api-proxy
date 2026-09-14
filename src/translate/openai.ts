@@ -16,6 +16,7 @@ import type {
   UsageData,
 } from "@/translate/types.js";
 import { resolveModel, resolveEffortForModel } from "@/translate/models.js";
+import { tagStreamError } from "@/stream.js";
 import {
   applyNoToolsSafeguard,
   extractUsage,
@@ -503,11 +504,11 @@ export class OpenAIStreamEncoder {
 
   /**
    * Public wrapper around errorChunks() for stream-level errors caught by
-   * pumpStream (TCP failure, idle timeout, encoder throw). Emits a uniform
-   * content+finish chunk pair instead of an out-of-band error envelope.
+   * pumpStream (TCP failure, idle timeout, encoder throw). Tags the message
+   * with the failure's real origin so the cause stays visible.
    */
   streamErrorChunks(err: Error): object[] {
-    return this.errorChunks(err.message);
+    return this.errorChunks(tagStreamError(err));
   }
 }
 

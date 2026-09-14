@@ -13,7 +13,7 @@ import { discoverModel } from "@/translate/models.js";
 import { extractUsage } from "@/translate/util.js";
 import { recordUsage, snapshot as usageSnapshot } from "@/usage-stats.js";
 import type { CCEvent, CCRequestBody } from "@/translate/types.js";
-import { formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
+import { formatSSE, formatSSEDone, formatAnthropicSSE, tagStreamError } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
 import crypto from "node:crypto";
 import { logger } from "@/logger.js";
@@ -545,16 +545,17 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
             ? []
             : encoder.finishRecords("end_turn").map((r) => formatAnthropicSSE(r.event, r.data)),
         (err) => {
-          // type:"overloaded_error" 而非 "api_error"：ZCode 的重试分类器只把
-          // overloaded_error 判为可重试（isRetryable:true + 529），其余类型
-          // 一律 retryable:false。流级错误（idle 超时/TCP 断连）是瞬态故障，
-          // 必须交给下游的 11 次重试额度恢复，message 保留根因供排查。
+          // 统一发 overloaded_error：这是下游分类器唯一写死为可重试的
+          // in-band 类型（isRetryable: type==="overloaded_error"）；其他类型
+          // 一律 retryable:false，会把下游整份重试额度作废。流级错误
+          // （idle 超时/TCP 断连）都是瞬态，收尾已完成、重试由下游整轮重发，
+          // 不会造成内容重复。真实来源经 tagStreamError 标在 message 前缀。
           const records: AnthropicSSERecord[] = [
             {
               event: "error",
               data: {
                 type: "error",
-                error: { type: "overloaded_error", message: err.message },
+                error: { type: "overloaded_error", message: tagStreamError(err) },
               },
             },
           ];

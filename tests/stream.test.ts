@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCCLine, formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
+import { parseCCLine, formatSSE, formatSSEDone, formatAnthropicSSE, tagStreamError } from "@/stream.js";
 
 describe("parseCCLine", () => {
   it("parses a CC event with data: prefix", () => {
@@ -102,5 +102,42 @@ describe("formatAnthropicSSE", () => {
     expect(result).toContain("event: content_block_delta");
     const parsed = JSON.parse(result.split("data: ")[1].trimEnd());
     expect(parsed.delta.text).toBe("Hello");
+  });
+});
+
+// Every mid-stream failure goes out as `overloaded_error` — the only in-band
+// type the downstream classifier hardcodes as retryable. The message tag is
+// therefore the sole remaining signal of what actually broke, so its mapping
+// is part of the contract, not cosmetic.
+describe("tagStreamError", () => {
+  it("labels an idle timeout", () => {
+    const err = new Error("CC upstream idle timeout: no data for 120000ms");
+    err.name = "IdleTimeoutError";
+    expect(tagStreamError(err)).toMatch(/^\[idle-timeout\]/);
+    expect(tagStreamError(err)).toContain("no data for 120000ms");
+  });
+
+  it("labels an undici connection reset (terminated with code)", () => {
+    const err = new Error("terminated") as NodeJS.ErrnoException;
+    err.code = "UND_ERR_SOCKET";
+    expect(tagStreamError(err)).toMatch(/^\[connection-reset\]/);
+  });
+
+  it("labels a bare 'terminated' with no code", () => {
+    expect(tagStreamError(new Error("terminated"))).toMatch(/^\[connection-reset\]/);
+  });
+
+  it("labels inconsistent upstream tool data", () => {
+    expect(tagStreamError(new Error("Inconsistent upstream tool arguments"))).toMatch(
+      /^\[bad-upstream-data\]/,
+    );
+  });
+
+  it("labels a client-initiated disconnect", () => {
+    expect(tagStreamError(new Error("Client disconnected"))).toMatch(/^\[client-gone\]/);
+  });
+
+  it("falls back to a generic tag", () => {
+    expect(tagStreamError(new Error("something else"))).toBe("[stream-error] something else");
   });
 });

@@ -67,3 +67,24 @@ export function formatAnthropicSSE(eventType: string, data: unknown): string {
   }
   return `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
+
+/**
+ * Tag a mid-stream failure with its real origin.
+ *
+ * Every mid-stream failure is reported to the downstream as
+ * `overloaded_error` because that is the only in-band error type its
+ * classifier hardcodes as retryable; any other type forfeits the whole retry
+ * budget. Downstream classifies on the error *type*, never on the message,
+ * so tagging is free — and it keeps the true cause visible in logs and in the
+ * UI's error detail, which the type alone no longer conveys.
+ */
+export function tagStreamError(err: Error): string {
+  if (err.name === "IdleTimeoutError") return `[idle-timeout] ${err.message}`;
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code === "UND_ERR_SOCKET" || /terminated|socket hang up/i.test(err.message)) {
+    return `[connection-reset] ${err.message}`;
+  }
+  if (/inconsistent/i.test(err.message)) return `[bad-upstream-data] ${err.message}`;
+  if (/client disconnected/i.test(err.message)) return `[client-gone] ${err.message}`;
+  return `[stream-error] ${err.message}`;
+}
