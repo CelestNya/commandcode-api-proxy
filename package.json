@@ -1,21 +1,20 @@
 {
   "name": "commandcode-api-proxy",
   "version": "0.4.2",
-  "description": "OpenAI-compatible API proxy for Command Code. Use your Command Code subscription from any OpenAI client.",
+  "description": "Personal build: OpenAI/Anthropic-compatible proxy for Command Code, with passthrough auth and a Windows tray.",
   "keywords": [
     "ai-proxy",
     "claude-code",
     "command-code",
     "commandcode",
     "llm",
-    "openai-proxy",
-    "opencode"
+    "openai-proxy"
   ],
-  "homepage": "https://github.com/thaolaptrinh/commandcode-api-proxy",
+  "homepage": "https://github.com/CelestNya/commandcode-api-proxy",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thaolaptrinh/commandcode-api-proxy.git"
+    "url": "git+https://github.com/CelestNya/commandcode-api-proxy.git"
   },
   "bin": {
     "commandcode-api-proxy": "./dist/proxy.js"
@@ -37,8 +36,8 @@
     "lint": "vp lint",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
-    "auth": "tsx src/proxy.ts auth",
     "check": "vp check",
+    "release:tray": "tray\\build.cmd",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {

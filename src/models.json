@@ -229,21 +229,5 @@
     "zai-org/GLM-5.2": ["high", "max"],
     "xai/grok-4.6": ["low", "medium", "high"],
     "xai/grok-4.5": ["low", "medium", "high"]
-  },
-  "maxOutputTokens": {
-    "deepseek/deepseek-v4-pro": 393216,
-    "deepseek/deepseek-v4-flash": 393216,
-    "MiniMaxAI/MiniMax-M2.7": 32768,
-    "MiniMaxAI/MiniMax-M2.5": 32768,
-    "zai-org/GLM-5.1": 131072,
-    "zai-org/GLM-5": 131072,
-    "moonshotai/Kimi-K2.6": 98304,
-    "moonshotai/Kimi-K2.5": 98304,
-    "Qwen/Qwen3.6-Max-Preview": 65536,
-    "Qwen/Qwen3.6-Plus": 65536,
-    "stepfun/Step-3.5-Flash": 65536,
-    "xiaomi/mimo-v2.5": 131072,
-    "Qwen/Qwen3.7-Max": 65536,
-    "Qwen/Qwen3.7-Plus": 65536
   }
 }

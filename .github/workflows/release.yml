@@ -1,16 +1,22 @@
 name: Release
 
+# Personal fork: this never publishes to npm. The package name is shared with
+# the upstream project, so an accidental `pnpm publish` would be an outward
+# facing mistake. Releases here are GitHub-only.
+#
+# The Windows tray zip is built locally (tray\build.cmd needs a Windows host and
+# the C# compiler) and attached to the release by hand.
+
 on:
   push:
     tags:
       - "v*"
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: read
 
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +27,6 @@ jobs:
         with:
           node-version: 24
           cache: "pnpm"
-          registry-url: "https://registry.npmjs.org"
 
       - run: pnpm install --frozen-lockfile
 
@@ -31,13 +36,11 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Publish to npm
-        continue-on-error: true
-        run: pnpm publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body: |
+            Personal build. Source-only release — the Windows tray package
+            (`CCProxy-<version>-win-x64.zip`) is built locally with
+            `pnpm release:tray` and attached manually.

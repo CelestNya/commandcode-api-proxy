@@ -1,12 +1,93 @@
 <a href="#"><img src="./.github/assets/banner.webp" alt="Banner"></a>
 
-# Command Code API Proxy
+# Command Code API Proxy — Personal Build
 
-[![npm version](https://img.shields.io/npm/v/commandcode-api-proxy)](https://www.npmjs.com/package/commandcode-api-proxy)
-[![downloads/month](https://img.shields.io/npm/dm/commandcode-api-proxy)](https://www.npmjs.com/package/commandcode-api-proxy)
+个人版 fork，基于 [thaolaptrinh/commandcode-api-proxy](https://github.com/thaolaptrinh/commandcode-api-proxy)。
 
-**OpenAI-compatible API proxy for [Command Code](https://commandcode.ai).**
-Use your Command Code subscription from **any** OpenAI-compatible client — OpenCode, Claude Code, or plain `curl`.
+**把 [Command Code](https://commandcode.ai) 的订阅协议翻译成标准 OpenAI / Anthropic 接口。**
+供本机 OpenCode、Claude Code、ZCode 或任意标准客户端使用。
+
+与原版的关键差异：
+
+- **API key 纯透传** —— 代理不存储、不管理 key。客户端每次请求带自己的 `Authorization`，
+  代理原样转发给上游。没有 `auth login`、没有 `auth.json`、没有首启提示。
+- **Windows 托盘 + 热更新** —— 绿色单目录、内嵌 node、双击即用，新版可自动接管旧版。
+- **零运行时依赖** —— 只用 node 内建模块。
+
+> 原版面向 npm 公开发布（含 key 托管与 `--setup-*` 引导）。本项目只服务本机，
+> 那些功能已被移除，README 不再记录。
+
+## Why?
+
+Command Code exposes two API surfaces:
+
+| Surface                         | Protocol                      | Plan required                   |
+| ------------------------------- | ----------------------------- | ------------------------------- |
+| `/provider/v1/chat/completions` | OpenAI-compatible             | **Provider** tier (paid add-on) |
+| `/alpha/generate`               | Custom (Vercel AI SDK stream) | Your standard subscription      |
+
+This proxy talks `/alpha/generate` upstream and standard OpenAI/Anthropic downstream — so your existing plan works from any tool.
+
+## Run the proxy
+
+```bash
+git clone https://github.com/CelestNya/commandcode-api-proxy.git
+cd commandcode-api-proxy
+pnpm install
+pnpm build && pnpm start
+```
+
+需要 Node.js >= 24。Windows 上推荐直接双击托盘包（见 [Windows tray & hot-swap](#windows-tray--hot-swap)），
+无需自行安装 Node。
+
+## Authentication
+
+**纯透传**：请求头里带什么 key，就原样转发给上游。代理自身不读取、不保存、不校验 key。
+
+```bash
+# OpenAI 格式
+curl http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer <你的 CC key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hi"}]}'
+
+# Anthropic 格式
+curl http://127.0.0.1:8787/v1/messages \
+  -H "x-api-key: <你的 CC key>" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+```
+
+不带 key 的请求直接得到 `401`，不会向上游发出。`Authorization: Bearer <key>` 与
+`x-api-key: <key>` 两种写法都接受。
+
+## CLI options
+
+| Option   | Description  | Default     |
+| -------- | ------------ | ----------- |
+| `--host` | Bind address | `127.0.0.1` |
+| `--port` | Port         | `8787`      |
+
+Equivalent env vars (lower priority than CLI flags):
+
+| Env var                  | Description                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `HOST`                   | Bind address                                                                                                            |
+| `PORT`                   | Port                                                                                                                    |
+| `CC_API_BASE`            | Upstream API base URL                                                                                                   |
+| `CC_CLI_VERSION`         | CLI version sent upstream                                                                                               |
+| `CC_UPSTREAM_TIMEOUT_MS` | Max ms for upstream to return response headers + first byte (default `600000` / 10 min). Bump for slow reasoning models |
+| `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams           |
+| `CC_MAX_BODY_BYTES`      | Max request body size (default `10485760` / 10 MiB, capped at 50 MiB). Raise for large vision/PDF payloads.             |
+| `CC_NO_TOOLS_GUARD`      | Set to `off` to disable the injected "tools are disabled" instruction for tool-less chat requests.                       |
+| `CC_PROXY`               | Tray only: `off` forces a direct connection, `<url>` overrides the auto-detected system proxy.                          |
+| `LOG_LEVEL`              | Log level (`debug`, `info`, `warn`, `error`)                                                                            |
+| `CORS_ORIGIN`            | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
+
+> **Security:** the proxy forwards the client's Command Code key upstream, so it is
+> designed for **localhost** use (`HOST=127.0.0.1`). Do not bind it to `0.0.0.0` on an
+> untrusted network without restricting `CORS_ORIGIN` and putting your own auth in front.
 
 ## Why?
 
@@ -22,54 +103,43 @@ This proxy talks `/alpha/generate` upstream and standard OpenAI downstream — s
 ## Run the proxy
 
 ```bash
-# Clone & run from source
-git clone https://github.com/thaolaptrinh/commandcode-api-proxy.git
+git clone https://github.com/CelestNya/commandcode-api-proxy.git
 cd commandcode-api-proxy
-npm install
-npm run build && npm start
-
-# Or run directly (no install)
-npx commandcode-api-proxy
-
-# Or install globally
-npm install -g commandcode-api-proxy
-commandcode-api-proxy
+pnpm install
+pnpm build && pnpm start
 ```
 
-On first run, the proxy prompts for your Command Code API key (get it from
-https://commandcode.ai/settings). Other ways to provide it are in
-[Authentication](#authentication).
+需要 Node.js >= 24。Windows 上推荐直接双击托盘包（见 [Windows tray & hot-swap](#windows-tray--hot-swap)），
+无需自行安装 Node。
 
 ## Authentication
 
-Provide your API key via `--api-key`, the `CC_API_KEY` env var, or save it
-with `auth login` (stored at `~/.config/commandcode-api-proxy/auth.json`).
-
-### CLI auth commands
-
-> From source, replace `commandcode-api-proxy` with `npm run auth --`
-> (e.g. `npm run auth -- login`).
+**纯透传**：请求头里带什么 key，就原样转发给上游。代理自身不读取、不保存、不校验 key。
 
 ```bash
-# Save a new API key
-commandcode-api-proxy auth login
+# OpenAI 格式
+curl http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer <你的 CC key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hi"}]}'
 
-# Overwrite existing key
-commandcode-api-proxy auth login --force
-
-# Remove saved key
-commandcode-api-proxy auth logout
+# Anthropic 格式
+curl http://127.0.0.1:8787/v1/messages \
+  -H "x-api-key: <你的 CC key>" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
 ```
+
+不带 key 的请求直接得到 `401`，不会向上游发出。`Authorization: Bearer <key>` 与
+`x-api-key: <key>` 两种写法都接受。
 
 ## CLI options
 
-| Option                | Description                       | Default     |
-| --------------------- | --------------------------------- | ----------- |
-| `--host`              | Bind address                      | `127.0.0.1` |
-| `--port`              | Port                              | `8787`      |
-| `--api-key`           | Command Code API key              | —           |
-| `--setup-opencode`    | Generate OpenCode provider config | —           |
-| `--setup-claude-code` | Generate Claude Code model config | —           |
+| Option   | Description  | Default     |
+| -------- | ------------ | ----------- |
+| `--host` | Bind address | `127.0.0.1` |
+| `--port` | Port         | `8787`      |
 
 Equivalent env vars (lower priority than CLI flags):
 
@@ -77,21 +147,19 @@ Equivalent env vars (lower priority than CLI flags):
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
 | `HOST`                   | Bind address                                                                                                            |
 | `PORT`                   | Port                                                                                                                    |
-| `CC_API_KEY`             | Command Code API key                                                                                                    |
 | `CC_API_BASE`            | Upstream API base URL                                                                                                   |
 | `CC_CLI_VERSION`         | CLI version sent upstream                                                                                               |
 | `CC_UPSTREAM_TIMEOUT_MS` | Max ms for upstream to return response headers + first byte (default `600000` / 10 min). Bump for slow reasoning models |
 | `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams           |
 | `CC_MAX_BODY_BYTES`      | Max request body size (default `10485760` / 10 MiB, capped at 50 MiB). Raise for large vision/PDF payloads.             |
 | `CC_NO_TOOLS_GUARD`      | Set to `off` to disable the injected "tools are disabled" instruction for tool-less chat requests.                       |
-| `LOG_LEVEL`              | Log level (`info`, `debug`, etc.)                                                                                       |
+| `CC_PROXY`               | Tray only: `off` forces a direct connection, `<url>` overrides the auto-detected system proxy.                          |
+| `LOG_LEVEL`              | Log level (`debug`, `info`, `warn`, `error`)                                                                            |
 | `CORS_ORIGIN`            | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
 
-> **Security:** the proxy forwards your paid Command Code key upstream and
-> accepts any auth token from clients (`proxy-managed`), so it is designed for
-> **localhost** use (`HOST=127.0.0.1`). Do not bind it to `0.0.0.0` on an
-> untrusted network without restricting `CORS_ORIGIN` and putting your own auth
-> in front.
+> **Security:** the proxy forwards the client's Command Code key upstream, so it is
+> designed for **localhost** use (`HOST=127.0.0.1`). Do not bind it to `0.0.0.0` on an
+> untrusted network without restricting `CORS_ORIGIN` and putting your own auth in front.
 
 ## Endpoints
 
@@ -103,23 +171,15 @@ Equivalent env vars (lower priority than CLI flags):
 | `POST /v1/messages`              | Anthropic |
 | `POST /v1/messages/count_tokens` | Anthropic |
 
-All endpoints accept any auth token (use `proxy-managed`) — the proxy injects
-your real Command Code key upstream.
+每个端点都要求请求头带 key（透传给上游）；缺失则本地 `401`。
 
 ## Client configuration
 
 ### OpenCode
 
-Run setup to auto-generate the provider config at `~/.config/opencode/opencode.json`:
-
-```bash
-npx commandcode-api-proxy --setup-opencode
-```
-
-All CC models are listed directly — pick the one you want from the model selector.
-
-Or add a `commandcode` provider manually — point `baseURL` at the proxy and
-use any model ID from the [Model aliases](#model-aliases) table:
+Point a `commandcode` provider at the proxy and use any model ID from the
+[Model aliases](#model-aliases) table. The `apiKey` here is placeholdered —
+put your real Command Code key in it (or override via OpenCode's auth store):
 
 ```json
 {
@@ -130,7 +190,7 @@ use any model ID from the [Model aliases](#model-aliases) table:
       "name": "Command Code",
       "options": {
         "baseURL": "http://127.0.0.1:8787/v1",
-        "apiKey": "proxy-managed"
+        "apiKey": "<你的 CC key>"
       },
       "models": {
         "deepseek-v4-pro": { "name": "DeepSeek V4 Pro" }
@@ -142,35 +202,21 @@ use any model ID from the [Model aliases](#model-aliases) table:
 
 ### Claude Code
 
-Claude Code only offers three tiers — `sonnet`, `opus`, `haiku`. The setup
-maps each tier to a Command Code model via env vars in `claude-settings.json`:
+Claude Code only offers three tiers — `sonnet`, `opus`, `haiku` — and sends
+`claude-*` model IDs. The proxy maps every `claude-*` request to one CC model,
+chosen by `ANTHROPIC_DEFAULT_MODEL` (or the first entry of the catalog when
+unset), so all three tiers land on a model that actually works:
 
 ```bash
-npx commandcode-api-proxy --setup-claude-code
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+export ANTHROPIC_AUTH_TOKEN=<你的 CC key>
+export ANTHROPIC_DEFAULT_MODEL=deepseek/deepseek-v4-pro
+claude
 ```
 
-If a settings file already exists, re-run with `--force` to overwrite it.
-
-| Claude Code tier | Env var                          | Maps to                      |
-| ---------------- | -------------------------------- | ---------------------------- |
-| `sonnet`         | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `deepseek/deepseek-v4-pro`   |
-| `opus`           | `ANTHROPIC_DEFAULT_OPUS_MODEL`   | `deepseek/deepseek-v4-pro`   |
-| `haiku`          | `ANTHROPIC_DEFAULT_HAIKU_MODEL`  | `deepseek/deepseek-v4-flash` |
-
-Edit those env vars in the settings file to point at other CC models. To force
-every `claude-*` request to a single model regardless of tier, set
-`ANTHROPIC_DEFAULT_MODEL`. Then run:
-
-```bash
-claude --settings ~/.config/commandcode-api-proxy/claude-settings.json
-```
-
-Or set an alias:
-
-```bash
-alias claude-proxy="claude --settings ~/.config/commandcode-api-proxy/claude-settings.json"
-claude-proxy
-```
+> `ANTHROPIC_DEFAULT_MODEL` is read by **the proxy**, not by Claude Code — it
+> decides which CC model a `claude-*` ID resolves to. An alias from the table
+> below works too (`deepseek-v4-pro`).
 
 ## Model aliases
 
@@ -178,34 +224,57 @@ Short names work in addition to full model IDs:
 
 | Alias                                            | Maps to                               |
 | ------------------------------------------------ | ------------------------------------- |
-| `deepseek-v4-pro`, `deepseek-v4`, `deepseek-pro` | `deepseek/deepseek-v4-pro`            |
-| `deepseek-v4-flash`, `deepseek-flash`            | `deepseek/deepseek-v4-flash`          |
-| `glm-5.2`, `glm5.2`                              | `zai-org/GLM-5.2`                     |
-| `glm-5.2-fast`, `glm5.2-fast`                    | `zai-org/GLM-5.2-Fast`                |
-| `glm-5.1`                                        | `zai-org/GLM-5.1`                     |
-| `glm-5`                                          | `zai-org/GLM-5`                       |
-| `minimax-m3`, `minimax3`                         | `MiniMaxAI/MiniMax-M3`                |
-| `minimax-m2.7`, `minimax2.7`                     | `MiniMaxAI/MiniMax-M2.7`              |
-| `minimax-m2.5`, `minimax2.5`                     | `MiniMaxAI/MiniMax-M2.5`              |
-| `kimi-k3`, `kimi3`                               | `moonshotai/Kimi-K3`                  |
-| `kimi-k2.7-code`, `kimi-code`                    | `moonshotai/Kimi-K2.7-Code`           |
-| `kimi-k2.7-highspeed`, `kimi-highspeed`          | `moonshotai/Kimi-K2.7-Code-Highspeed` |
-| `kimi-k2.6`, `kimi2.6`                           | `moonshotai/Kimi-K2.6`                |
-| `kimi-k2.5`, `kimi2.5`                           | `moonshotai/Kimi-K2.5`                |
-| `qwen3.7-max`, `qwen-3.7-max`                    | `Qwen/Qwen3.7-Max`                    |
-| `qwen3.7-plus`, `qwen-3.7-plus`                  | `Qwen/Qwen3.7-Plus`                   |
-| `qwen3.6-max`, `qwen-3.6-max`                    | `Qwen/Qwen3.6-Max-Preview`            |
-| `qwen3.6-plus`, `qwen-3.6-plus`                  | `Qwen/Qwen3.6-Plus`                   |
-| `step-3.7-flash`, `step3.7`                      | `stepfun/Step-3.7-Flash`              |
-| `step3.5`, `step-3.5-flash`                      | `stepfun/Step-3.5-Flash`              |
-| `mimo-v2.5-pro`, `mimo-pro`                      | `xiaomi/mimo-v2.5-pro`                |
-| `mimo-v2.5`, `mimo2.5`                           | `xiaomi/mimo-v2.5`                    |
-| `grok-4.5`, `grok4.5`                            | `xai/grok-4.5`                        |
-| `nemotron`, `nemotron-3-ultra`                   | `nvidia/nemotron-3-ultra-550b-a55b`   |
-| `inkling`                                        | `thinkingmachines/inkling`            |
-| `hy3`                                            | `tencent/Hy3`                         |
+| `deepseek-v4-pro`, `deepseek-v4`, `deepseek-pro` | `deepseek/deepseek-v4-pro` |
+| `deepseek-v4-flash`, `deepseek-flash` | `deepseek/deepseek-v4-flash` |
+| `deepseek-v4-flash-vision`, `deepseek-vision` | `deepseek/deepseek-v4-flash-vision-exp` |
+| `glm-5.3`, `glm5.3` | `zai-org/GLM-5.3` |
+| `glm-5.3-flash`, `glm5.3-flash` | `z-ai/glm-5.3-flash` |
+| `glm-5.2`, `glm5.2` | `zai-org/GLM-5.2` |
+| `glm-5.2-fast`, `glm5.2-fast` | `zai-org/GLM-5.2-Fast` |
+| `glm-5.1` | `zai-org/GLM-5.1` |
+| `glm-5` | `zai-org/GLM-5` |
+| `minimax-m3`, `minimax3` | `MiniMaxAI/MiniMax-M3` |
+| `minimax-m3-free` | `minimax/minimax-m3-free` |
+| `minimax-m2.7`, `minimax2.7` | `MiniMaxAI/MiniMax-M2.7` |
+| `minimax-m2.7-free` | `minimax/minimax-m2.7-free` |
+| `minimax-m2.5`, `minimax2.5` | `MiniMaxAI/MiniMax-M2.5` |
+| `kimi-k3`, `kimi3` | `moonshotai/Kimi-K3` |
+| `kimi-k2.7-code`, `kimi2.7-code`, `kimi-code` | `moonshotai/Kimi-K2.7-Code` |
+| `kimi-k2.7-highspeed`, `kimi-highspeed` | `moonshotai/Kimi-K2.7-Code-Highspeed` |
+| `kimi-k2.6`, `kimi2.6` | `moonshotai/Kimi-K2.6` |
+| `kimi-k2.5`, `kimi2.5` | `moonshotai/Kimi-K2.5` |
+| `qwen3.8-max`, `qwen-3.8-max` | `Qwen/Qwen3.8-Max` |
+| `qwen3.8-flash`, `qwen-3.8-flash` | `Qwen/Qwen3.8-Flash` |
+| `qwen3.8-27b`, `qwen-3.8-27b` | `Qwen/Qwen3.8-27B` |
+| `qwen3.7-max`, `qwen-3.7-max` | `Qwen/Qwen3.7-Max` |
+| `qwen3.7-plus`, `qwen-3.7-plus` | `Qwen/Qwen3.7-Plus` |
+| `qwen3.7-flash`, `qwen-3.7-flash` | `Qwen/Qwen3.7-Flash` |
+| `qwen3.6-max`, `qwen-3.6-max` | `Qwen/Qwen3.6-Max-Preview` |
+| `qwen3.6-plus`, `qwen-3.6-plus` | `Qwen/Qwen3.6-Plus` |
+| `step-3.7-flash`, `step3.7` | `stepfun/Step-3.7-Flash` |
+| `step-3.5-flash`, `step3.5` | `stepfun/Step-3.5-Flash` |
+| `mimo-v2.5-pro`, `mimo-pro` | `xiaomi/mimo-v2.5-pro` |
+| `mimo-v2.5`, `mimo2.5` | `xiaomi/mimo-v2.5` |
+| `grok-4.6`, `grok4.6` | `xai/grok-4.6` |
+| `grok-4.5`, `grok4.5` | `xai/grok-4.5` |
+| `nemotron`, `nemotron-3-ultra` | `nvidia/nemotron-3-ultra-550b-a55b` |
+| `inkling` | `thinkingmachines/inkling` |
+| `inkling-small` | `thinkingmachines/inkling-small` |
+| `hy4`, `hy4-preview` | `tencent/hy4-preview` |
+| `hy3` | `tencent/Hy3` |
+| `muse-spark`, `muse-spark-1.2` | `meta/muse-spark-1.2` |
+| `muse-spark-contributor` | `meta/muse-spark-1.2-contributor` |
+| `muse-spark-1.1` | `meta/muse-spark-1.1` |
+| `fugu`, `fugu-ultra` | `sakana/fugu-ultra` |
+| `laguna` | `poolside/laguna-s-2.1-free` |
+
+This table is generated from `src/models.json` (`shortAliases`) — that file is the
+single source of truth.
 
 Any model ID is passed through as-is — the proxy does not validate against a fixed list.
+A bare name the catalog has not seen yet is forwarded verbatim; if CC rejects it with
+`Model/provider not recognized`, the proxy refreshes the catalog from the provider API
+and retries once with the resolved ID.
 
 ### Reasoning effort
 
