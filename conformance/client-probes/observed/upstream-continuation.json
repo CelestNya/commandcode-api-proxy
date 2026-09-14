@@ -1,0 +1,83 @@
+{
+  "note": "上游侧实测：断流后能否续写。需要真实上游与 key，故不进 golden 自动比对。",
+  "endpoint": "http://127.0.0.1:8787/v1/messages",
+  "model": "deepseek/deepseek-v4-flash",
+  "results": [
+    {
+      "label": "visibility",
+      "status": 200,
+      "stopReason": "end_turn",
+      "ms": 2257,
+      "blocks": [
+        "XK-4471"
+      ],
+      "text": "XK-4471"
+    },
+    {
+      "label": "prefill-numbers",
+      "status": 200,
+      "stopReason": "end_turn",
+      "ms": 2190,
+      "blocks": [
+        "[thinking ]",
+        "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40"
+      ],
+      "text": "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40"
+    },
+    {
+      "label": "prefill-phrase",
+      "status": 200,
+      "stopReason": "end_turn",
+      "ms": 1961,
+      "blocks": [
+        "[thinking ]",
+        "ALPHA BETA GAMMA DELTA EPSILON ZETA"
+      ],
+      "text": "ALPHA BETA GAMMA DELTA EPSILON ZETA"
+    },
+    {
+      "label": "instruct-continue",
+      "status": 200,
+      "stopReason": "end_turn",
+      "ms": 2506,
+      "blocks": [
+        "[thinking ]",
+        "6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40"
+      ],
+      "text": "6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40"
+    },
+    {
+      "label": "empty-tooluse-retry",
+      "status": 200,
+      "stopReason": "tool_use",
+      "ms": 1921,
+      "blocks": [
+        "[thinking ]",
+        "[tool_use get_time]"
+      ],
+      "text": ""
+    },
+    {
+      "label": "empty-tooluse-rejected",
+      "status": 200,
+      "stopReason": "tool_use",
+      "ms": 1823,
+      "blocks": [
+        "[thinking ]",
+        "[tool_use get_time]"
+      ],
+      "text": ""
+    },
+    {
+      "label": "complete-tool-ok",
+      "status": 200,
+      "stopReason": "end_turn",
+      "ms": 1549,
+      "blocks": [
+        "[thinking ]",
+        "It's 09:00 (9:00 AM) JST in Tokyo on September 14, 2026."
+      ],
+      "text": "It's 09:00 (9:00 AM) JST in Tokyo on September 14, 2026."
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "note": "客户端侧实测；与 golden/ 的代理侧记录互补",
+  "results": [
+    {
+      "dialect": "openai",
+      "label": "openai/error-after-content",
+      "streamedText": "Here is the beginning of the answer",
+      "finish": "error",
+      "errorPart": true,
+      "kept": [
+        {
+          "role": "assistant",
+          "content": "[{\"type\":\"text\",\"text\":\"Here is the beginning of the answer\"}]"
+        }
+      ],
+      "threw": null
+    },
+    {
+      "dialect": "anthropic",
+      "label": "anthropic/error-after-content",
+      "streamedText": "Here is the beginning of the answer",
+      "finalStop": null,
+      "finalBlocks": null,
+      "currentBlocks": [
+        {
+          "type": "text",
+          "text": "Here is the beginning of the answer"
+        }
+      ],
+      "kept": [
+        {
+          "type": "text",
+          "text": "Here is the beginning of the answer"
+        }
+      ],
+      "iterError": "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"[upstream-error] idle timeout\"}}",
+      "finalError": "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"[upstream-error] idle timeout\"}}",
+      "finalText": "THREW APIError: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"[upstream-error] idle timeout\"}}"
+    },
+    {
+      "dialect": "openai",
+      "label": "openai/truncated-as-stop",
+      "streamedText": "Here is the beginning of the answer",
+      "finish": "stop",
+      "errorPart": false,
+      "kept": [
+        {
+          "role": "assistant",
+          "content": "[{\"type\":\"text\",\"text\":\"Here is the beginning of the answer\"}]"
+        }
+      ],
+      "threw": null
+    },
+    {
+      "dialect": "anthropic",
+      "label": "anthropic/truncated-as-max-tokens",
+      "streamedText": "Here is the beginning of the answer",
+      "finalStop": "max_tokens",
+      "finalBlocks": [
+        {
+          "type": "text",
+          "text": "Here is the beginning of the answer"
+        }
+      ],
+      "currentBlocks": null,
+      "kept": [
+        {
+          "type": "text",
+          "text": "Here is the beginning of the answer"
+        }
+      ],
+      "iterError": null,
+      "finalError": null,
+      "finalText": "Here is the beginning of the answer"
+    },
+    {
+      "dialect": "anthropic",
+      "label": "anthropic/tool-use-truncated-clean-stop",
+      "streamedText": "{\"cmd\":\"rm -rf /tmp/x",
+      "finalStop": "max_tokens",
+      "finalBlocks": [
+        {
+          "type": "tool_use",
+          "name": "run_shell",
+          "input": {}
+        }
+      ],
+      "currentBlocks": null,
+      "kept": [
+        {
+          "type": "tool_use",
+          "name": "run_shell",
+          "input": {}
+        }
+      ],
+      "iterError": null,
+      "finalError": null,
+      "finalText": "THREW AnthropicError: stream ended without producing a content block with type=text"
+    },
+    {
+      "dialect": "anthropic",
+      "label": "anthropic/tool-use-truncated-error",
+      "streamedText": "{\"cmd\":\"rm -rf /tmp/x",
+      "finalStop": null,
+      "finalBlocks": null,
+      "currentBlocks": [
+        {
+          "type": "tool_use",
+          "name": "run_shell",
+          "input": {}
+        }
+      ],
+      "kept": [
+        {
+          "type": "tool_use",
+          "name": "run_shell",
+          "input": {}
+        }
+      ],
+      "iterError": "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"[upstream-error] idle timeout\"}}",
+      "finalError": "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"[upstream-error] idle timeout\"}}",
+      "finalText": "THREW APIError: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"[upstream-error] idle timeout\"}}"
+    },
+    {
+      "dialect": "anthropic",
+      "label": "anthropic/empty-no-blocks",
+      "streamedText": "",
+      "finalStop": "end_turn",
+      "finalBlocks": [],
+      "currentBlocks": null,
+      "kept": [],
+      "iterError": null,
+      "finalError": null,
+      "finalText": "THREW AnthropicError: stream ended without producing a content block with type=text"
+    },
+    {
+      "dialect": "anthropic",
+      "label": "anthropic/empty-text-block",
+      "streamedText": "",
+      "finalStop": "end_turn",
+      "finalBlocks": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ],
+      "currentBlocks": null,
+      "kept": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ],
+      "iterError": null,
+      "finalError": null,
+      "finalText": ""
+    }
+  ]
+}

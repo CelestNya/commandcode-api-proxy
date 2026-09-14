@@ -40,9 +40,13 @@
     "release:tray": "tray\\build.cmd",
     "conformance:record": "node conformance/record.mjs && node conformance/record-translate.mjs",
     "conformance:check": "node conformance/record.mjs --check && node conformance/record-translate.mjs --check",
+    "conformance:probe": "node conformance/client-probes/partial-context.mjs",
+    "conformance:probe:upstream": "node conformance/client-probes/upstream-continuation.mjs",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {
+    "@ai-sdk/openai-compatible": "^1.0.54",
+    "@anthropic-ai/sdk": "^0.125.0",
     "@types/node": "^24.0.0",
     "ai": "^5.0.206",
     "tsc-alias": "^1.8.17",

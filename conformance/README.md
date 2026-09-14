@@ -25,6 +25,10 @@ conformance/
 ├── record-translate.mjs     pure-function samples, writes golden/translate.json
 ├── scenarios/
 │   └── upstream-scenarios.json   the scripted upstream event sequences
+├── client-probes/           what the *client* does with what we send (not diffed)
+│   ├── partial-context.mjs      does a broken stream lose the text already sent?
+│   ├── upstream-continuation.mjs can a truncated turn be resumed?
+│   └── observed/                probe output, checked in as evidence
 └── golden/
     ├── behaviour.json       67 samples: streaming, failures, surface, validation, aliases
     └── translate.json       39 samples: request translation + model resolution
@@ -46,6 +50,34 @@ Each `stream`/`failure` case also records **the upstream request** the proxy
 made — method, path, headers and body. CC rejects requests that don't look like
 the official CLI, so the header set (including the CLI-identifying ones) is part
 of the contract, not an implementation detail.
+
+## `client-probes/` — the other half of the contract
+
+`golden/` records what the proxy **sends**. These probes record what a real
+client SDK **does** with it, which is where several non-obvious behaviours live
+and where two claims in the spec turned out to be wrong.
+
+They need the real client SDKs (`@anthropic-ai/sdk`, `ai` +
+`@ai-sdk/openai-compatible`) and are **not** part of `conformance:check` —
+`upstream-continuation.mjs` additionally needs a live upstream and a key. Run
+them by hand when changing anything about how a stream ends:
+
+```bash
+node conformance/client-probes/partial-context.mjs        # offline, fake upstream
+node conformance/client-probes/upstream-continuation.mjs  # needs the real proxy up
+```
+
+Findings worth keeping (full detail in `RUST-REWRITE-SPEC.md` §2.5 and §8.7):
+
+- **A broken stream does not lose the text already sent.** Both SDKs keep the
+  partial text in the message they hand back, so a mid-stream failure is a
+  *truncation*, not a *discard*.
+- **A truncated tool call becomes an empty-argument tool call.** The partial
+  JSON is dropped and `input` ends up `{}` — the one case where "just truncate
+  it" is dangerous.
+- **CC does not implement Anthropic's prefill.** Ending a request with an
+  `assistant` message makes the model rewrite from the start, not continue.
+  Telling it "continue from where you stopped" in a user message does work.
 
 ## Running it
 

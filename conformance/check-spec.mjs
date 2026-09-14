@@ -99,8 +99,8 @@ const afterContent = streamRecords("stream/openai/error-after-content");
 expect("error then [DONE]", afterContent.map((r) => (r.data === "<DONE>" ? "<DONE>" : r.data?.error ? "error" : "chunk")),
   ["chunk", "chunk", "error", "<DONE>"]);
 
-// ── 2.5 streaming hard constraints ──────────────────────────────────────────
-console.log("2.5 streaming hard constraints");
+// ── 2.6 streaming hard constraints ──────────────────────────────────────────
+console.log("2.6 streaming hard constraints");
 // Every Anthropic record carries a type discriminator matching its event name.
 const anthropicStreams = golden.cases.filter((c) => c.name.startsWith("stream/anthropic/"));
 let mismatches = 0;
@@ -127,6 +127,35 @@ expect("message_stop carries its discriminator",
 console.log("3.4 timeout semantics");
 expectSpecMentions("total-duration cap is explicitly forbidden", "禁止引入生成阶段的总时长上限");
 expectSpecMentions("idle timeout is byte-interval based", "只认字节间隔");
+
+// ── 2.5 partial output survives; prefill does not ───────────────────────────
+// These two claims can't be checked against golden/ — that records what the
+// proxy *sends*, not what a client SDK does with it. They are guarded by their
+// probe output instead, so the spec can't drift away from the evidence.
+console.log("2.5/8.7 client-side findings");
+expectSpecMentions("partial text is documented as surviving", "部分输出不会丢失");
+expectSpecMentions("the empty-argument tool_use hazard is documented", "空参数工具调用");
+expectSpecMentions("prefill is documented as unsupported", "不实现 Anthropic 的");
+{
+  const probe = JSON.parse(
+    readFileSync(path.join(HERE, "client-probes", "observed", "partial-context.json"), "utf8"),
+  );
+  const byLabel = Object.fromEntries(probe.results.map((r) => [r.label, r]));
+  const keptText = (label) =>
+    (byLabel[label]?.kept ?? []).map((b) => b.text ?? "").join("");
+  expect("error envelope keeps the partial text (anthropic)",
+    keptText("anthropic/error-after-content"), "Here is the beginning of the answer");
+  expect("error envelope keeps the partial text (openai)",
+    byLabel["openai/error-after-content"]?.kept?.[0]?.content?.includes("Here is the beginning of the answer"), true);
+  expect("clean truncation keeps the same text",
+    keptText("anthropic/truncated-as-max-tokens"), "Here is the beginning of the answer");
+  // The hazard: partial tool JSON is dropped and becomes an empty-argument call.
+  const toolBlocks = byLabel["anthropic/tool-use-truncated-clean-stop"]?.kept ?? [];
+  expect("truncated tool_use survives as a block", toolBlocks[0]?.type, "tool_use");
+  expect("...with its arguments silently emptied", toolBlocks[0]?.input, {});
+  expect("empty stream yields no content blocks",
+    byLabel["anthropic/empty-no-blocks"]?.kept, []);
+}
 
 // ── 4.1 model resolution ────────────────────────────────────────────────────
 console.log("4.1 model resolution");
