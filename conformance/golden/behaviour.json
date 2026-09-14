@@ -4236,16 +4236,6 @@
             }
           },
           {
-            "event": "error",
-            "data": {
-              "error": {
-                "message": "[connection-reset] terminated",
-                "type": "overloaded_error"
-              },
-              "type": "error"
-            }
-          },
-          {
             "event": "content_block_stop",
             "data": {
               "index": 0,
@@ -4253,17 +4243,13 @@
             }
           },
           {
-            "event": "message_delta",
+            "event": "error",
             "data": {
-              "delta": {
-                "stop_reason": "end_turn",
-                "stop_sequence": null
+              "error": {
+                "message": "[connection-reset] terminated",
+                "type": "overloaded_error"
               },
-              "type": "message_delta",
-              "usage": {
-                "input_tokens": 0,
-                "output_tokens": 0
-              }
+              "type": "error"
             }
           },
           {
@@ -4366,17 +4352,11 @@
           {
             "event": "data",
             "data": {
-              "choices": [
-                {
-                  "delta": {},
-                  "finish_reason": "stop",
-                  "index": 0
-                }
-              ],
-              "created": "<epoch>",
-              "id": "<uuid>",
-              "model": "deepseek-v4-flash",
-              "object": "chat.completion.chunk"
+              "error": {
+                "code": "network_error",
+                "message": "[idle-timeout] CC upstream idle timeout: no data for 800ms",
+                "type": "upstream_error"
+              }
             }
           },
           {
@@ -4390,6 +4370,57 @@
       "name": "stream/anthropic/hang-after-start",
       "pathname": "/v1/messages",
       "upstreamRequests": [
+        {
+          "method": "POST",
+          "path": "/alpha/generate",
+          "headers": {
+            "host": "127.0.0.1:19888",
+            "content-type": "application/json",
+            "accept": "application/json, */*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-US,en;q=0.9",
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "authorization": "Bearer conformance-fixture-key",
+            "x-cli-environment": "production",
+            "x-command-code-version": "1.54.0",
+            "x-session-id": "<uuid>",
+            "x-co-flag": "false",
+            "x-taste-learning": "false",
+            "x-project-slug": "cc-proxy",
+            "traceparent": "00-<trace-id>-<span-id>-01",
+            "sec-fetch-mode": "cors",
+            "content-length": "490"
+          },
+          "body": {
+            "config": {
+              "currentBranch": "",
+              "date": "2026-09-14",
+              "environment": "linux-x64, Node.js v24.16.0",
+              "gitStatus": "",
+              "isGitRepo": false,
+              "mainBranch": "",
+              "recentCommits": [],
+              "structure": [],
+              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+            },
+            "memory": "",
+            "params": {
+              "max_tokens": 64,
+              "messages": [
+                {
+                  "content": "hello",
+                  "role": "user"
+                }
+              ],
+              "model": "deepseek/deepseek-v4-flash",
+              "stream": true
+            },
+            "permissionMode": "standard",
+            "skills": "",
+            "taste": "",
+            "threadId": "<uuid>"
+          }
+        },
         {
           "method": "POST",
           "path": "/alpha/generate",
@@ -4478,17 +4509,13 @@
             }
           },
           {
-            "event": "message_delta",
+            "event": "error",
             "data": {
-              "delta": {
-                "stop_reason": "end_turn",
-                "stop_sequence": null
+              "error": {
+                "message": "[idle-timeout] CC upstream idle timeout: no data for 800ms",
+                "type": "overloaded_error"
               },
-              "type": "message_delta",
-              "usage": {
-                "input_tokens": 0,
-                "output_tokens": 0
-              }
+              "type": "error"
             }
           },
           {

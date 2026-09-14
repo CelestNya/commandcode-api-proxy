@@ -24,6 +24,7 @@ import type {
 import { resolveAnthropicModel } from "@/translate/anthropic-models.js";
 import { resolveEffortForModel } from "@/translate/models.js";
 import { extractUsage, pruneDanglingTools, buildCCConfig } from "@/translate/util.js";
+import { tagStreamError } from "@/stream.js";
 import { logger } from "@/logger.js";
 
 // ── Constants ──
@@ -583,6 +584,41 @@ export class AnthropicStreamEncoder {
         type: "message_delta",
         delta: { stop_reason: stopReason, stop_sequence: null },
         usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    });
+    records.push({ event: "message_stop", data: { type: "message_stop" } });
+    return records;
+  }
+
+  /**
+   * 失败收尾：报告错误并终止流，**不伪造成功**。
+   *
+   * 为什么不复用 `finishRecords`：它会在 error 之前/之后补一条
+   * `message_delta(stop_reason="end_turn")`，而客户端把 `message_delta` 当作
+   * "模型正常说完"的权威信号 —— 实测（conformance/client-probes）结果是
+   * `finishReason` 变成 `"stop"`，于是"中途断流"被洗成一次成功回复。这是本项目
+   * 反复强调的最坏失败模式，不能留在自己的代码里。
+   *
+   * 协议要求 `message_start` 必须是第一条记录，所以未开始时先补一个空信封。
+   * error 之后直接 message_stop，让客户端的 finishReason 保持非 stop 的取值。
+   */
+  errorRecords(err: Error, closeBlocks = true): AnthropicSSERecord[] {
+    this.sawFinish = true;
+    const records: AnthropicSSERecord[] = [];
+    if (!this.started) {
+      records.push(this.makeMessageStart(0));
+      this.started = true;
+    }
+    // 已开的内容块必须关闭，否则客户端认为流在半途断掉（块永远不收尾）。
+    if (closeBlocks) {
+      this.closeCurrentBlock(records);
+      this.closeToolBlocks(records);
+    }
+    records.push({
+      event: "error",
+      data: {
+        type: "error",
+        error: { type: "overloaded_error", message: tagStreamError(err) },
       },
     });
     records.push({ event: "message_stop", data: { type: "message_stop" } });

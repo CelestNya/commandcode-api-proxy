@@ -106,6 +106,11 @@ const server = http.createServer(async (req, res) => {
   const events = s.ndjson ?? [];
   let written = 0;
   for (const event of events) {
+    // Hang *after* writing this many events: stop sending, but keep the
+    // response open so the proxy's idle timeout (not a clean EOF) is what
+    // observes the stall. `return` alone would end the response, which the
+    // proxy sees as a normal end-of-stream — that is how this scenario
+    // silently stopped exercising the idle path before.
     if (s.hangAfterEvents !== undefined && written >= s.hangAfterEvents) {
       return; // leave the socket open and silent — exercises the idle timeout
     }
@@ -115,6 +120,11 @@ const server = http.createServer(async (req, res) => {
       return res.socket?.destroy();
     }
     if (s.eventDelayMs) await new Promise((r) => setTimeout(r, s.eventDelayMs));
+  }
+  // Script exhausted. If the scenario asked to hang, do it now — otherwise a
+  // scenario whose `hangAfterEvents` equals its event count would end cleanly.
+  if (s.hangAfterEvents !== undefined) {
+    return; // socket stays open and silent
   }
   if (s.resetAfterMs !== undefined) {
     setTimeout(() => res.socket?.destroy(), s.resetAfterMs);

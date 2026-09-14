@@ -24,7 +24,7 @@ import {
   validateCountTokensRequest,
   ValidationError,
 } from "@/translate/validation.js";
-import type { AnthropicRequest, AnthropicSSERecord } from "@/translate/anthropic-types.js";
+import type { AnthropicRequest } from "@/translate/anthropic-types.js";
 
 // ──────────────────────────────────────────
 // Mutable server state
@@ -293,38 +293,61 @@ function writeSSE(res: http.ServerResponse, chunk: string): Promise<boolean> {
  * records to `res`. Applies client-side backpressure (pauses the upstream
  * when `res` buffers fill), and isolates encoder errors so they terminate
  * the stream cleanly instead of crashing the process.
+ *
+ * `onError` may return a replacement stream to continue with. That is how a
+ * failure which produced no client-visible output gets recovered: the proxy
+ * re-sends the request upstream and keeps pumping, so the client never learns
+ * anything went wrong. Returning an array means "report the failure".
  */
 async function pumpStream(
   stream: NodeJS.ReadableStream,
   res: http.ServerResponse,
   encode: (event: CCEvent) => string[],
   onEnd: () => string[],
-  onError: (err: Error) => string[],
+  onError: (
+    err: Error,
+    canRetry: boolean,
+  ) => string[] | { retryStream: NodeJS.ReadableStream | Promise<NodeJS.ReadableStream> },
 ): Promise<void> {
   const writable = (chunk: string): Promise<boolean> => writeSSE(res, chunk);
 
-  try {
-    for await (const event of stream) {
-      let chunks: string[];
-      try {
-        chunks = encode(event as unknown as CCEvent);
-      } catch (err) {
-        // Encoder blew up — turn it into a stream error so the catch below
-        // handles it uniformly instead of crashing the proxy.
-        (stream as Readable).destroy(err as Error);
-        throw err;
+  let current = stream;
+  // At most one replacement: a retry is "give upstream a second chance", not
+  // a loop. On the second failure `canRetry` is false, so onError reports.
+  let retried = false;
+
+  for (;;) {
+    try {
+      for await (const event of current) {
+        let chunks: string[];
+        try {
+          chunks = encode(event as unknown as CCEvent);
+        } catch (err) {
+          // Encoder blew up — turn it into a stream error so the catch below
+          // handles it uniformly instead of crashing the proxy.
+          (current as Readable).destroy(err as Error);
+          throw err;
+        }
+        for (const chunk of chunks) {
+          if (!(await writable(chunk))) return;
+        }
       }
-      for (const chunk of chunks) {
+      for (const chunk of onEnd()) {
         if (!(await writable(chunk))) return;
       }
-    }
-    for (const chunk of onEnd()) {
-      if (!(await writable(chunk))) return;
-    }
-  } catch (err) {
-    logger.error("[stream] upstream streaming error:", (err as Error).message);
-    for (const chunk of onError(err as Error)) {
-      if (!(await writable(chunk))) return;
+      return;
+    } catch (err) {
+      logger.error("[stream] upstream streaming error:", (err as Error).message);
+      const action = onError(err as Error, !retried);
+      if (!Array.isArray(action)) {
+        retried = true;
+        current = await action.retryStream;
+        continue;
+      }
+      for (const chunk of action) {
+        if (!(await writable(chunk))) return;
+      }
+      return;
     }
   }
 }
@@ -479,11 +502,18 @@ async function handleChatCompletions(
 
   const abort = abortOnClientDisconnect(res);
 
+  // One threadId per client request, shared by every upstream attempt so CC
+  // bills one session per intent (see the Anthropic handler for the rationale).
+  const pinnedThreadId = crypto.randomUUID();
+  const buildBody = (): CCRequestBody => {
+    const body = toCCRequest(openAIReq);
+    body.threadId = pinnedThreadId;
+    return body;
+  };
+
   try {
     const stream = await sendToCCWithModelDiscovery(
-      // Rebuilt per attempt so a retry re-resolves the model against the
-      // refreshed catalog.
-      () => toCCRequest(openAIReq),
+      buildBody,
       model,
       {
         apiBase: config.ccApiBase,
@@ -503,17 +533,37 @@ async function handleChatCompletions(
         ...corsHeaders(),
       });
 
+      // See the Anthropic handler: zero bytes written means a re-send upstream
+      // is invisible to the client, any bytes written means it would duplicate.
+      let sentBytes = 0;
+
+      const retryStream = (): Promise<NodeJS.ReadableStream> =>
+        sendToCC(buildBody(), {
+          apiBase: config.ccApiBase,
+          apiKey,
+          ccVersion: config.ccVersion,
+          timeoutMs: config.upstreamTimeoutMs,
+          idleTimeoutMs: config.idleTimeoutMs,
+        }, abort.signal).then((r) => r.stream);
+
       await pumpStream(
         stream,
         res,
-        (event) => encoder.emit(event).map((c) => formatSSE(c)),
+        (event) => encoder.emit(event).map((c) => (sentBytes++, formatSSE(c))),
         () => (encoder.finished ? [] : encoder.finishChunks("stop").map((c) => formatSSE(c))),
-        // Stream-level error (TCP failure, idle timeout, encoder throw).
-        // Always emit a uniform content+finish chunk pair via streamErrorChunks
-        // — mixing a non-chunk `{error:...}` envelope with valid chunks
-        // confused some clients (treating the envelope as a tool call named
-        // "error", or failing JSON parse).
-        (err) => encoder.streamErrorChunks(err).map((c) => formatSSE(c)),
+        (err, canRetry) => {
+          if (canRetry && sentBytes === 0) {
+            logger.warn(`[stream] no output yet; re-sending to upstream once`);
+            return { retryStream: retryStream() };
+          }
+          // Stream-level error (TCP failure, idle timeout, encoder throw) with
+          // output already delivered, or the retry failed too: emit the error
+          // envelope and nothing else. No finish chunk — claiming a normal
+          // stop after a failure is what makes a client record a successful
+          // turn (see conformance/client-probes/).
+          logger.warn(`[stream] reporting failure to client (${tagStreamError(err)})`);
+          return encoder.streamErrorChunks(err).map((c) => formatSSE(c));
+        },
       );
       // After pump completes, emit the [DONE] sentinel if we still can.
       // `writableEnded` only flips when end() is called — `res.destroyed`
@@ -576,11 +626,19 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
   logger.info(`[${reqId2}] [Anthropic] Model: ${model}`);
   const abort = abortOnClientDisconnect(res);
 
+  // One threadId per client request, shared by every upstream attempt: the
+  // model-discovery retry and the streaming-recovery retry both reuse it so CC
+  // bills one session per intent rather than one per attempt.
+  const pinnedThreadId = crypto.randomUUID();
+  const buildBody = (): CCRequestBody => {
+    const body = anToCCRequest(anthropicReq);
+    body.threadId = pinnedThreadId;
+    return body;
+  };
+
   try {
     const stream = await sendToCCWithModelDiscovery(
-      // Rebuilt per attempt so a retry re-resolves the model against the
-      // refreshed catalog.
-      () => anToCCRequest(anthropicReq),
+      buildBody,
       model,
       {
         apiBase: config.ccApiBase,
@@ -600,31 +658,53 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
         ...corsHeaders(),
       });
 
+      // Tracks whether any byte has reached the client. This is the single
+      // condition that decides whether a failure can be recovered by
+      // re-sending upstream: with zero bytes written the client cannot tell a
+      // retry happened, and with any bytes written a retry would duplicate
+      // output. Counting bytes (rather than inspecting the encoder) also
+      // covers message_start, which the client does see.
+      let sentBytes = 0;
+
+      // Issues one fresh upstream request for the recovery path. buildBody
+      // already pins the threadId, so this stays on the same CC session.
+      const retryStream = (): Promise<NodeJS.ReadableStream> =>
+        sendToCC(buildBody(), {
+          apiBase: config.ccApiBase,
+          apiKey,
+          ccVersion: config.ccVersion,
+          timeoutMs: config.upstreamTimeoutMs,
+          idleTimeoutMs: config.idleTimeoutMs,
+        }, abort.signal).then((r) => r.stream);
+
       await pumpStream(
         stream,
         res,
-        (event) => encoder.emit(event).map((r) => formatAnthropicSSE(r.event, r.data)),
+        (event) =>
+          encoder
+            .emit(event)
+            .map((r) => (sentBytes++, formatAnthropicSSE(r.event, r.data))),
         () =>
           encoder.finished
             ? []
             : encoder.finishRecords("end_turn").map((r) => formatAnthropicSSE(r.event, r.data)),
-        (err) => {
-          // 统一发 overloaded_error：这是下游分类器唯一写死为可重试的
-          // in-band 类型（isRetryable: type==="overloaded_error"）；其他类型
-          // 一律 retryable:false，会把下游整份重试额度作废。流级错误
-          // （idle 超时/TCP 断连）都是瞬态，收尾已完成、重试由下游整轮重发，
-          // 不会造成内容重复。真实来源经 tagStreamError 标在 message 前缀。
-          const records: AnthropicSSERecord[] = [
-            {
-              event: "error",
-              data: {
-                type: "error",
-                error: { type: "overloaded_error", message: tagStreamError(err) },
-              },
-            },
-          ];
-          if (!encoder.finished) records.push(...encoder.finishRecords("end_turn"));
-          return records.map((r) => formatAnthropicSSE(r.event, r.data));
+        (err, canRetry) => {
+          // Recovery: nothing was written downstream, so re-sending upstream is
+          // invisible to the client. Downstream retry is NOT an option here —
+          // once the response has started, no in-band error type makes the
+          // client retry (measured: conformance/client-probes/
+          // retry-classification.mjs). The proxy is the only recovery layer.
+          if (canRetry && sentBytes === 0) {
+            logger.warn(`[stream] no output yet; re-sending to upstream once`);
+            return { retryStream: retryStream() };
+          }
+          // Already delivered partial output, or the retry failed too: report
+          // honestly. `errorRecords` sends error + message_stop WITHOUT a
+          // trailing message_delta — that would overwrite the failure with
+          // stop_reason "end_turn" and the client would record a successful
+          // turn. Real cause stays in the message prefix via tagStreamError.
+          logger.warn(`[stream] reporting failure to client (${tagStreamError(err)})`);
+          return encoder.errorRecords(err).map((r) => formatAnthropicSSE(r.event, r.data));
         },
       );
       if (!res.writableEnded && !res.destroyed) res.end();
