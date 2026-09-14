@@ -56,6 +56,15 @@ if errorlevel 1 (
 echo Built CCProxyTray.exe (v%VER%)
 
 rem ---- staging package ----
+rem Refuse to package a stale dist: a deleted module still sitting in dist/
+rem ships dead files (v0.4.1-p1 went out carrying dist\auth.js + dist\setup\
+rem long after those were removed). Rebuild first, then package.
+rem Note: no parentheses inside these echo lines — cmd would read them as the
+rem end of the enclosing block.
+if not exist "%ROOT%\dist\proxy.js" goto :stale_dist_missing
+if exist "%ROOT%\dist\auth.js" goto :stale_dist_auth
+if exist "%ROOT%\dist\setup" goto :stale_dist_setup
+
 set PKG=%ROOT%\release\CCProxy
 if exist "%PKG%" rmdir /s /q "%PKG%"
 mkdir "%PKG%\node" 2>nul
@@ -64,6 +73,9 @@ copy /y "%OUTDIR%CCProxyTray.exe" "%PKG%" >nul || goto :pack_fail
 xcopy /e /i /y "%ROOT%\dist" "%PKG%\dist" >nul || goto :pack_fail
 if not exist "%PKG%\dist\models.json" copy /y "%ROOT%\src\models.json" "%PKG%\dist\models.json" >nul
 copy /y "%ROOT%\package.json" "%PKG%" >nul || goto :pack_fail
+rem Never ship runtime state produced by local testing.
+if exist "%PKG%\selfcheck.log" del /q "%PKG%\selfcheck.log"
+if exist "%PKG%\logs" rmdir /s /q "%PKG%\logs"
 
 set "NODE_SRC="
 for /f "delims=" %%N in ('where node 2^>nul') do (
@@ -110,4 +122,16 @@ exit /b 0
 
 :pack_fail
 echo Packaging failed.
+exit /b 1
+
+:stale_dist_missing
+echo ERROR: dist\proxy.js is missing. Run "pnpm build" first.
+exit /b 1
+
+:stale_dist_auth
+echo ERROR: dist\auth.js still present - dist is stale. Run a clean "pnpm build".
+exit /b 1
+
+:stale_dist_setup
+echo ERROR: dist\setup still present - dist is stale. Run a clean "pnpm build".
 exit /b 1
