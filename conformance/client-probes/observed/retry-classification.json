@@ -1,0 +1,76 @@
+{
+  "note": "AI SDK 重试判定实测。upstreamRequests>1 才代表客户端真的重试了。",
+  "sdk": "ai + @ai-sdk/anthropic",
+  "results": [
+    {
+      "variant": "A-message_start-then-error",
+      "dialect": "anthropic",
+      "upstreamRequests": 1,
+      "text": "",
+      "errorPart": true,
+      "finish": "unknown",
+      "threw": null,
+      "retried": false
+    },
+    {
+      "variant": "B-error-first",
+      "dialect": "anthropic",
+      "upstreamRequests": 4,
+      "text": "",
+      "errorPart": true,
+      "finish": null,
+      "threw": null,
+      "retried": true
+    },
+    {
+      "variant": "C-content-then-error",
+      "dialect": "anthropic",
+      "upstreamRequests": 1,
+      "text": "partial text",
+      "errorPart": true,
+      "finish": "unknown",
+      "threw": null,
+      "retried": false
+    },
+    {
+      "variant": "D-http-529",
+      "dialect": "anthropic",
+      "upstreamRequests": 4,
+      "text": "",
+      "errorPart": true,
+      "finish": null,
+      "threw": null,
+      "retried": true
+    },
+    {
+      "variant": "E-openai-envelope-after-content",
+      "dialect": "openai",
+      "upstreamRequests": 1,
+      "text": "partial text",
+      "errorPart": true,
+      "finish": "error",
+      "threw": null,
+      "retried": false
+    },
+    {
+      "variant": "F-openai-envelope-first",
+      "dialect": "openai",
+      "upstreamRequests": 1,
+      "text": "",
+      "errorPart": true,
+      "finish": "error",
+      "threw": null,
+      "retried": false
+    },
+    {
+      "variant": "G-openai-http-500",
+      "dialect": "openai",
+      "upstreamRequests": 4,
+      "text": "",
+      "errorPart": true,
+      "finish": null,
+      "threw": null,
+      "retried": true
+    }
+  ]
+}

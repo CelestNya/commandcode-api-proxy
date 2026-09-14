@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^2.0.102
+        version: 2.0.102(zod@4.4.3)
       '@ai-sdk/openai-compatible':
         specifier: ^1.0.54
         version: 1.0.54(zod@4.4.3)
@@ -37,6 +40,12 @@ importers:
         version: 3.2.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)
 
 packages:
+
+  '@ai-sdk/anthropic@2.0.102':
+    resolution: {integrity: sha512-OGECnK9zIfZQQ++/py3lMDtFT1u43WQO7Js5V5esTOa2iu1E9gDYO5FsJq3DRHZiQlMwBUwIrKNKJfFk2zqgqw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/gateway@2.0.105':
     resolution: {integrity: sha512-X0cdnJ/B422AvtKf5C2ZO8cyVf36utX8DORg6AHux1+a3EGYSLIy91L6MrUKOP68c7dL3WnAirOaiQrGL8rueQ==}
@@ -1561,6 +1570,12 @@ packages:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
+
+  '@ai-sdk/anthropic@2.0.102(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 2.0.4
+      '@ai-sdk/provider-utils': 3.0.37(zod@4.4.3)
+      zod: 4.4.3
 
   '@ai-sdk/gateway@2.0.105(zod@4.4.3)':
     dependencies:

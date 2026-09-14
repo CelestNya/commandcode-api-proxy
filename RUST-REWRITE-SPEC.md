@@ -173,6 +173,67 @@ OpenAI 侧 `code: "network_error"` 判为可重试。其余类型一律不重试
 - **Anthropic**：发 `event: error` + `{"type":"error","error":{...}}`，
   其后跟 `message_stop`。
 
+#### 2.4.3 `overloaded_error` **不能**触发下游重试（**实测，推翻既有假设**）
+
+> 证据：`conformance/client-probes/retry-classification.mjs` 与
+> `observed/retry-classification.json`。方法：假上游记录被请求次数，`maxRetries:3`
+> 下 **>1 次才代表客户端真的重试了**。
+
+| 上游返回 | 上游被请求 | 客户端重试？ |
+| -------- | ---------- | ------------ |
+| **HTTP 529** + `overloaded_error` 体 | 4 次 | ✅ 是 |
+| **HTTP 500**（OpenAI 方言） | 4 次 | ✅ 是 |
+| 200 + `error` 作为**首个**事件 | 4 次 | ✅ 是（Anthropic 方言） |
+| 200 + `message_start` 后 `error` | **1 次** | ❌ 否 |
+| 200 + 正文后 `error` | **1 次** | ❌ 否 |
+| 200 + OpenAI `{error}` 信封（首块或内容后） | **1 次** | ❌ 否 |
+
+**机制**（源码级确认，非推测）：
+
+- Anthropic provider 只在**首块探测**阶段把错误转成可重试错误：
+  ```js
+  statusCode: error.type === "overloaded_error" ? 529 : 500,
+  isRetryable: error.type === "overloaded_error"
+  ```
+  但这段代码在 `firstChunkReader` 分支里 —— **已开始推流后不再走这里**。
+- 流内 `error` 事件走的是 `controller.enqueue({ type: "error", error })`，
+  **从不构造 `APICallError`**。
+- `ai` 包的重试包装器只认一个条件：
+  ```js
+  if (error instanceof Error && APICallError.isInstance(error) && error.isRetryable === true && ...)
+  ```
+  `enqueue` 出来的 error part **不是** `APICallError`，所以 `isRetryable` 永远
+  不参与判断 —— 流内错误**在任何类型下都不会触发重试**。
+- OpenAI 兼容 provider 里根本没有 `isRetryable`（`grep` 零命中），错误信封同样
+  只走 `enqueue`。
+
+**在生产里复现的实例**（2026-09-14，`sess_8e9a0574` 第 79 轮）：上游停摆后代理发
+`event: error` + `type: "overloaded_error"`，ZCode 侧记为
+`ProviderBusinessError` / `exceptionKind: "provider_business"` /
+`retryable: false` / `attempt: 1`（共 11 次额度），**整轮报废**。同一时刻代理日志
+只留下 `[CC upstream error] Invalid error response format: Gateway request failed`。
+
+> **那句 `Gateway request failed` 不是 CC 说的，也不是代理说的** —— 它是
+> `@ai-sdk/gateway` 的默认文案：`createGatewayErrorFromResponse` 在响应无法解析成
+> 合法 Gateway 错误形状时，抛 `Invalid error response format: ${defaultMessage}`。
+> 排查时不要被它误导成"上游网关故障"。
+
+**这推翻了 `a3864f6` 的核心论证**。那个 commit 的结论"把流内错误标成
+`overloaded_error` 就能让下游重试"经实测**不成立**：生产日志里两次流内
+`overloaded_error` 都是 `retryable:false`、轮次直接失败；跨 7 天所有
+`canRetry:true` 的记录**全部是传输层错误**（无响应体，`reason: network_error` /
+`server_error`）。
+
+**对重构的含义**（重要）：
+
+1. **流已开始后，代理是唯一的恢复层**。"交给下游重试"这条路不存在，所以
+   §8.7 的断流续写不是可选优化，而是**唯一的补救手段**。
+2. `overloaded_error` 标记**仍然要保留** —— 它在**路径 A**（头未发出、错误是
+   首个事件）下是有效的，也是 Anthropic 协议的正确表达。但**不要指望它救流内失败**。
+3. 若要让流内失败可重试，唯一可行方向是**不把 200 写出去**（即代理自己先探测
+   首块再决定状态码）—— 这需要缓冲首块，会改变 §2.4.1 的整个时序契约，属于
+   重构期的大决策，**不要顺手改**。
+
 ### 2.5 部分输出不会丢失（**实测**，推翻了一个常见假设）
 
 > 证据：`conformance/client-probes/partial-context.mjs`，原始记录见同目录
@@ -838,16 +899,26 @@ prefill 语义。**不要在重构里依赖 A。**
 **B 方案是稳的**，但**有一个前提必须先定**：续写请求由谁发起。
 
 - **代理自动续写**：断流后代理自己再发一次上游请求，把两段拼接后吐给客户端。
-  优点：用户无感。缺点：计费翻倍、拼接处可能重复或语义断裂、客户端看不到
-  "中间失败过"、与 §5.5 的"不做总时长上限"叠加后可能长时间不返回。
-- **代理不续写，只如实收尾**（推荐）：把断流标成 `stop_reason: max_tokens` 之类
-  的可继续状态，让**客户端**决定要不要续。优点：计费透明、客户端有完整判断依据、
-  代理保持"翻译层"职责。缺点：需要客户端配合。
+  优点：用户无感，是唯一能让长任务**无人值守跑完**的手段（§2.4.3 证明下游不会
+  重试，用户不在场这轮就废了）。缺点：计费翻倍、拼接处可能重复或语义断裂、
+  客户端看不到"中间失败过"、与 §5.5 的"不做总时长上限"叠加后可能长时间不返回。
+- **代理不续写，只如实收尾**：把断流标成 `stop_reason: max_tokens` 之类
+  的可继续状态，让**客户端**决定要不要续。优点：计费透明、代理保持"翻译层"
+  职责、拼接风险归零。缺点：需要用户在场并按"继续"。
 
-**本次决策建议**：选"代理不续写，只如实收尾"，并把"断流"与"正常截断"在
-`stop_reason` 上**区分开**（这是当前实现没有的：`finishRecords` 一律 `end_turn`）。
-理由：代理自动续写一旦判断失误，用户看到的是"回答被静默拼接了两遍"，比明确报错
-更难发现 —— 而这正是本 spec 反复强调的最坏失败模式。
+**本次决策建议**：**先做"如实收尾"，把自动续写留作下一步**，理由是分阶段降风险：
+
+1. 立刻可做且零风险：把"断流"与"正常截断"在 `stop_reason` 上**区分开**
+   （当前实现没有 —— `finishRecords` 一律 `end_turn`，客户端分不出"模型说完了"
+   和"网断了"）。
+2. 自动续写单独设计（需要限次、拼接去重、计费可见性），**不要和这次重构混在
+   一起**。理由是它一旦判断失误，用户看到的是"回答被静默拼接了两遍"，比明确
+   报错更难发现 —— 而这正是本 spec 反复强调的最坏失败模式。
+
+> **背景**：用户提出"partial 之后人类大概率也是继续这个会话"——这个直觉是对的，
+> 客户端确实保留半截内容（§2.5）。但**代理自动续写不是实现它的唯一方式**：
+> B 方案的"指令接续"实测有效，客户端侧只要把半截 + 一句"继续"发回来即可。
+> 所以自动续写属于**体验优化**，不是**能力缺失**。
 
 > **未决问题（留给实施阶段）**：Anthropic 协议里"上游中途失败"没有专用
 > `stop_reason`，可选值只有 `end_turn` / `max_tokens` / `stop_sequence` /
@@ -864,7 +935,8 @@ prefill 语义。**不要在重构里依赖 A。**
 | **取消安全** | `select!` 中读上游 body 与关闭信号竞争时丢字节或解析错位。`read_exact` / `read_to_end` / `write_all` **均非**取消安全 | 循环内持有自己的缓冲区；取消视为硬停，丢弃缓冲而非续读部分行 |
 | **`spawn_blocking` 不可取消** | 已启动的任务在 runtime 关闭时无限等待，托盘需快速退出 | 长时阻塞用真线程；设 `shutdown_timeout` |
 | **CC 的服务端探测** | 请求头不像官方 CLI 会被拒（`Proxy use detected`） | 逐字复刻头集合，用 golden 的 `upstreamRequests` 断言 |
-| **重试可重试性回归** | 错误类型映射错了会导致客户端不重试 | `failure/*` 与流内错误是最高优先级复刻点 |
+| **重试可重试性回归** | 错误类型映射错了会导致客户端不重试 | `failure/*` 与流内错误是最高优先级复刻点。**注意 §2.4.3：流内错误在任何类型下都不会触发下游重试**，别把恢复希望押在这里 |
+| **流内失败无自动恢复** | 头已发出后上游才失败，下游不会重试，整轮报废 | 目前**无解**（§2.4.3）。若要做，唯一路径是缓冲首块后再决定状态码，属重构期大决策 |
 | **Windows 头文件特性** | `CreateJobObjectW` 需 `Win32_Security`，缺失时编译期报错 | 已在 DEVELOPMENT.md 记录 |
 | **`panic = "abort"` 丢回溯** | 托盘唯一诊断通道是日志文件 | 若现场排查困难，考虑改为 `unwind` 换取回溯 |
 | **别名表漂移** | `models.json` 78 条别名会随 CC 上新模型变化 | 保持 `models.json` 为唯一真相源，Rust 侧用 `include_str!` 嵌入 |
@@ -896,12 +968,17 @@ prefill 语义。**不要在重构里依赖 A。**
 | "缺 `max_tokens` 本地拒绝" | ❌ OpenAI 路径可选，仅 Anthropic 必填 |
 | "别名不做 trim" | ✅ 确认：`"deepseek-v4-pro "` 原样透传 |
 
-**第二轮（客户端侧实测，`conformance/client-probes/`）又推翻两条**：
+**第二轮（客户端侧实测，`conformance/client-probes/`）又推翻三条**：
 
 | 断言 | 实测结果 |
 | ---- | -------- |
 | "中途失败不重试，是因为重试会让用户看到重复内容" | ⚠️ 结论对、**理由错**。半截内容**不会**丢，客户端下一轮原样带上（§2.5） |
 | "极短回复报错是因为 `finishRecords` 没合成空块" | ❌ 零内容块完全合法；抛错的是客户端调 `finalText()` 而流里没有 `text` 块（§2.5.2） |
+| "把流内错误标成 `overloaded_error` 就能让下游重试" | ❌ **测下来从不重试**，任何类型都不行 —— 流内错误不是 `APICallError`（§2.4.3）。`a3864f6` 的整个论证作废 |
+
+**第三轮（生产日志复核）**：`a3864f6` 的结论在生产上**没有生效过**——
+v0.4.2 已含该标记，但流内 `overloaded_error` 两次都是 `retryable:false`，
+跨 7 天所有 `canRetry:true` 记录全是传输层错误。**代码改了，但问题没解决。**
 
 **教训**：这份文档里每一行"当前行为是 X"都应当能在 `conformance/golden/` 里找到
 对应证据。凡是凭源码阅读或直觉写下的行为断言，都可能像上面几条一样是错的 ——

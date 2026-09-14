@@ -1,0 +1,65 @@
+{
+  "note": "生产日志证据（不可重跑，从两侧日志抄录）：一次真实轮次因流内失败而报废。支撑 RUST-REWRITE-SPEC.md §2.4.3 —— 流内错误从不触发下游重试。",
+  "when": "2026-09-14T14:56:08Z（本地 22:56）",
+  "session": "sess_8e9a0574-81ac-4663-a405-c1c476bd57cf",
+  "turn": 79,
+  "iteration": 15,
+  "requestId": "18018d2c-c481-4fd5-9b62-2768a1c8cb2b",
+  "proxy": {
+    "version": "0.4.2",
+    "path": "D:\\Windows\\Desktop\\CCProxy-Release\\CCProxy-v0.4.2\\dist\\proxy.js",
+    "port": 8787,
+    "logLines": [
+      "2026-09-14 22:55:37 [INFO] [18018d2c-c481-4fd5-9b62-2768a1c8cb2b] [Anthropic] Model: deepseek-v4.1-flash",
+      "2026-09-14 22:56:06 [ERROR] [CC upstream error] Invalid error response format: Gateway request failed"
+    ],
+    "note": "代理侧只有这两行。请求时刻（22:55:37）与错误时刻（22:56:06）相隔 29 秒，与客户端记录的 durationMs: 30555 吻合。v0.4.2 构建于 17:50，不含 abb5101 的到达/结果两行日志，所以看不到 reqId 结果行。"
+  },
+  "client": {
+    "log": "~/.zcode/cli/log/zcode-2026-09-14.jsonl",
+    "lines": [37599, 37600, 37601, 37602, 37606],
+    "event": "model.sdk.stream.failed",
+    "error": {
+      "name": "ProviderBusinessError",
+      "code": "PROVIDER_BUSINESS_ERROR",
+      "message": "[upstream-error] Invalid error response format: Gateway request failed"
+    },
+    "classification": {
+      "exceptionKind": "provider_business",
+      "errorPhase": "stream",
+      "responseStatus": 200,
+      "reason": "unknown",
+      "retryable": false,
+      "attempt": 1,
+      "maxAttempts": 11
+    },
+    "chunks": {
+      "start": 1,
+      "start-step": 1,
+      "emittedError": false,
+      "lastChunkType": "start-step",
+      "textDeltaChars": 0
+    },
+    "outcome": "turn.failed (turnNumber 79, turnPhase processing_input)"
+  },
+  "inBandError": {
+    "responseStatus": 200,
+    "errorType": "overloaded_error",
+    "note": "代理已按 a3864f6 把流内错误标成 overloaded_error，客户端仍是 retryable:false —— 该修复未达到预期效果。"
+  },
+  "misleadingMessage": {
+    "text": "Invalid error response format: Gateway request failed",
+    "provenance": "@ai-sdk/gateway/src/errors/create-gateway-error.ts",
+    "explanation": "createGatewayErrorFromResponse 在响应无法解析成合法 Gateway 错误形状时抛出 `Invalid error response format: ${defaultMessage}`，defaultMessage 默认是 'Gateway request failed'。既不是 CC 的错误，也不是本代理的错误 —— 排查时勿误判为上游网关故障。"
+  },
+  "corroboration": {
+    "claim": "流内错误从不触发下游重试（任何类型）",
+    "evidence": [
+      "本请求：流内 overloaded_error -> retryable:false, attempt 1/11",
+      "2026-09-14T12:01:20Z 另一轮：流内 overloaded_error（[connection-reset] terminated）-> retryable:false",
+      "跨 6 天统计 61 条带响应体的失败：overloaded_error/api_error/upstream_error 全部 retryable:false",
+      "跨 3 天所有 canRetry:true 的记录（20 条）：reason 仅 network_error / server_error，均无响应体（传输层错误）",
+      "离线探针 conformance/client-probes/retry-classification.mjs：HTTP 529 被请求 4 次；200+流内错误一律 1 次"
+    ]
+  }
+}

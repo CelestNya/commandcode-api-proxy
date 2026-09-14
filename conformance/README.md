@@ -27,6 +27,7 @@ conformance/
 │   └── upstream-scenarios.json   the scripted upstream event sequences
 ├── client-probes/           what the *client* does with what we send (not diffed)
 │   ├── partial-context.mjs      does a broken stream lose the text already sent?
+│   ├── retry-classification.mjs does any in-band error actually trigger a retry?
 │   ├── upstream-continuation.mjs can a truncated turn be resumed?
 │   └── observed/                probe output, checked in as evidence
 └── golden/
@@ -64,11 +65,20 @@ them by hand when changing anything about how a stream ends:
 
 ```bash
 node conformance/client-probes/partial-context.mjs        # offline, fake upstream
+node conformance/client-probes/retry-classification.mjs   # offline, fake upstream
 node conformance/client-probes/upstream-continuation.mjs  # needs the real proxy up
 ```
 
-Findings worth keeping (full detail in `RUST-REWRITE-SPEC.md` §2.5 and §8.7):
+Findings worth keeping (full detail in `RUST-REWRITE-SPEC.md` §2.4.3, §2.5, §8.7):
 
+- **No in-band error ever triggers a retry, whatever its type.** The AI SDK's
+  retry wrapper only retries `APICallError` instances, and a stream-level error
+  event is enqueued as a plain error part — it never becomes one. Measured by
+  counting upstream requests with `maxRetries: 3`: an HTTP 529 was requested 4
+  times, every 200-plus-in-band-error shape exactly once. This overturns the
+  reasoning in commit `a3864f6` — the `overloaded_error` marker is right for
+  errors sent *before* the stream starts, but it cannot rescue a mid-stream
+  failure.
 - **A broken stream does not lose the text already sent.** Both SDKs keep the
   partial text in the message they hand back, so a mid-stream failure is a
   *truncation*, not a *discard*.

@@ -136,6 +136,41 @@ console.log("2.5/8.7 client-side findings");
 expectSpecMentions("partial text is documented as surviving", "部分输出不会丢失");
 expectSpecMentions("the empty-argument tool_use hazard is documented", "空参数工具调用");
 expectSpecMentions("prefill is documented as unsupported", "不实现 Anthropic 的");
+// The load-bearing correction: in-band errors never retry, whatever their type.
+expectSpecMentions("in-band errors are documented as non-retryable", "不能**触发下游重试");
+expectSpecMentions("the proxy is documented as the only recovery layer", "代理是唯一的恢复层");
+{
+  const probe = JSON.parse(
+    readFileSync(path.join(HERE, "client-probes", "observed", "retry-classification.json"), "utf8"),
+  );
+  const byVariant = Object.fromEntries(probe.results.map((r) => [r.variant, r]));
+  // A retry is only real if the upstream was hit more than once.
+  expect("http 529 IS retried", byVariant["D-http-529"]?.retried, true);
+  expect("error-after-message_start is NOT retried",
+    byVariant["A-message_start-then-error"]?.retried, false);
+  expect("error-after-content is NOT retried",
+    byVariant["C-content-then-error"]?.retried, false);
+  expect("error-first without 200 IS retried",
+    byVariant["B-error-first"]?.retried, true);
+  expect("openai error envelope after content is NOT retried",
+    byVariant["E-openai-envelope-after-content"]?.retried, false);
+  expect("openai error envelope first is NOT retried",
+    byVariant["F-openai-envelope-first"]?.retried, false);
+  expect("the partial text still reaches the client",
+    byVariant["C-content-then-error"]?.text, "partial text");
+}
+{
+  // Production evidence: the retryability fix was deployed and still did not work.
+  const prod = JSON.parse(
+    readFileSync(path.join(HERE, "client-probes", "observed", "production-inband-error.json"), "utf8"),
+  );
+  expect("the deployed proxy already sent overloaded_error",
+    prod.inBandError?.errorType, "overloaded_error");
+  expect("...and the client still refused to retry",
+    prod.client?.classification?.retryable, false);
+  expect("...with 11 attempts available",
+    prod.client?.classification?.maxAttempts, 11);
+}
 {
   const probe = JSON.parse(
     readFileSync(path.join(HERE, "client-probes", "observed", "partial-context.json"), "utf8"),
