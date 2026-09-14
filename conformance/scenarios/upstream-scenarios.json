@@ -1,0 +1,198 @@
+{
+  "$comment": "Canonical upstream event sequences. These mirror what the real Command Code /alpha/generate emits, as observed in production. Both the Node implementation and the Rust rewrite must translate these identically.",
+  "scenarios": {
+    "clean-text": {
+      "description": "A minimal successful turn: start, one text delta, finish with usage.",
+      "ndjson": [
+        { "type": "start", "data": { "model": "deepseek/deepseek-v4-flash" } },
+        { "type": "text-delta", "data": { "text": "Hello" } },
+        {
+          "type": "finish",
+          "data": {
+            "finishReason": "stop",
+            "usage": {
+              "promptTokens": 100,
+              "completionTokens": 5,
+              "totalTokens": 105,
+              "promptTokensDetails": { "cachedTokens": 64 }
+            }
+          }
+        }
+      ]
+    },
+
+    "multi-delta": {
+      "description": "Several text deltas that must be emitted as separate SSE chunks in order.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "text-delta", "data": { "text": "one " } },
+        { "type": "text-delta", "data": { "text": "two " } },
+        { "type": "text-delta", "data": { "text": "three" } },
+        { "type": "finish", "data": { "finishReason": "stop" } }
+      ]
+    },
+
+    "reasoning-then-text": {
+      "description": "Reasoning deltas precede the answer; Anthropic must open a thinking block first.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "reasoning-delta", "data": { "text": "let me think" } },
+        { "type": "reasoning-delta", "data": { "text": " about it" } },
+        { "type": "text-delta", "data": { "text": "The answer is 4." } },
+        { "type": "finish", "data": { "finishReason": "stop" } }
+      ]
+    },
+
+    "tool-call-delta-then-final": {
+      "description": "Streamed tool arguments followed by the canonical final object. The deltas concatenate exactly to the final JSON, so the encoder must not duplicate the payload.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "text-delta", "data": { "text": "Checking the time." } },
+        {
+          "type": "tool-call-delta",
+          "data": { "toolCallId": "call_1", "name": "get_time", "arguments": "{\"tz\":" }
+        },
+        {
+          "type": "tool-call-delta",
+          "data": { "toolCallId": "call_1", "name": "get_time", "arguments": "\"UTC\"}" }
+        },
+        {
+          "type": "tool-call",
+          "data": { "toolCallId": "call_1", "toolName": "get_time", "input": { "tz": "UTC" } }
+        },
+        { "type": "finish", "data": { "finishReason": "tool-calls" } }
+      ]
+    },
+
+    "tool-call-final-only": {
+      "description": "A canonical tool call with no preceding deltas — the arguments must be emitted whole.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        {
+          "type": "tool-call",
+          "data": { "toolCallId": "call_9", "toolName": "get_weather", "input": { "city": "Tokyo" } }
+        },
+        { "type": "finish", "data": { "finishReason": "tool-call" } }
+      ]
+    },
+
+    "parallel-tool-calls": {
+      "description": "Two tool calls in one turn, each with its own index.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        {
+          "type": "tool-call",
+          "data": { "toolCallId": "call_a", "toolName": "first", "input": { "n": 1 } }
+        },
+        {
+          "type": "tool-call",
+          "data": { "toolCallId": "call_b", "toolName": "second", "input": { "n": 2 } }
+        },
+        { "type": "finish", "data": { "finishReason": "tool-calls" } }
+      ]
+    },
+
+    "start-only-truncated": {
+      "description": "Upstream closes the socket after `start` with no finish. The proxy must synthesise the terminal records instead of leaving the stream dangling.",
+      "ndjson": [{ "type": "start", "data": {} }]
+    },
+
+    "text-without-finish": {
+      "description": "Deltas arrive, then the connection closes with no finish event — synthesised termination required.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "text-delta", "data": { "text": "partial answer" } }
+      ]
+    },
+
+    "error-event": {
+      "description": "An in-band error event. The downstream client must receive exactly one error envelope (retryable class) and no synthesised success finish.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "error", "data": { "message": "model refused" } }
+      ]
+    },
+
+    "error-after-content": {
+      "description": "Content already streamed when the upstream fails. Content must be preserved and the error surfaced after it.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "text-delta", "data": { "text": "Here is the beginning..." } },
+        { "type": "error", "data": { "message": "upstream exploded mid-turn" } }
+      ]
+    },
+
+    "late-event-after-finish": {
+      "description": "A misbehaving upstream keeps sending after finish. The encoder must swallow the stragglers and not emit a second terminal record.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "text-delta", "data": { "text": "done" } },
+        { "type": "finish", "data": { "finishReason": "stop" } },
+        { "type": "text-delta", "data": { "text": "late" } },
+        { "type": "finish", "data": { "finishReason": "stop" } }
+      ]
+    },
+
+    "length-finish-reason": {
+      "description": "finishReason=length must map to max_tokens on the Anthropic side.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "text-delta", "data": { "text": "cut off mid" } },
+        { "type": "finish", "data": { "finishReason": "length" } }
+      ]
+    },
+
+    "garbage-lines": {
+      "description": "NDJSON lines that are not JSON at all. The parser must skip them and still terminate cleanly.",
+      "raw": "data: {{{not json\n\ndata: also-not-json\n\n:\n\n"
+    },
+
+    "empty-body": {
+      "description": "A 200 with zero bytes — the proxy must synthesise an empty but valid turn.",
+      "raw": ""
+    },
+
+    "reset-mid-stream": {
+      "description": "The upstream dies after the first delta. The client must get a terminal error, not a hang.",
+      "ndjson": [
+        { "type": "start", "data": {} },
+        { "type": "text-delta", "data": { "text": "before the crash" } }
+      ],
+      "resetAfterMs": 60
+    },
+
+    "hang-after-start": {
+      "description": "Upstream opens the stream then goes silent forever. Used to pin the idle-timeout behaviour.",
+      "ndjson": [{ "type": "start", "data": {} }],
+      "hangAfterEvents": 1
+    }
+  },
+
+  "httpFailures": {
+    "$comment": "Header-phase failures. Each must produce the documented downstream status and envelope shape.",
+    "unauthorized-401": {
+      "status": 401,
+      "errorBody": { "error": { "message": "invalid api key" } }
+    },
+    "forbidden-403-unknown-model": {
+      "status": 403,
+      "errorBody": { "error": { "message": "Model/provider not recognized" } }
+    },
+    "rate-limited-429": {
+      "status": 429,
+      "errorBody": { "error": { "message": "slow down" } }
+    },
+    "server-error-500": {
+      "status": 500,
+      "errorBody": { "error": { "message": "internal" } }
+    },
+    "overloaded-529": {
+      "status": 529,
+      "errorBody": { "error": { "message": "overloaded" } }
+    },
+    "bad-request-400": {
+      "status": 400,
+      "errorBody": { "error": { "message": "malformed request" } }
+    }
+  }
+}
