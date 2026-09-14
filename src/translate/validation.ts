@@ -205,8 +205,10 @@ export function validateAnthropicRequest(body: unknown): AnthropicRequest {
         `Field 'thinking.type' must be one of: ${[...THINKING_TYPES].join(", ")}`,
       );
     }
-    // budget_tokens only exists on the "enabled" form, and is only meaningful
-    // there; guard it against max_tokens so the upstream doesn't 400 later.
+    // A budget at or above max_tokens cannot leave room for the answer, so the
+    // upstream would reject it anyway — surfacing it here gives a clearer
+    // message. Callers that pass the two independently have to keep the budget
+    // below the output cap; the translator only derives a level from it.
     if (typeof t.budget_tokens === "number" && t.budget_tokens >= (req.max_tokens as number)) {
       throw new ValidationError("thinking.budget_tokens must be less than max_tokens");
     }

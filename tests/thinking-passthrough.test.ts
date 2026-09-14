@@ -74,6 +74,20 @@ describe("output_config.effort 是强度的真相源", () => {
     expect(effortOf(base({ thinking: { type: "enabled", budget_tokens: 64000 } }))).toBe("max");
   });
 
+  // 客户端对字段命名不一致：Messages API 是 snake_case，有些客户端发 camelCase。
+  // 只认一个会让另一个落进"无预算"分支 —— 而旧代码那里会 fallthrough 到 max，
+  // 这正是"不管怎么选都用最高档"的直接原因。
+  it("接受 camelCase 的 budgetTokens", () => {
+    expect(effortOf(base({ thinking: { type: "enabled", budgetTokens: 1024 } as never }))).toBe("high");
+    expect(effortOf(base({ thinking: { type: "enabled", budgetTokens: 64000 } as never }))).toBe("max");
+  });
+
+  // 没有预算时不猜。旧实现让 undefined 逐级比较失败后落到 "max"，
+  // 把"未指定"变成了"最高档"。
+  it("无预算时不落到最高档", () => {
+    expect(effortOf(base({ thinking: { type: "enabled" } as never }))).toBeUndefined();
+  });
+
   // 两者都给时以 effort 为准：它是显式意图，budget 只是旧协议的回退。
   it("effort 与 budget 冲突时以 effort 为准", () => {
     const req = base({

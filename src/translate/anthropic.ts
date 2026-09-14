@@ -188,8 +188,13 @@ function toCCPartByBlock(block: AnthropicContentBlock): CCContentPart | null {
  *   2. `output_config.effort` → the explicit level. This is what current
  *      clients send; reading only `budget_tokens` (as this used to) silently
  *      discarded the user's choice and sent the same level every time.
- *   3. `thinking.budget_tokens` → the older convention, still honoured by
- *      mapping the budget onto a level.
+ *   3. `thinking.budget_tokens` (also accepted as `budgetTokens`) → the older
+ *      convention, mapped onto a level.
+ *
+ * A missing budget yields no level at all. The previous version returned "max"
+ * in that case — `undefined <= 2000` is false, so every comparison fell
+ * through to the last branch — which is why every request looked like it was
+ * pinned to the highest level.
  */
 function resolveReasoningEffort(req: AnthropicRequest): string | undefined {
   const thinking = req.thinking;
@@ -197,7 +202,13 @@ function resolveReasoningEffort(req: AnthropicRequest): string | undefined {
   if (req.output_config?.effort) return req.output_config.effort;
   if (!thinking || thinking.type !== "enabled") return undefined;
 
-  const b = thinking.budget_tokens;
+  // Clients differ on the spelling: the Messages API field is snake_case, some
+  // send camelCase. Accept both rather than silently ignoring one.
+  const t = thinking as { budget_tokens?: unknown; budgetTokens?: unknown };
+  const raw = t.budget_tokens ?? t.budgetTokens;
+  const b = typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+  if (b === undefined) return undefined;
+
   if (b <= REASONING_THRESHOLDS.LOW) return "low";
   if (b <= REASONING_THRESHOLDS.MEDIUM) return "medium";
   if (b <= REASONING_THRESHOLDS.HIGH) return "high";

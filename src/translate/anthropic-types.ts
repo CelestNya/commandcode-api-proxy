@@ -23,7 +23,7 @@ export interface AnthropicRequest {
    * shape and are what a client's "thinking off" setting sends.
    */
   thinking?:
-    | { type: "enabled"; budget_tokens: number }
+    | { type: "enabled"; budget_tokens?: number; budgetTokens?: number }
     | { type: "disabled" }
     | { type: "adaptive" };
   /**
