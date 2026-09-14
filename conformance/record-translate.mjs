@@ -136,6 +136,21 @@ const OPENAI_CASES = {
     reasoning_effort: "max",
     messages: [{ role: "user", content: "think" }],
   },
+  // Effort clipping is two steps: a rank ordering picks the nearest legal
+  // level, and the model's own effort set bounds it. Pin both directions —
+  // "low" must rise to the model's minimum, "max" must fall to its maximum.
+  "reasoning-effort-clipped-up": {
+    model: "deepseek/deepseek-v4-pro",
+    max_tokens: 64,
+    reasoning_effort: "low",
+    messages: [{ role: "user", content: "think a little" }],
+  },
+  "reasoning-effort-uncatalogued-model": {
+    model: "totally-unknown-model",
+    max_tokens: 64,
+    reasoning_effort: "max",
+    messages: [{ role: "user", content: "think" }],
+  },
   "tool-choice-object": {
     model: "deepseek-v4-flash",
     max_tokens: 64,
@@ -214,6 +229,48 @@ const ANTHROPIC_CASES = {
     thinking: { type: "enabled", budget_tokens: 2000 },
     messages: [{ role: "user", content: "think" }],
   },
+  // One case per threshold band: the raw budget maps to an effort level first
+  // (b<=2000 low, <=8000 medium, <=16000 high, <=32000 xhigh, else max), then
+  // that level is clipped to the model's own set. Recording each band pins the
+  // composition of the two steps, which is easy to get wrong by looking at
+  // either step alone.
+  "thinking-budget-band-low": {
+    model: "deepseek/deepseek-v4-pro",
+    max_tokens: 20000,
+    thinking: { type: "enabled", budget_tokens: 2000 },
+    messages: [{ role: "user", content: "think" }],
+  },
+  "thinking-budget-band-medium": {
+    model: "deepseek/deepseek-v4-pro",
+    max_tokens: 20000,
+    thinking: { type: "enabled", budget_tokens: 8000 },
+    messages: [{ role: "user", content: "think" }],
+  },
+  "thinking-budget-band-high": {
+    model: "deepseek/deepseek-v4-pro",
+    max_tokens: 40000,
+    thinking: { type: "enabled", budget_tokens: 16000 },
+    messages: [{ role: "user", content: "think" }],
+  },
+  "thinking-budget-band-xhigh": {
+    model: "deepseek/deepseek-v4-pro",
+    max_tokens: 60000,
+    thinking: { type: "enabled", budget_tokens: 32000 },
+    messages: [{ role: "user", content: "think" }],
+  },
+  "thinking-budget-band-max": {
+    model: "deepseek/deepseek-v4-pro",
+    max_tokens: 90000,
+    thinking: { type: "enabled", budget_tokens: 60000 },
+    messages: [{ role: "user", content: "think" }],
+  },
+  // A model whose set is wider than the band mapping, so clipping is a no-op.
+  "thinking-budget-wide-set": {
+    model: "xai/grok-4.5",
+    max_tokens: 20000,
+    thinking: { type: "enabled", budget_tokens: 8000 },
+    messages: [{ role: "user", content: "think" }],
+  },
   "thinking-clipped-grok": {
     model: "xai/grok-4.5",
     max_tokens: 4000,
@@ -273,7 +330,16 @@ const ALIAS_CASES = [
   "muse-spark",
   "laguna",
   "deepseek/deepseek-v4-pro",
+  // Casing is documented as insensitive for aliases; pin it, including the
+  // mixed-case form of a multi-word alias.
   "DEEPSEEK-V4-PRO",
+  "GLM-5.3",
+  "GLM5.3",
+  "Kimi-K3",
+  // A full id keeps its casing (passthrough), unlike a bare alias.
+  "DeepSeek/DeepSeek-V4-Pro",
+  // Bare-last-segment matching against the catalog is also case-insensitive.
+  "Nemotron-3-Ultra-550B-A55B",
   "deepseek-v4-pro ",
   "totally-unknown-model",
   "",

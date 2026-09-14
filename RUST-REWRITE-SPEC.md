@@ -303,25 +303,67 @@ NDJSON（`data: {json}\n`），事件类型：
 
 ### 4.1 模型解析
 
-- 别名表由 `models.json` 的 `shortAliases`（78 条）驱动，**区分大小写归一**
-  （`DEEPSEEK-V4-PRO` → `deepseek/deepseek-v4-pro`），但**不做 trim**
-  （`"deepseek-v4-pro "` 原样透传 —— 这是当前行为，需保持一致或明确改变）
-- 完整 ID（含 `/`）原样透传
-- 未知 ID 原样透传，不报错
-- 空字符串 → 目录首个模型
+`resolveModel` 的判定顺序（**顺序本身是契约**，提前或延后都会改变结果）：
+
+1. **空串或 `"default"`** → 目录首个模型
+2. **别名表查找，大小写不敏感**（`SHORT_ALIASES[m] ?? SHORT_ALIASES[m.toLowerCase()]`）
+   - 实测：`DEEPSEEK-V4-PRO`、`GLM-5.3`、`GLM5.3`、`Kimi-K3` 均正确解析
+3. **含 `/` 的完整 ID** → **原样透传，不改大小写**
+   - 实测：`DeepSeek/DeepSeek-V4-Pro` → `DeepSeek/DeepSeek-V4-Pro`（**保持原样**）
+   - ⚠️ 注意这与别名的大小写不敏感**行为相反**，是两步顺序导致的
+4. **裸名（无 `/`）** → 按最后一段与目录 ID 做**大小写不敏感**匹配
+   - 实测：`Nemotron-3-Ultra-550B-A55B` → `nvidia/nemotron-3-ultra-550b-a55b`
+5. **都不匹配** → 原样透传，不报错
+
+**不做 trim**：实测 `"deepseek-v4-pro "`（带尾空格）→ 原样返回 `"deepseek-v4-pro "`。
+这是当前真实行为。
+
 - `claude-*` 前缀 → `ANTHROPIC_DEFAULT_MODEL`，未设则目录首个
-- 裸名（无 `/`）→ 先查别名表，再按最后一段在目录里模糊匹配
 - 目录未命中且 CC 返回 `Model/provider not recognized` → 刷新目录后**重试一次**，
   重试时**复用同一 threadId**
 
 ### 4.2 reasoning effort
 
-模型各自接受不同的 effort 子集（如 `deepseek-v4-pro` 只收 `high`/`max`）。
-请求超出子集时裁剪到最近的有效值（`low` → `high`），未知 level 记 `warn`。
-无 effort 集的模型忽略该参数。
+**映射是两步，不是一步。** 遗漏任一步都会得到错误结果，且看单步代码时都像是对的。
 
-Anthropic 侧由 `thinking.budget_tokens` 映射 effort（budget 越大 effort 越高），
-阈值：`LOW 2000 / MEDIUM 8000 / HIGH 16000 / XHIGH 32000`。
+**第一步：level → 模型合法子集（裁剪）**
+
+`REASONING_EFFORTS`（`models.json`）给出每个模型接受的 effort 子集
+（`deepseek-v4-pro`: `[high, max]`；`xai/grok-4.5`: `[low, medium, high]`）。
+请求值不在子集内时，按 rank 序（`low 0 / medium 1 / high 2 / xhigh 3 / max 4`）
+裁剪到**最近**的合法值，而非报错。无 effort 集的模型忽略该参数。
+
+**第二步：Anthropic 的 `thinking.budget_tokens` → level**
+
+阈值是**上界**（`<=` 判定）：
+
+| budget_tokens | 映射 level |
+| ------------- | ---------- |
+| ≤ 2000 | `low` |
+| ≤ 8000 | `medium` |
+| ≤ 16000 | `high` |
+| ≤ 32000 | `xhigh` |
+| > 32000 | `max` |
+
+**两步叠加后的实际结果**（实测，这是最容易搞错的地方）：
+
+| budget | 纯阈值映射 | 对 `deepseek-v4-pro`（`high`/`max`）裁剪后 |
+| ------ | ---------- | ---------------------------------------- |
+| 2000 | low | **high** |
+| 8000 | medium | **high** |
+| 16000 | high | high |
+| 32000 | xhigh | **high** |
+| 60000 | max | max |
+
+> **注意这个塌缩效应**：对只支持 `high`/`max` 的模型，**1–32000 的全部 budget
+> 都映射为 `high`** —— 四个阈值区间里有三个被压平成同一个值。也就是说，在这类
+> 模型上调小 `budget_tokens` **不会**降低推理强度，只有超过 32000 才升到 `max`。
+> 这是当前的真实行为，Rust 侧必须复刻（若想改变，属于新需求，需单独决策）。
+
+`xai/grok-4.5`（`low`/`medium`/`high`）实测：budget 2000 → `low`，
+budget 8000 → `medium` —— 它的子集覆盖了低区间，所以不塌缩。
+
+未知 effort level 记 `warn`。
 
 ### 4.3 Anthropic ↔ CC 映射要点
 
@@ -339,7 +381,11 @@ Anthropic 侧由 `thinking.budget_tokens` 映射 effort（budget 越大 effort �
 - `tool_calls` 的下标必须按 `toolCallId` 稳定分配
 - `tool-call-delta` 之后的 `tool-call` 同 id 时复用同一下标
 - 悬空的助手 tool-call（无对应 tool 结果）与悬空 tool 结果**都要剪除**
-- `tool_choice` 映射为 CC 的对象形式，**不发裸字符串**
+- `tool_choice` 映射为 **CC 的对象形式**，字段名是**蛇形 `tool_choice`**
+  （与 `max_tokens` 一致，不是 camelCase `toolChoice`）
+  - 实测：OpenAI 的 `{"type":"function","function":{"name":"get_time"}}`
+    → CC 的 `{"type":"tool","name":"get_time"}`
+  - **绝不发裸字符串**（`"auto"` 之类在 CC 侧无效）
 - `reasoning-delta` → `reasoning_content`
 - 流式 delta 只允许 `role` / `content` / `reasoning_content` / `tool_calls` 四个键
 
@@ -452,6 +498,39 @@ Anthropic 侧由 `thinking.budget_tokens` 映射 effort（budget 越大 effort �
 
 **特别说明**：DEVELOPMENT.md 中"4. Async rules (tokio)"整节作废，替换为线程
 模型规范（线程安全、锁的持有范围、阻塞边界）。
+
+#### 5.5.1 线程约束与"不得引入总时长上限"（重要）
+
+**禁止引入生成阶段的总时长上限。** 这条是**硬约束**，不是建议 —— 未来若有人
+"顺手加固"，会导致无人值守的长任务在输出中途被掐断，而那是最糟的失败方式
+（内容已吐出一半，重试要从头再来并重新计费）。
+
+依据：现有实现在 `src/upstream.ts:182` **于响应头到达后清除超时计时器**
+（注释原文：*"Successful generation remains governed by the separate idle timeout."*）
+—— 即**刻意**只留 idle 超时，不设生成阶段总时长限制。生产实测 2307 次请求
+从未因时长被中断。
+
+| 风险 | 正确工具 | 状态 |
+| ---- | -------- | ---- |
+| 上游静默挂起 | **idle 超时**（相邻字节间隔，120s） | 已有，保留 |
+| 客户端断开 | abort 传播（`abortOnClientDisconnect` 等价物） | 已有，保留 |
+| 客户端读得慢、占住线程 | **线程总数上限** | 新增 |
+| 长时间的合法生成 | **不做限制** | 刻意如此 |
+
+**新增的线程约束**（用于防慢客户端耗尽，而非防长任务）：
+
+| 项 | 值 | 说明 |
+| -- | -- | ---- |
+| 最大并发线程数 | 64 | 超出**拒绝新连接**，不排队、不无限 spawn |
+| 线程栈大小 | 512 KB | 实测 24 KB RSS/阻塞线程（含栈实际占用）；默认 2MB 是浪费 |
+| 下游写超时 | 待定 | 防客户端只连不读；具体值需实测确定 |
+
+**不得**用"每连接总时长上限"来防慢客户端 —— 它区分不了"恶意慢速"与"合法的长
+任务"。用线程数上限即可：64 × 24 KB = 1.5 MB，成本可忽略。
+
+实测支撑（本机，1000 个真正阻塞在 socket 上的线程）：24 KB RSS/线程、
+1000 线程空闲 CPU 占用 **0 ms/2s**、线程创建 16 µs。生产峰值并发 **32**
+（60 秒窗口内最多同时完成 32 个请求），余量超过一个数量级。
 
 ### 5.6 日志
 

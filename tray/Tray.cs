@@ -199,20 +199,88 @@ namespace CCProxyTray
             op.Finished.WaitOne(5000);
         }
 
-        /** 端口是否真的在提供服务——接班是否成立的唯一判据。 */
+        /**
+         * 接班是否成立的唯一判据：端口上真的有一个**能回 HTTP 的**代理在服务。
+         *
+         * 单纯 TCP 连接成功不足以证明这一点——握手成功只说明有人 listen：
+         *   - 进程刚 bind 完、尚未加载完配置，请求仍会失败；
+         *   - 端口被**别的程序**占用（不是我们的代理）同样能连上；
+         *   - 进程僵死但 socket 未关闭，TCP 层照样接受连接。
+         * 这三种情况下若据此 Commit，现任会退场，而继任者其实服务不了，
+         * 直接造成服务真空。所以必须发一个真实的 HTTP 请求。
+         *
+         * /health 是纯本地实现（不碰上游、不需要 key），因此把它作为判据不会
+         * 把外部环境问题误判成版本问题——上游凭据错误、断网都不影响它，那些
+         * 属于运行期问题，不该让一次正常的版本交接回滚。
+         */
         static bool PortServing(int port)
         {
+            return HttpHealthOk(port, null);
+        }
+
+        /**
+         * 发 GET /health 并校验 body。
+         *
+         * expectedVersion 传 null 时只要求"是一个能回 /health 形状的代理"。
+         * 传入具体版本则额外要求版本一致——用于区分"我们的代理"与"恰好占用
+         * 同一端口的其它程序"，**不要**用在交接窗口内（那时可能由前任应答）。
+         */
+        static bool HttpHealthOk(int port, string expectedVersion)
+        {
+            var url = "http://127.0.0.1:" + port + "/health";
             try
             {
-                using (var c = new TcpClient())
+                var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+                req.Method = "GET";
+                req.Timeout = 2000;              // 连不上/不响应都算失败，别拖住交接
+                req.ReadWriteTimeout = 2000;
+                req.Proxy = null;                // 本机回环，绝不走系统代理
+                req.KeepAlive = false;
+
+                using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
                 {
-                    var ar = c.BeginConnect(System.Net.IPAddress.Loopback, port, null, null);
-                    if (!ar.AsyncWaitHandle.WaitOne(1000)) return false;
-                    c.EndConnect(ar);
+                    if ((int)resp.StatusCode != 200)
+                    {
+                        TrayLog("[health] :" + port + " 返回 HTTP " + (int)resp.StatusCode);
+                        return false;
+                    }
+                    string body;
+                    using (var sr = new StreamReader(resp.GetResponseStream()))
+                        body = sr.ReadToEnd();
+
+                    // 必须能被解析成 /health 的形状，而不只是"有响应"。
+                    if (body.IndexOf("\"status\"", StringComparison.Ordinal) < 0
+                        || body.IndexOf("ok", StringComparison.Ordinal) < 0)
+                    {
+                        TrayLog("[health] :" + port + " 响应不是 /health 形状：" + Truncate(body, 120));
+                        return false;
+                    }
+
+                    if (expectedVersion != null)
+                    {
+                        var needle = "\"version\":\"" + expectedVersion + "\"";
+                        if (body.IndexOf(needle, StringComparison.Ordinal) < 0)
+                        {
+                            TrayLog("[health] :" + port + " 版本不符，期望 " + expectedVersion
+                                    + "，实际响应：" + Truncate(body, 120));
+                            return false;
+                        }
+                    }
                     return true;
                 }
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                TrayLog("[health] :" + port + " 探活失败：" + ex.GetType().Name + " " + ex.Message);
+                return false;
+            }
+        }
+
+        static string Truncate(string s, int max)
+        {
+            if (s == null) return "";
+            s = s.Replace("\r", " ").Replace("\n", " ");
+            return s.Length <= max ? s : s.Substring(0, max) + "…";
         }
 
         /** 只读探测是否有另一个托盘在运行；绝不干扰对方（自检安全用）。 */
@@ -443,18 +511,26 @@ namespace CCProxyTray
         {
             if (isSuccessor)
             {
+                // 接班判据：端口上出现一个**能回 /health 的**代理。
+                //
+                // 这里刻意**不校验版本**：让位期间端口可能仍由前任应答（它还没
+                // 退场），此时版本自然与继任者不同，但那并不构成失败——真正要
+                // 确认的是"服务没断"。若在这里要求版本一致，反而会把正常的交接
+                // 窗口误判成失败并触发回滚。
+                //
+                // 版本一致性由用户可见的两处保证：托盘 tooltip 与 /health.version。
                 var sw = Stopwatch.StartNew();
                 while (sw.ElapsedMilliseconds < SERVE_VERIFY_MS)
                 {
                     if (PortServing(InstancePort()))
                     {
-                        TrayLog("交接成功：已在 :" + InstancePort() + " 提供服务，通知现任退出");
+                        TrayLog("交接成功：:" + InstancePort() + " 已有代理应答 /health，通知现任退出");
                         commitEvent.Set();
                         return;
                     }
                     Thread.Sleep(500);
                 }
-                TrayLog("交接失败：未能在期限内提供服务，通知现任回滚");
+                TrayLog("交接失败：未能在期限内提供可应答的 /health，通知现任回滚");
                 abortEvent.Set();
                 return;
             }

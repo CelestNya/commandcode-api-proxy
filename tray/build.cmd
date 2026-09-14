@@ -87,6 +87,31 @@ if defined NODE_SRC (
   echo WARN: node.exe not found on PATH - package has no embedded node.
 )
 
+rem ---- verify the packaged build before publishing it ----
+rem A build that compiles is not necessarily a build that behaves. v0.4.1-p1
+rem reached the Desktop with a broken tray menu and a service that never started,
+rem because nothing checked the artifact after assembling it. This runs the
+rem packaged dist in an isolated namespace on ephemeral ports and asserts the
+rem behaviours that matter (service answers /health, a clean stream completes,
+rem a mid-stream failure carries the markers the client needs to retry).
+rem
+rem It never touches the production port or a running instance.
+rem
+rem Note: the errorlevel check must not sit inside a parenthesised block. cmd
+rem expands %ERRORLEVEL%-style tests when it parses the block, so an `if
+rem errorlevel` in there reads the level from *before* the command ran. The
+rem goto form below is expanded per-line and behaves correctly.
+if defined CC_SKIP_VERIFY goto :verify_skipped
+echo Verifying packaged build...
+node "%ROOT%\conformance\verify-build.mjs" --exe "%PKG%\CCProxyTray.exe"
+if errorlevel 1 goto :verify_fail
+goto :verify_done
+
+:verify_skipped
+echo WARN: CC_SKIP_VERIFY is set - packaging an unverified build.
+
+:verify_done
+
 rem ---- publish to the hot-swap folder on the Desktop ----
 rem The Desktop may be redirected (this machine: D:\Windows\Desktop), so ask
 rem the shell for the real path instead of assuming %USERPROFILE%\Desktop.
@@ -122,6 +147,14 @@ exit /b 0
 
 :pack_fail
 echo Packaging failed.
+exit /b 1
+
+:verify_fail
+echo.
+echo ERROR: the packaged build failed verification - NOT publishing it.
+echo The previous versions on the Desktop are untouched, so the running
+echo instance is unaffected. Fix the failure above and re-run.
+echo (Set CC_SKIP_VERIFY=1 to bypass - only when you know why it fails.)
 exit /b 1
 
 :stale_dist_missing

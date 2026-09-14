@@ -429,6 +429,74 @@
         "threadId": "<uuid>"
       }
     },
+    "reasoning-effort-clipped-up": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "deepseek/deepseek-v4-pro",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think a little\n\n[System Note: Tool execution is disabled in this environment. Do not output any tool calls (such as Build, Search, ReadFile, grep, etc.). You must answer directly in plain text.]"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 64,
+          "reasoning_effort": "high",
+          "system": "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text."
+        },
+        "threadId": "<uuid>"
+      }
+    },
+    "reasoning-effort-uncatalogued-model": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "totally-unknown-model",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think\n\n[System Note: Tool execution is disabled in this environment. Do not output any tool calls (such as Build, Search, ReadFile, grep, etc.). You must answer directly in plain text.]"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 64,
+          "reasoning_effort": "max",
+          "system": "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text."
+        },
+        "threadId": "<uuid>"
+      }
+    },
     "tool-choice-object": {
       "ok": true,
       "value": {
@@ -745,6 +813,204 @@
         "threadId": "<uuid>"
       }
     },
+    "thinking-budget-band-low": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "deepseek/deepseek-v4-pro",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 20000,
+          "reasoning_effort": "high"
+        },
+        "threadId": "<uuid>"
+      }
+    },
+    "thinking-budget-band-medium": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "deepseek/deepseek-v4-pro",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 20000,
+          "reasoning_effort": "high"
+        },
+        "threadId": "<uuid>"
+      }
+    },
+    "thinking-budget-band-high": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "deepseek/deepseek-v4-pro",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 40000,
+          "reasoning_effort": "high"
+        },
+        "threadId": "<uuid>"
+      }
+    },
+    "thinking-budget-band-xhigh": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "deepseek/deepseek-v4-pro",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 60000,
+          "reasoning_effort": "high"
+        },
+        "threadId": "<uuid>"
+      }
+    },
+    "thinking-budget-band-max": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "deepseek/deepseek-v4-pro",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 90000,
+          "reasoning_effort": "max"
+        },
+        "threadId": "<uuid>"
+      }
+    },
+    "thinking-budget-wide-set": {
+      "ok": true,
+      "value": {
+        "config": {
+          "workingDir": "<cwd>",
+          "date": "<date>",
+          "environment": "<platform>",
+          "structure": "<tree>",
+          "isGitRepo": "<bool>",
+          "currentBranch": "",
+          "mainBranch": "",
+          "gitStatus": "",
+          "recentCommits": []
+        },
+        "memory": "",
+        "taste": "",
+        "skills": "",
+        "permissionMode": "standard",
+        "params": {
+          "model": "xai/grok-4.5",
+          "messages": [
+            {
+              "role": "user",
+              "content": "think"
+            }
+          ],
+          "stream": false,
+          "max_tokens": 20000,
+          "reasoning_effort": "medium"
+        },
+        "threadId": "<uuid>"
+      }
+    },
     "thinking-clipped-grok": {
       "ok": true,
       "value": {
@@ -957,6 +1223,26 @@
     "DEEPSEEK-V4-PRO": {
       "ok": true,
       "value": "deepseek/deepseek-v4-pro"
+    },
+    "GLM-5.3": {
+      "ok": true,
+      "value": "zai-org/GLM-5.3"
+    },
+    "GLM5.3": {
+      "ok": true,
+      "value": "zai-org/GLM-5.3"
+    },
+    "Kimi-K3": {
+      "ok": true,
+      "value": "moonshotai/Kimi-K3"
+    },
+    "DeepSeek/DeepSeek-V4-Pro": {
+      "ok": true,
+      "value": "DeepSeek/DeepSeek-V4-Pro"
+    },
+    "Nemotron-3-Ultra-550B-A55B": {
+      "ok": true,
+      "value": "nvidia/nemotron-3-ultra-550b-a55b"
     },
     "deepseek-v4-pro ": {
       "ok": true,
