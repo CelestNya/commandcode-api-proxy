@@ -111,7 +111,7 @@ Three crates, not one. This is what makes `forbid(unsafe_code)` possible.
 | ----- | -------- | ------------- |
 | `ccproxy-core` | Translation, NDJSON/SSE encoding, model catalog, config | `#![forbid(unsafe_code)]` |
 | `ccproxy-win32` | Job Objects, mutex/event handover, `GetExtendedTcpTable`, tray | `#![deny(unsafe_code)]` |
-| `ccproxy` (bin) | Wiring, axum server, CLI | `#![forbid(unsafe_code)]` |
+| `ccproxy` (bin) | Wiring, HTTP server, CLI | `#![forbid(unsafe_code)]` |
 
 - Put `#![forbid(unsafe_code)]` at the crate root of `-core` and the binary.
   `forbid` cannot be lowered by a nested `#[allow]` — attempting it is itself a
@@ -177,58 +177,95 @@ A proxy is both a library and a binary, so both idioms apply to different parts.
 - Log at the boundary only — one `error!` where the request fails, not in the
   translation layer.
 
-## 4. Async rules (tokio)
+## 4. Concurrency: threads, not async
 
-The streaming path is where the subtle bugs live.
+**The project is blocking, thread-per-connection, with no tokio anywhere.** This
+is a deliberate decision (see `RUST-REWRITE-SPEC.md` §5.5), not an oversight —
+do not introduce an async runtime later without revisiting it.
 
-- **Never block in an async context.** `std::fs`, `std::net`, `std::thread::sleep`
-  and CPU-heavy work go in `spawn_blocking` or a dedicated thread.
-- **`spawn_blocking` tasks cannot be cancelled.** Tokio's runtime shutdown waits
-  for started ones indefinitely unless `shutdown_timeout` is set. For a tray app
-  that must exit promptly, use a real thread for long-lived blocking work, and
-  set an explicit shutdown timeout.
-- **Cancellation safety is the core hazard here.** `select!` that reads the
-  upstream body in one branch and a shutdown signal in another will lose bytes
-  or desynchronise the NDJSON parser whenever the signal branch wins mid-read.
-  `read_exact`, `read_to_end`, `read_to_string` and `write_all` are **not**
-  cancellation-safe. Read into a buffer the loop owns across iterations, and
-  treat cancellation as a hard stop — discard the buffer rather than resuming a
-  partial line.
-- `select!` panics if every branch is disabled and there is no `else`.
-- Hold `std::sync::Mutex` for data protection; use `tokio::sync::Mutex` **only**
-  when the guard must live across an `.await`. Never hold a std guard across
-  await.
-- Graceful shutdown: `axum::serve(...).with_graceful_shutdown(signal)` stops
-  accepting, then `CancellationToken` (cloned per task) signals, then
-  `TaskTracker::wait()` drains in-flight streams. Do not put connection draining
-  in a `Drop` impl — destructors must not block (API Guidelines `C-DTOR-BLOCK`).
-- Per the idempotency rule: if a function misbehaves when restarted while
-  waiting at an `.await`, it is not cancellation-safe and must not sit in a
-  `select!` branch.
+Rationale, measured: the proxy is a pure I/O forwarder with few, long-lived
+connections. Production runs about one request per 35 seconds with a peak of 32
+concurrent, and a blocked thread costs 24 KB RSS and **zero CPU** (measured over
+1000 idle blocked threads). The machine has 16 logical cores; the other target
+has 4. Threads are ample, and choosing them removes a whole class of complexity
+rather than adding cost:
+
+| Removed by not using async | Why it mattered here |
+| -------------------------- | -------------------- |
+| `select!` cancellation safety | The subtle hazard for a streaming proxy: a signal branch winning mid-read loses bytes or desynchronises the NDJSON parser. `read_exact` / `read_to_end` / `write_all` are not cancellation-safe. With blocking reads there is no cancellation to reason about |
+| `spawn_blocking` wrapper | `rusqlite` is synchronous; under threads it is used directly |
+| Runtime shutdown hangs | No runtime to shut down; the writer thread is joined explicitly |
+| `Send + 'static` bounds | Shared state needs only `Arc` plus a lock |
+
+Rules that follow:
+
+- **One thread per connection, with a hard cap** (64). Past the cap, refuse the
+  connection rather than queueing — the failure mode being defended against is
+  a slow or malicious client holding a thread forever, not throughput.
+- **Reduce the stack size** (`std::thread::Builder::stack_size`, 512 KB instead
+  of the 2 MB default). 64 threads then cost ~1.5 MB rather than ~128 MB.
+- **Do not add a total-duration cap on a request.** The only timeouts are the
+  header deadline and the byte-interval idle timeout. A legitimate long
+  generation must never be cut off mid-answer; that is the worst possible
+  failure (content already delivered, retry starts over and is billed again).
+  Measured production data confirms long turns are real.
+- **Backpressure is implicit.** A slow downstream client blocks the thread in
+  `write`, which stops reads from upstream and lets TCP windowing slow the
+  source. Do not buffer to "avoid blocking" — that turns backpressure into
+  unbounded memory growth.
+- **Never hold a lock across a blocking I/O call.** Take the lock, copy what is
+  needed, release, then do I/O.
+- **Sharing state:** immutable config behind `Arc`; the model catalog behind
+  `RwLock` (read-mostly) or `arc-swap`; the usage writer receives records over a
+  bounded `std::sync::mpsc` channel from a dedicated writer thread that owns the
+  connection. `try_send` only — a full channel drops the record and counts it,
+  never blocks the request path.
+- **Graceful shutdown:** stop accepting, then let in-flight responses finish
+  with a bounded grace period, then exit. Do not put draining in a `Drop` impl —
+  destructors must not block (API Guidelines `C-DTOR-BLOCK`).
 
 ## 5. HTTP and streaming
 
-- **Server: axum** (thin over hyper, reuses tower/tower-http for timeouts,
-  tracing, body limits). Raw hyper means reimplementing routing and extractors;
-  actix-web has a different runtime model and ~10× less adoption.
-- **Client: reqwest** with `default-features = false` and an explicit TLS
-  backend, to keep the dependency tree (and binary) small.
-- **Streaming:** prefer axum's `Sse` for the response side — it enforces
-  `text/event-stream` framing and supports `KeepAlive` (off by default, which is
-  a real trap behind idle-closing intermediaries). Use `async-stream`'s
-  `stream!` for the NDJSON→SSE transform to keep the state machine readable.
-- **JSON: `serde_json`. Do not reach for `simd-json` or `sonic-rs`.** The work
-  here is per-line, small objects — exactly where SIMD parsers gain least.
-  `simd-json` mutates buffers in place and is substantially `unsafe`;
-  `sonic-rs` needs `-C target-cpu=native` and is not universally faster on
-  serialise. Revisit only with a `criterion` benchmark proving a win.
-- **Add `KeepAlive` on the SSE response.** The Node version relies on the
-  client's own idle timeout; a Rust server behind the same intermediaries should
-  send comment pings.
+Stack, all blocking (measured: 2.2 MB binary with the whole stack linked in,
+against 88 MB for the bundled Node runtime):
+
+| Layer | Choice | Why |
+| ----- | ------ | --- |
+| Server | `tiny_http` | API is "a request comes in, you return a response" — no async runtime, no extractor machinery to learn |
+| Client | `ureq` | Blocking, TLS-capable, streams the response body |
+| Storage | `rusqlite` (bundled) | Synchronous, fits the thread model directly |
+| JSON | `serde_json` | See below |
+
+- **Do not reach for `simd-json` or `sonic-rs`.** The work here is per-line,
+  small objects — exactly where SIMD parsers gain least. `simd-json` mutates
+  buffers in place and is substantially `unsafe`; `sonic-rs` needs
+  `-C target-cpu=native` and is not universally faster on serialise. Revisit
+  only with a `criterion` benchmark proving a win.
+- **Write each SSE record completely, then flush.** One record is `event:` line
+  + `data:` line + **a blank line**; the blank line is what dispatches the event,
+  and per the WHATWG spec *"once the end of the file is reached, any pending
+  data must be discarded"*. Ending the response right after a `data:` line
+  silently drops the final event — plausibly `message_stop`, which looks exactly
+  like a turn stopping with no message. This is the single easiest thing to get
+  wrong when rewriting the write loop.
+- **`[DONE]` must be bare and standalone.** The OpenAI Node SDK compares for
+  equality, so a trailing space makes it attempt `JSON.parse("[DONE] ")` and
+  throw.
+- **Derive the SSE `event:` name and the payload `type` from one constructor.**
+  They must always agree, because the Anthropic SDKs dispatch on the event name
+  (a whitelist that drops unknown names *silently*) while the Vercel AI SDK
+  ignores the event name entirely and validates `type` against a Zod union.
+  They are exact inverses; only emitting both consistently satisfies both. The
+  Node version achieved this by discipline — the Rust version should make it
+  impossible to violate.
+- **Consider `KeepAlive` comment pings** if the deployment sits behind an
+  intermediary that closes idle connections. The Node version relies on the
+  client's own timeout, and no intermediary has caused a problem so far.
 
 ## 6. Testing
 
-- **`#[tokio::test]`** for async units; **`insta`** for the translation layer —
+- **Plain `#[test]` everywhere** — there is no async runtime to bridge, so no
+  `#[tokio::test]` is needed. **`insta`** for the translation layer —
   request/response shapes are exactly snapshot-shaped, and `cargo insta review`
   forces an explicit accept.
 - **`proptest`** over `quickcheck` for the invariants the Node conformance test
@@ -236,8 +273,11 @@ The streaming path is where the subtle bugs live.
   identically, and every emitted Anthropic record must satisfy the block
   lifecycle (no delta before `content_block_start`, no record after
   `message_stop`).
-- **`wiremock`** for the upstream mock — it intercepts at the reqwest layer, so
-  real serialisation is exercised.
+- **The conformance harness is the primary acceptance test**, and it needs no
+  port: load `conformance/golden/*.json` and assert against it, or replay the
+  scenarios through `conformance/mock-upstream.mjs` (plain Node, no Rust-side
+  equivalent required). For an upstream mock inside `cargo test`, `httpmock`
+  works with blocking clients; `wiremock` is async-oriented and a poor fit here.
 - **`cargo-nextest`** for the run (`doctests` are not supported — run
   `cargo test --doc` separately). `--no-tests` exits non-zero by default.
 - **`cargo-deny`** for advisories, licences, bans and sources; it is a superset
@@ -303,7 +343,10 @@ Per the Rust API Guidelines, applied to an application:
   ```
 
   Measured on this machine: a hello-world binary is 1.17 MB default and 245 KB
-  with this profile; with axum + reqwest + tokio + windows-rs linked in, 1.8 MB.
+  with this profile; with `tiny_http` + `ureq` + `rusqlite` (bundled) linked in,
+  **2.2 MB** — against 88 MB for the bundled Node runtime the rewrite replaces.
   `panic = "abort"` does not apply to test/bench profiles — Cargo forces unwind
-  there.
+  there. It also removes backtraces, which matters for a tray app whose only
+  diagnostic channel is a log file; weigh that if field crashes become hard to
+  diagnose.
 
