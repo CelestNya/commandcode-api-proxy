@@ -6,6 +6,7 @@ import {
 } from "@/translate/anthropic.js";
 import type { AnthropicRequest, AnthropicSSERecord } from "@/translate/anthropic-types.js";
 import type { CCEvent } from "@/translate/types.js";
+import { UpstreamEventError } from "@/stream.js";
 
 describe("toCCRequest", () => {
   it("basic text request maps correctly", () => {
@@ -370,13 +371,15 @@ describe("AnthropicStreamEncoder", () => {
     expect(missing.map((r) => r.event)).toEqual([]);
   });
 
-  it("error before content emits message_start then error", () => {
+  // An upstream error with nothing written downstream is RECOVERABLE: the
+  // encoder throws so the service layer can re-send the request and the client
+  // sees one clean response instead of a failed turn. Reporting it in-band
+  // would be a wasted turn when nothing had been delivered yet.
+  it("error before content throws so the service layer can recover", () => {
     const encoder = new AnthropicStreamEncoder("m");
-    const records = encoder.emit({ type: "error", data: { message: "Boom!" } });
-    const events = records.map((r) => r.event);
-    expect(events).toContain("message_start");
-    expect(events).toContain("error");
-    expect(events).toContain("message_stop");
+    expect(() => encoder.emit({ type: "error", data: { message: "Boom!" } })).toThrow(
+      UpstreamEventError,
+    );
   });
 
   // Retryability contract: the downstream client's classifier treats an
@@ -386,6 +389,10 @@ describe("AnthropicStreamEncoder", () => {
   // 2026-09-14. The real origin is preserved as a message tag instead.
   it("in-band error uses the retryable overloaded_error marker", () => {
     const encoder = new AnthropicStreamEncoder("m");
+    // Content first: only then is the failure reported in-band rather than
+    // recovered (a retry after output would duplicate it).
+    encoder.emit({ type: "start", data: {} });
+    encoder.emit({ type: "text-delta", data: { text: "partial" } });
     const records = encoder.emit({ type: "error", data: { message: "Boom!" } });
     const errRecord = records.find((r) => r.event === "error");
     const err = errRecord!.data.error as { type: string; message: string };
@@ -499,6 +506,9 @@ describe("AnthropicStreamEncoder", () => {
     const encoder = new AnthropicStreamEncoder("m");
     expect(encoder.finished).toBe(false);
     encoder.emit({ type: "start", data: {} });
+    // Content first — otherwise the failure is recoverable and gets thrown
+    // instead (see the recovery tests).
+    encoder.emit({ type: "text-delta", data: { text: "partial" } });
     encoder.emit({ type: "error", data: { message: "boom" } });
     expect(encoder.finished).toBe(true);
   });

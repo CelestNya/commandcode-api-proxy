@@ -161,10 +161,13 @@ describe("Anthropic 编码器协议一致性（模糊）", () => {
         records.push(...(encoder.finishRecords("end_turn") as ARecord[]));
       const problems = validateAnthropic(records, `seed=${seed}`);
       if (threw) {
-        // 唯一允许的抛错：上游自相矛盾的工具参数（已有专门测试与错误信封路径）
+        // 允许的抛错有两类，各自都有专门测试与服务层处理路径：
+        //   1. 上游自相矛盾的工具参数（Inconsistent upstream tool arguments）
+        //   2. 零内容时的上游 error 事件（UpstreamEventError）—— 服务层据此重发
         const msg = String((threw as Error).message);
-        if (!msg.includes("Inconsistent upstream tool arguments"))
-          problems.push(`seed=${seed}: 意外抛错 ${msg}`);
+        const name = (threw as Error).name;
+        if (!msg.includes("Inconsistent upstream tool arguments") && name !== "UpstreamEventError")
+          problems.push(`seed=${seed}: 意外抛错 ${name}: ${msg}`);
       }
       // 格式化器是唯一线上出口：每条记录序列化后必须带 type 判别
       for (const r of records) {
@@ -266,8 +269,21 @@ describe("OpenAI 编码器协议一致性（模糊）", () => {
       const rng = mulberry32(seed);
       const encoder = new OpenAIStreamEncoder("m");
       const chunks: Record<string, unknown>[] = [];
+      let threw: unknown = null;
       for (const e of genOpenAIEvents(rng)) {
-        for (const c of encoder.emit(e) as Record<string, unknown>[]) chunks.push(c);
+        try {
+          for (const c of encoder.emit(e) as Record<string, unknown>[]) chunks.push(c);
+        } catch (err) {
+          threw = err;
+          break;
+        }
+      }
+      // 零内容时的上游 error 事件会抛 UpstreamEventError，供服务层重发；
+      // 这与 Anthropic 侧同契约，不是协议违规。
+      if (threw) {
+        const name = (threw as Error).name;
+        if (name !== "UpstreamEventError")
+          allProblems.push(`seed=${seed}: 意外抛错 ${name}: ${(threw as Error).message}`);
       }
       // 镜像服务层 pumpStream onEnd：仅未终态时才合成收尾
       if (!encoder.finished)

@@ -24,7 +24,7 @@ import type {
 import { resolveAnthropicModel } from "@/translate/anthropic-models.js";
 import { resolveEffortForModel } from "@/translate/models.js";
 import { extractUsage, pruneDanglingTools, buildCCConfig } from "@/translate/util.js";
-import { tagStreamError } from "@/stream.js";
+import { tagStreamError, UpstreamEventError } from "@/stream.js";
 import { logger } from "@/logger.js";
 
 // ── Constants ──
@@ -275,6 +275,18 @@ export class AnthropicStreamEncoder {
     return this.sawFinish;
   }
 
+  /**
+   * Whether the client has received anything worth keeping.
+   *
+   * `started` only flips when a content event is emitted — an upstream `start`
+   * is buffered in `pendingStart`, and `message_start` is an empty envelope the
+   * replacement stream re-sends. So false means a failed attempt can be
+   * re-sent invisibly: the client sees one continuous response.
+   */
+  get hasEmittedContent(): boolean {
+    return this.started;
+  }
+
   emit(event: CCEvent): AnthropicSSERecord[] {
     // 终态守卫：error/finish 已发出 message_stop，message_stop 之后不允许
     // 再有任何记录——行为不端的上游（终态后继续发事件）到此全部吞掉，
@@ -288,24 +300,25 @@ export class AnthropicStreamEncoder {
     }
 
     if (event.type === "error") {
-      this.sawFinish = true;
       const msg =
         (event.data.message as string) ??
         (event.data.error as { message?: string } | undefined)?.message ??
         JSON.stringify(event.data);
       logger.error(`[CC upstream error] ${msg}`);
+      // Nothing has been written downstream yet → this is recoverable: throw so
+      // the service layer can re-send the request and the client sees a single
+      // clean response. Once output exists the failure must be reported in-band
+      // (a retry would duplicate it), so fall through to the error records.
+      if (!this.started) throw new UpstreamEventError(msg);
 
+      this.sawFinish = true;
       const records: AnthropicSSERecord[] = [];
-      if (!this.started) {
-        records.push(this.makeMessageStart(0));
-      }
       this.closeCurrentBlock(records);
       this.closeToolBlocks(records);
       // 统一发 overloaded_error：这是下游分类器唯一写死为可重试的 in-band
       // 错误类型（isRetryable: type==="overloaded_error"），api_error 一律
-      // retryable:false 会把重试额度全部作废。流中失败（上游停摆/断连/网关
-      // 故障）都是瞬态，且此处已完成收尾、重试由下游整轮重发，不会重复投递。
-      // 真实错误来源保留在 message 前缀，供人和日志区分。
+      // retryable:false 会把重试额度全部作废。此处已投递过内容，重发会让用户
+      // 看到重复，只能如实报告。真实错误来源保留在 message 前缀，供人区分。
       records.push({
         event: "error",
         data: {

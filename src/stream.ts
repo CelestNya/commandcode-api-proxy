@@ -69,6 +69,22 @@ export function formatAnthropicSSE(eventType: string, data: unknown): string {
 }
 
 /**
+ * Raised when the upstream reports a failure through an in-band `error` event
+ * while nothing has been written downstream yet.
+ *
+ * It travels as an exception so it takes the same recovery path as a transport
+ * failure: the proxy can re-send the request and the client sees one clean,
+ * successful response. Reported as `[upstream-error]` because the failure came
+ * from the upstream's own judgement, not from the transport.
+ */
+export class UpstreamEventError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UpstreamEventError";
+  }
+}
+
+/**
  * Tag a mid-stream failure with its real origin.
  *
  * Every mid-stream failure is reported to the downstream as
@@ -80,6 +96,7 @@ export function formatAnthropicSSE(eventType: string, data: unknown): string {
  */
 export function tagStreamError(err: Error): string {
   if (err.name === "IdleTimeoutError") return `[idle-timeout] ${err.message}`;
+  if (err.name === "UpstreamEventError") return `[upstream-error] ${err.message}`;
   const code = (err as NodeJS.ErrnoException).code;
   if (code === "UND_ERR_SOCKET" || /terminated|socket hang up/i.test(err.message)) {
     return `[connection-reset] ${err.message}`;

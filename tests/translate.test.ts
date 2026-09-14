@@ -346,6 +346,10 @@ describe("OpenAIStreamEncoder", () => {
   // finish chunk on stream end and the client would see a duplicate.
   it("marks the encoder as finished after an error event", () => {
     expect(encoder.finished).toBe(false);
+    // Content first — with none delivered the failure is recoverable and the
+    // encoder throws instead so the service layer can re-send.
+    encoder.emit({ type: "start", data: {} });
+    encoder.emit({ type: "text-delta", data: { text: "partial" } });
     encoder.emit({ type: "error", data: { message: "boom" } });
     expect(encoder.finished).toBe(true);
   });
@@ -357,6 +361,7 @@ describe("OpenAIStreamEncoder", () => {
   // the AI SDK maps to a stream error part (finishReason "error").
   it("reports an upstream error via the error envelope, not as content", () => {
     encoder.emit({ type: "start", data: {} });
+    encoder.emit({ type: "text-delta", data: { text: "partial" } });
     const chunks = encoder.emit({ type: "error", data: { message: "idle timeout" } }) as any[];
 
     const envelope = chunks.find((c) => c && typeof c === "object" && "error" in c);

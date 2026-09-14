@@ -1,0 +1,28 @@
+{
+  "note": "重发恢复产生重复 role/message_start 时，客户端能否容忍。成立则\"零内容可安全重发\"。",
+  "results": [
+    {
+      "dialect": "openai",
+      "label": "dup-role-then-content",
+      "text": "hello",
+      "finish": "stop",
+      "errorPart": false,
+      "threw": null,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "[{\"type\":\"text\",\"text\":\"hello\"}]"
+        }
+      ]
+    },
+    {
+      "dialect": "anthropic",
+      "label": "dup-message-start",
+      "text": "",
+      "finish": "error",
+      "errorPart": true,
+      "threw": null,
+      "messages": []
+    }
+  ]
+}

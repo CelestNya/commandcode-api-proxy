@@ -13,7 +13,12 @@ import { discoverModel } from "@/translate/models.js";
 import { extractUsage } from "@/translate/util.js";
 import { recordUsage, snapshot as usageSnapshot } from "@/usage-stats.js";
 import type { CCEvent, CCRequestBody } from "@/translate/types.js";
-import { formatSSE, formatSSEDone, formatAnthropicSSE, tagStreamError } from "@/stream.js";
+import {
+  formatSSE,
+  formatSSEDone,
+  formatAnthropicSSE,
+  tagStreamError,
+} from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
 import crypto from "node:crypto";
 import { logger } from "@/logger.js";
@@ -533,9 +538,7 @@ async function handleChatCompletions(
         ...corsHeaders(),
       });
 
-      // See the Anthropic handler: zero bytes written means a re-send upstream
-      // is invisible to the client, any bytes written means it would duplicate.
-      let sentBytes = 0;
+      // See the Anthropic handler: the encoder decides recoverability.
 
       const retryStream = (): Promise<NodeJS.ReadableStream> =>
         sendToCC(buildBody(), {
@@ -549,10 +552,10 @@ async function handleChatCompletions(
       await pumpStream(
         stream,
         res,
-        (event) => encoder.emit(event).map((c) => (sentBytes++, formatSSE(c))),
+        (event) => encoder.emit(event).map((c) => formatSSE(c)),
         () => (encoder.finished ? [] : encoder.finishChunks("stop").map((c) => formatSSE(c))),
         (err, canRetry) => {
-          if (canRetry && sentBytes === 0) {
+          if (canRetry && !encoder.hasEmittedContent) {
             logger.warn(`[stream] no output yet; re-sending to upstream once`);
             return { retryStream: retryStream() };
           }
@@ -658,13 +661,11 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
         ...corsHeaders(),
       });
 
-      // Tracks whether any byte has reached the client. This is the single
-      // condition that decides whether a failure can be recovered by
-      // re-sending upstream: with zero bytes written the client cannot tell a
-      // retry happened, and with any bytes written a retry would duplicate
-      // output. Counting bytes (rather than inspecting the encoder) also
-      // covers message_start, which the client does see.
-      let sentBytes = 0;
+      // Whether a failure can be recovered by re-sending upstream is decided
+      // by the encoder: it knows whether any real content reached the client.
+      // With none, a retry is invisible; with any, it would duplicate output.
+      // (message_start alone does not count — the client sees an empty
+      // envelope, and the replacement stream re-opens it.)
 
       // Issues one fresh upstream request for the recovery path. buildBody
       // already pins the threadId, so this stays on the same CC session.
@@ -680,10 +681,7 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
       await pumpStream(
         stream,
         res,
-        (event) =>
-          encoder
-            .emit(event)
-            .map((r) => (sentBytes++, formatAnthropicSSE(r.event, r.data))),
+        (event) => encoder.emit(event).map((r) => formatAnthropicSSE(r.event, r.data)),
         () =>
           encoder.finished
             ? []
@@ -694,7 +692,7 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
           // once the response has started, no in-band error type makes the
           // client retry (measured: conformance/client-probes/
           // retry-classification.mjs). The proxy is the only recovery layer.
-          if (canRetry && sentBytes === 0) {
+          if (canRetry && !encoder.hasEmittedContent) {
             logger.warn(`[stream] no output yet; re-sending to upstream once`);
             return { retryStream: retryStream() };
           }

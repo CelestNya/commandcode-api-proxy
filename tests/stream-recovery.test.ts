@@ -124,6 +124,50 @@ const anthropicBody = {
 };
 
 describe("流级失败：零内容时重发上游", () => {
+  it("上游 error 事件且零内容时也重发（生产最常出现的形状）", async () => {
+    // 生产日志里 `[CC upstream error] Invalid error response format: Gateway
+    // request failed` 就是这条路径（22:56 那次，零内容、整轮报废）。
+    const calls = scriptedFetch([
+      () => new Response(bytes([
+        { type: "start", data: {} },
+        { type: "error", data: { message: "Invalid error response format: Gateway request failed" } },
+      ])),
+      () => new Response(bytes([
+        { type: "start", data: {} },
+        { type: "text-delta", data: { text: "recovered from upstream error" } },
+        { type: "finish", data: { finishReason: "stop" } },
+      ])),
+    ]);
+    const port = await listen();
+    const { records } = await readSSE(port, "/v1/messages", anthropicBody);
+
+    expect(calls.count).toBe(2);
+    const text = records
+      .filter((r) => r.event === "content_block_delta")
+      .map((r) => (r.data.delta as { text?: string })?.text ?? "")
+      .join("");
+    expect(text).toBe("recovered from upstream error");
+    expect(records.some((r) => r.event === "error")).toBe(false);
+  });
+
+  it("上游 error 事件但已吐内容时不重发，如实报错", async () => {
+    const calls = scriptedFetch([
+      () => new Response(bytes([
+        { type: "start", data: {} },
+        { type: "text-delta", data: { text: "partial" } },
+        { type: "error", data: { message: "boom" } },
+      ])),
+    ]);
+    const port = await listen();
+    const { records } = await readSSE(port, "/v1/messages", anthropicBody);
+
+    expect(calls.count).toBe(1);
+    const events = records.map((r) => r.event);
+    expect(events).toContain("error");
+    // 不伪造成功
+    expect(records.some((r) => r.event === "message_delta")).toBe(false);
+  });
+
   it("重发一次并完整交付第二次的内容（客户端无感）", async () => {
     const calls = scriptedFetch([
       // 第一次：吐出 start 后立刻断（尚无任何内容产出）
@@ -172,6 +216,32 @@ describe("流级失败：零内容时重发上游", () => {
     // 不得伪造成功收尾
     const deltas = records.filter((r) => r.event === "message_delta");
     expect(deltas).toHaveLength(0);
+  });
+
+  it("已发出 message_start 但不含内容时，不重发（重复 message_start 会让整轮失败）", async () => {
+    // 实测（conformance/client-probes/duplicate-role-probe.mjs）：
+    // Anthropic SDK 对重复 message_start 抛
+    // "Received message_start for message m2 while message m1 is still open"，
+    // 整轮 error、messages 为空 —— 比原问题更糟。所以只有"连 message_start
+    // 都没发过"才允许重发。
+    const calls = scriptedFetch([
+      () =>
+        streamThatThenFails(
+          [
+            { type: "start", data: {} },
+            // 一个空内容 delta：足以让 message_start 落地（content 事件才触发它）
+            { type: "text-delta", data: { text: "" } },
+          ],
+          "destroy",
+        ),
+    ]);
+    const port = await listen();
+    const { records } = await readSSE(port, "/v1/messages", anthropicBody);
+
+    // 已经发过 message_start → 不再重发
+    expect(calls.count).toBe(1);
+    const starts = records.filter((r) => r.event === "message_start");
+    expect(starts).toHaveLength(1);
   });
 
   it("重发时固定 threadId，不换会话（避免多计费）", async () => {

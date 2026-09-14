@@ -16,7 +16,7 @@ import type {
   UsageData,
 } from "@/translate/types.js";
 import { resolveModel, resolveEffortForModel } from "@/translate/models.js";
-import { tagStreamError } from "@/stream.js";
+import { tagStreamError, UpstreamEventError } from "@/stream.js";
 import {
   applyNoToolsSafeguard,
   extractUsage,
@@ -224,6 +224,15 @@ export class OpenAIStreamEncoder {
   private readonly created: number;
   private toolCallIndex = 0;
   private sawFinish = false;
+  /**
+   * Whether any real payload (text, reasoning, or a tool call) has been sent.
+   *
+   * The opening role chunk does not count: it carries no payload and clients
+   * merge a repeated one silently, so a retry after only that chunk still
+   * presents a single clean response. This is what decides whether an upstream
+   * `error` event is recoverable by re-sending the request.
+   */
+  private emittedContent = false;
   /** finish 事件里归一后的用量（含缓存命中），供服务层落统计日志 */
   lastUsage?: UsageData;
   // Map a CC toolCallId to the OpenAI streaming `index` we assigned it.
@@ -259,6 +268,16 @@ export class OpenAIStreamEncoder {
 
   get finished(): boolean {
     return this.sawFinish;
+  }
+
+  /**
+   * Whether the client has received anything worth keeping.
+   *
+   * False means a failed attempt can be re-sent invisibly — at most the
+   * opening role chunk went out, which clients merge without complaint.
+   */
+  get hasEmittedContent(): boolean {
+    return this.emittedContent;
   }
 
   /**
@@ -304,6 +323,7 @@ export class OpenAIStreamEncoder {
       case "text-delta": {
         const text = event.data.text as string;
         if (text) {
+          this.emittedContent = true;
           chunks.push({
             id,
             object: "chat.completion.chunk",
@@ -318,6 +338,7 @@ export class OpenAIStreamEncoder {
       case "reasoning-delta": {
         const text = event.data.text as string;
         if (text) {
+          this.emittedContent = true;
           chunks.push({
             id,
             object: "chat.completion.chunk",
@@ -330,6 +351,7 @@ export class OpenAIStreamEncoder {
       }
 
       case "tool-call-delta": {
+        this.emittedContent = true;
         const toolCallId = (event.data.toolCallId as string) ?? undefined;
         const upstreamIndex = (event.data.index as number) ?? undefined;
         const tc: {
@@ -364,6 +386,7 @@ export class OpenAIStreamEncoder {
       }
 
       case "tool-call": {
+        this.emittedContent = true;
         const toolCallId = (event.data.toolCallId as string) ?? "";
         const toolName = (event.data.toolName as string) ?? (event.data.name as string) ?? "";
         const input = event.data.input ?? event.data.arguments;
@@ -431,12 +454,17 @@ export class OpenAIStreamEncoder {
       }
 
       case "error": {
-        this.sawFinish = true;
-        return this.errorChunks(
+        const message =
           (event.data.message as string) ??
-            (event.data.error as { message?: string } | undefined)?.message ??
-            JSON.stringify(event.data),
-        );
+          (event.data.error as { message?: string } | undefined)?.message ??
+          JSON.stringify(event.data);
+        // Nothing meaningful written yet → recoverable: throw so the service
+        // layer can re-send upstream and the client sees one clean response.
+        // The role chunk alone does not count as output (clients merge a
+        // repeated role delta without complaint — measured).
+        if (!this.emittedContent) throw new UpstreamEventError(message);
+        this.sawFinish = true;
+        return this.errorChunks(message);
       }
     }
 
