@@ -27,6 +27,7 @@ pub mod config;
 pub mod log;
 pub mod models;
 pub mod server;
+pub mod translate;
 pub mod usage;
 pub mod validation;
 
