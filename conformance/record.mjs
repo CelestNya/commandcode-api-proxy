@@ -11,7 +11,14 @@
 //   node conformance/record.mjs --check          (compare instead of write)
 
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+  existsSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -82,25 +89,84 @@ function startProxy() {
     CC_IDLE_TIMEOUT_MS: "800",
     CC_UPSTREAM_TIMEOUT_MS: "1200",
     CORS_ORIGIN: "*",
+    // Keep the usage ledger out of the production database. The data directory
+    // is `%LOCALAPPDATA%\cc-proxy` plus this namespace, so a conformance run
+    // writes its hundreds of synthetic attempts (fixture models, injected 5xx)
+    // into a directory of its own instead of mixing them with real billing
+    // history that the tray and any future reporting read.
+    CC_TRAY_NS: "conformance",
   };
-  const proc = spawn(process.execPath, [path.join(ROOT, "dist", "proxy.js")], {
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // --exe <path> spawns that binary directly (e.g. the Rust build) instead of
+  // node + dist/proxy.js. The scenarios, mock and golden stay shared.
+  const exe = flag("exe", null);
+  let proc;
+  if (exe) {
+    // Named on stdout so a run always states what it drove: passing the wrong
+    // --exe (or none) is otherwise indistinguishable from a passing result.
+    console.error(`[recorder] proxy under test: ${exe}`);
+    proc = spawn(exe, { env, stdio: ["ignore", "pipe", "pipe"] });
+  } else {
+    // Refuse to record against a build older than the sources rather than
+    // silently reporting stale behaviour as a pass. This repo carries a copy of
+    // the Node tree, so an un-rebuilt dist/ here once produced a clean
+    // "everything matches" run that had proven nothing.
+    const entry = path.join(ROOT, "dist", "proxy.js");
+    if (!existsSync(entry)) {
+      console.error(
+        `[recorder] ${entry} is missing — build first (npm run build), ` +
+          `or pass --exe <path> to drive a binary directly.`,
+      );
+      process.exit(2);
+    }
+    if (newestMtime(path.join(ROOT, "src")) > statSync(entry).mtimeMs) {
+      console.error(
+        `[recorder] dist/proxy.js is older than src/ — the transcript would describe ` +
+          `stale behaviour. Run \`npm run build\` first, or pass --exe <path>.`,
+      );
+      process.exit(2);
+    }
+    console.error(`[recorder] proxy under test: ${entry}`);
+    proc = spawn(process.execPath, [entry], { env, stdio: ["ignore", "pipe", "pipe"] });
+  }
   proc.stdout.on("data", () => {});
   proc.stderr.on("data", (d) => process.stderr.write(`[proxy] ${d}`));
   return proc;
 }
 
+/** Newest mtime under `dir`, recursively. 0 when the directory is absent. */
+function newestMtime(dir) {
+  let newest = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    const mtime = entry.isDirectory() ? newestMtime(full) : statSync(full).mtimeMs;
+    if (mtime > newest) newest = mtime;
+  }
+  return newest;
+}
+
 // ── normalisation ───────────────────────────────────────────────────────────
 
 /**
- * Normalise a header map: lowercase keys, drop values that legitimately vary
- * per run (trace ids, dates, versions) so diffs stay meaningful.
+ * Normalise a header map: lowercase keys, sort by name, drop values that
+ * legitimately vary per run (trace ids, dates, versions) so diffs stay
+ * meaningful.
+ *
+ * Sorting matters because the order headers appear on the wire is chosen by
+ * the HTTP client or server library, not by the proxy: Node's fetch and ureq
+ * emit them in different orders, and no HTTP contract makes the order
+ * significant. Without this, every case with an upstream request would differ
+ * for a reason that carries no behaviour.
  */
 function normaliseHeaders(h) {
   const out = {};
-  for (const [k, v] of Object.entries(h)) {
+  const entries = Object.entries(h).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [k, v] of entries) {
     const key = k.toLowerCase();
     if (key === "date" || key === "connection" || key === "keep-alive") continue;
     // The advertised CLI version is configuration, not behaviour: it is
@@ -116,6 +182,26 @@ function normaliseHeaders(h) {
     // recorded in full and compared separately, so the length adds nothing.
     if (key === "content-length") {
       out[key] = "<len>";
+      continue;
+    }
+    // sec-fetch-mode is injected by Node's undici fetch, not by the proxy's
+    // own header-building code. It is a runtime artifact of the current
+    // implementation, not a contract — CC does not require it. Dropping it
+    // keeps the golden language-neutral (the Rust client must not have to
+    // fabricate a browser header to match a Node quirk).
+    if (key === "sec-fetch-mode") continue;
+    // HTTP framing is chosen by the server library, not by the proxy's logic:
+    // Node streams without a known length (chunked) while tiny-http buffers
+    // small bodies and sends content-length. Which one appears is an artifact
+    // of the runtime; the body itself is recorded and compared in full. The
+    // Server header is likewise injected by tiny-http.
+    if (key === "transfer-encoding" || key === "server") continue;
+    // The project slug is derived from the working-directory basename, so it
+    // changes whenever the checkout is renamed and would fail every case for a
+    // reason unrelated to behaviour. The contract is the header's presence and
+    // slug shape, not which slug.
+    if (key === "x-project-slug" && /^[a-z0-9-]+$/.test(String(v))) {
+      out[key] = "<slug>";
       continue;
     }
     out[key] = redact(String(v));
@@ -203,6 +289,19 @@ function normaliseJSON(value, key = "") {
     if (key === "workingDir" && /^([A-Za-z]:[\\/]|\/)/.test(value)) return "<cwd>";
     return redact(value);
   }
+  // `/health`'s `cache` block is a running total of every request this process
+  // has served, so its numbers encode how many scenarios the recorder walked
+  // rather than the endpoint's contract. Pinning them would make every added
+  // scenario fail the whole surface group for an unrelated reason — the
+  // contract is that the block exists with numeric fields, which the shape
+  // check below still enforces.
+  if (key === "cache" && value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((k) => [k, typeof value[k] === "number" ? "<count>" : normaliseJSON(value[k], k)]),
+    );
+  }
   // Unix timestamps and other wall-clock scalars vary per run by design; the
   // contract is their presence and type, not their value.
   if (typeof value === "number") {
@@ -224,7 +323,16 @@ async function readResponse(res) {
   const ctype = res.headers.get("content-type") ?? "";
   const base = {
     status: res.status,
-    headers: normaliseHeaders(Object.fromEntries(res.headers)),
+    // A response's framing is chosen by the server library, not by the proxy's
+    // own logic: Node streams an unknown-length body (chunked) while tiny-http
+    // sends a content-length for a body it buffered. Which one appears is a
+    // runtime artifact, and the body is recorded in full and compared, so the
+    // header is dropped here rather than pinned to whichever server is running.
+    headers: normaliseHeaders(
+      Object.fromEntries(
+        [...res.headers].filter(([k]) => k.toLowerCase() !== "content-length"),
+      ),
+    ),
   };
   if (ctype.includes("text/event-stream")) {
     return { ...base, bodyKind: "sse", records: parseSSE(text) };
@@ -282,6 +390,13 @@ async function runCase(name, { pathname, request, headers, scenario, models }) {
     downstream = { status: null, error: redact(String(err)), bodyKind: "transport-error" };
   }
   const upstream = await control("/__log");
+  // Whether every attempt used one session is read off the raw log, before
+  // redaction turns each threadId into "<uuid>". CC bills per session, so a
+  // retry that mints a new one charges the user twice for a single intent —
+  // and that is invisible in the recorded bodies, where the ids look alike.
+  const sessionIds = upstream.requests.map((r) => r.body?.threadId ?? null);
+  const headerIds = upstream.requests.map((r) => r.headers["x-session-id"] ?? null);
+  const stable = (values) => new Set(values).size <= 1;
   return {
     name,
     pathname,
@@ -293,6 +408,15 @@ async function runCase(name, { pathname, request, headers, scenario, models }) {
       headers: normaliseHeaders(r.headers),
       body: r.body ? normaliseJSON(r.body) : null,
     })),
+    session: {
+      attempts: upstream.requests.length,
+      // true when every attempt reused one threadId, i.e. CC sees one session.
+      threadIdStable: stable(sessionIds),
+      headerStable: stable(headerIds),
+      // The two must agree, or CC would see a session id that contradicts the
+      // body it was sent with.
+      bodyMatchesHeader: sessionIds.every((id, i) => id === headerIds[i]),
+    },
     downstream,
   };
 }
@@ -454,7 +578,9 @@ async function main() {
       const body = log.requests[0]?.body;
       transcript.modelResolution.push({
         requested,
-        sentUpstream: body?.model ?? null,
+        // The model travels in `params.model`; reading `body.model` recorded
+        // null for every case, so this group asserted nothing about resolution.
+        sentUpstream: body?.params?.model ?? null,
         threadIdStable: typeof body?.threadId === "string",
       });
     }
@@ -491,6 +617,10 @@ async function main() {
 /** Deep-compare two transcripts, reporting the first path that differs per case. */
 function diffTranscripts(a, b) {
   const diffs = [];
+  // `cases` is keyed by name; the three surface groups are flat arrays. All of
+  // them are part of the contract — comparing only `cases` silently skipped
+  // 21 samples (httpSurface, validation, modelResolution), which is precisely
+  // the set a partially-implemented rewrite can get wrong.
   const casesA = new Map(a.cases.map((c) => [c.name, c]));
   const casesB = new Map(b.cases.map((c) => [c.name, c]));
   for (const name of casesA.keys()) {
@@ -504,6 +634,22 @@ function diffTranscripts(a, b) {
   }
   for (const name of casesB.keys()) {
     if (!casesA.has(name)) diffs.push(`new case not in golden: ${name}`);
+  }
+  for (const group of ["httpSurface", "validation", "modelResolution"]) {
+    const ga = new Map((a[group] ?? []).map((c) => [c.name, c]));
+    const gb = new Map((b[group] ?? []).map((c) => [c.name, c]));
+    for (const name of ga.keys()) {
+      if (!gb.has(name)) {
+        diffs.push(`${group} missing in current run: ${name}`);
+        continue;
+      }
+      if (JSON.stringify(ga.get(name)) !== JSON.stringify(gb.get(name))) {
+        diffs.push(`${group} differs: ${name}`);
+      }
+    }
+    for (const name of gb.keys()) {
+      if (!ga.has(name)) diffs.push(`${group} new case not in golden: ${name}`);
+    }
   }
   return diffs;
 }
