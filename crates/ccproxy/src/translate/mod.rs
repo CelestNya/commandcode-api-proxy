@@ -6,17 +6,22 @@
 //! pin them, and the tests in `golden` replay all 52 of them.
 
 pub mod anthropic;
+pub mod anthropic_stream;
 pub mod models;
+pub mod nonstream;
 pub mod openai;
+pub mod openai_stream;
 pub mod util;
 
 use crate::models::Catalog;
 use serde_json::Value;
 
 pub use anthropic::{resolve_anthropic_model, to_cc_request as anthropic_to_cc};
+pub use anthropic_stream::AnthropicEncoder;
 pub use models::{needs_catalog_discovery, resolve_effort_for_model, resolve_model, ModelTables};
 pub use openai::to_cc_request as openai_to_cc;
-pub use util::{build_cc_config, prune_dangling_tools, truthy};
+pub use openai_stream::OpenAIEncoder;
+pub use util::{build_cc_config, extract_usage, prune_dangling_tools, truthy};
 
 /// The two environment knobs the translation layer honors. Read once at the
 /// call site and threaded through, so the translators stay pure and the tests

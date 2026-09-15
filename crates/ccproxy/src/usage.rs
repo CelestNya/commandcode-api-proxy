@@ -12,6 +12,42 @@ pub struct UsageTotals {
     pub completion_tokens: u64,
 }
 
+/// Usage reported by one upstream turn, ported from `extractUsage`. Every field
+/// is optional because the upstream omits what it does not know, and absence
+/// must stay distinguishable from zero: the Anthropic encoder emits
+/// `input_tokens: 0` for a missing value but *omits* `cache_read_input_tokens`
+/// entirely, and a client that saw a fabricated 0 would report a cache miss.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UsageData {
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+}
+
+impl UsageData {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl UsageTotals {
+    /// Fold one turn's usage into the running totals.
+    pub fn absorb(&mut self, data: &UsageData) {
+        self.requests = self.requests.saturating_add(1);
+        self.prompt_tokens = self
+            .prompt_tokens
+            .saturating_add(data.prompt_tokens.unwrap_or(0));
+        self.cached_tokens = self
+            .cached_tokens
+            .saturating_add(data.cached_tokens.unwrap_or(0));
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(data.completion_tokens.unwrap_or(0));
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct CacheSnapshot {
     pub requests: u64,

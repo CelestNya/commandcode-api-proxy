@@ -1,7 +1,67 @@
 //! Shared CC request scaffolding, ported from src/translate/util.ts:
 //! config block, no-tools safeguard, usage extraction and tool pairing.
 
+use crate::usage::UsageData;
 use serde_json::{json, Map, Value};
+
+/// Extract usage from a CC `finish` event payload, ported from
+/// `extractUsage` in src/translate/util.ts.
+///
+/// The upstream reports usage under `totalUsage` with AI SDK camelCase fields;
+/// other bridges use `usage` with snake_case. Both are accepted, and the
+/// first present alias in each row wins. A string that parses as a finite
+/// number is accepted (some bridges stringify counts), an unparseable one is
+/// treated as absent.
+pub fn extract_usage(data: &Value) -> Option<UsageData> {
+    let container = data
+        .get("totalUsage")
+        .filter(|v| !v.is_null())
+        .or_else(|| data.get("usage").filter(|v| !v.is_null()))?;
+    let u = container.as_object()?;
+
+    let num = |key: &str| -> Option<u64> {
+        match u.get(key)? {
+            Value::Number(n) => n.as_u64().or_else(|| n.as_f64().map(|f| f as u64)),
+            Value::String(s) if !s.trim().is_empty() => {
+                s.trim().parse::<f64>().ok().map(|f| f as u64)
+            }
+            _ => None,
+        }
+    };
+    let first = |keys: &[&str]| -> Option<u64> { keys.iter().find_map(|k| num(k)) };
+    // Nested aliases resolve against the whole container, so a path like
+    // `/inputTokenDetails/cacheReadTokens` works.
+    let nested = |path: &str| -> Option<u64> { container.pointer(path).and_then(Value::as_u64) };
+
+    let prompt_tokens = first(&["promptTokens", "inputTokens", "prompt_tokens"]);
+    let completion_tokens = first(&["completionTokens", "outputTokens", "completion_tokens"]);
+    let total_tokens = first(&["totalTokens", "total_tokens"]).or_else(|| {
+        match (prompt_tokens, completion_tokens) {
+            (Some(p), Some(c)) => Some(p.saturating_add(c)),
+            _ => None,
+        }
+    });
+    let cached_tokens = first(&["cachedInputTokens"])
+        .or_else(|| nested("/inputTokenDetails/cacheReadTokens"))
+        .or_else(|| nested("/promptTokensDetails/cachedTokens"))
+        .or_else(|| nested("/prompt_tokens_details/cached_tokens"));
+    let reasoning_tokens = first(&["reasoningTokens"])
+        .or_else(|| nested("/outputTokenDetails/reasoningTokens"))
+        .or_else(|| nested("/completion_tokens_details/reasoning_tokens"));
+
+    let usage = UsageData {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        reasoning_tokens,
+    };
+    if usage.is_empty() {
+        None
+    } else {
+        Some(usage)
+    }
+}
 
 /// JavaScript truthiness, which several of the ported guards depend on: an
 /// empty string, `0`, `false`, `null` and a missing key are all falsy, while an
