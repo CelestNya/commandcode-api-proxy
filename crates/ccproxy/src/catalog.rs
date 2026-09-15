@@ -162,16 +162,7 @@ fn build(models: Vec<ModelMeta>) -> Catalog {
 /// Fetch the API list and merge it with the static builtins.
 ///
 /// `None` means "nothing usable came back" — the caller keeps what it has.
-/// Static entries keep their order and come first, which is what keeps the
-/// default model (`ids[0]`) stable across a refresh.
 fn fetch_and_merge(api_base: &str, api_key: &str) -> Option<Vec<ModelMeta>> {
-    let raw: RawMeta = meta();
-    let orgs: HashSet<String> = raw
-        .closed_model_orgs
-        .iter()
-        .map(|o| o.to_lowercase())
-        .collect();
-
     let url = format!("{}/provider/v1/models", api_base.trim_end_matches('/'));
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_millis(MODELS_FETCH_TIMEOUT_MS))
@@ -189,11 +180,25 @@ fn fetch_and_merge(api_base: &str, api_key: &str) -> Option<Vec<ModelMeta>> {
         },
         Err(_) => return None,
     };
+    merge(parsed.data)
+}
+
+/// Merge an API model list with the static builtins.
+///
+/// Static entries keep their order and come first, which is what keeps the
+/// default model (`ids[0]`) stable across a refresh. `None` means the list
+/// contributed nothing usable.
+fn merge(api_models: Vec<ApiModel>) -> Option<Vec<ModelMeta>> {
+    let raw: RawMeta = meta();
+    let orgs: HashSet<String> = raw
+        .closed_model_orgs
+        .iter()
+        .map(|o| o.to_lowercase())
+        .collect();
 
     // Tolerate junk entries rather than letting one malformed record discard
     // the whole refresh.
-    let open: Vec<ApiModel> = parsed
-        .data
+    let open: Vec<ApiModel> = api_models
         .into_iter()
         .filter(|m| match m.id.as_deref() {
             Some(id) => !is_closed_model(id, &orgs),
@@ -270,10 +275,145 @@ mod tests {
     }
 
     #[test]
+    fn the_merge_keeps_static_order_first_so_the_default_model_is_stable() {
+        // The API returns the builtins in a different order, plus a new model.
+        // Static order must win, or `ids[0]` — the default model — would move
+        // under a client that never asked for a specific one.
+        let merged = merge(vec![
+            ApiModel {
+                id: Some("deepseek/deepseek-v4-flash".into()),
+                name: None,
+                context_length: None,
+            },
+            ApiModel {
+                id: Some("brand/new-model".into()),
+                name: Some("New Model".into()),
+                context_length: Some(999),
+            },
+        ])
+        .expect("merge succeeds");
+        assert_eq!(merged[0].id, "deepseek/deepseek-v4-pro");
+        assert_eq!(merged[1].id, "deepseek/deepseek-v4-flash");
+        // New models are appended after every static entry.
+        let new = merged
+            .iter()
+            .find(|m| m.id == "brand/new-model")
+            .expect("api-only model present");
+        assert_eq!(new.display_name, "New Model");
+        assert_eq!(new.context_window, 999);
+        assert_eq!(merged.len(), 45);
+    }
+
+    #[test]
+    fn a_refresh_that_only_returns_closed_models_is_discarded() {
+        // CC serves Anthropic/OpenAI/Google models this proxy does not target.
+        // A list containing only those must not replace the catalog — an empty
+        // result is "nothing usable", not "no models exist".
+        assert!(merge(vec![
+            ApiModel {
+                id: Some("claude-opus-5".into()),
+                name: None,
+                context_length: None,
+            },
+            ApiModel {
+                id: Some("gpt-5.5".into()),
+                name: None,
+                context_length: None,
+            },
+            ApiModel {
+                id: Some("google/gemini-3.7-flash".into()),
+                name: None,
+                context_length: None,
+            },
+        ])
+        .is_none());
+        // Junk records with no id at all are skipped, not fatal.
+        assert!(merge(vec![ApiModel {
+            id: None,
+            name: Some("anonymous".into()),
+            context_length: None,
+        },])
+        .is_none());
+    }
+
+    #[test]
+    fn an_api_entry_overrides_the_static_display_name_and_window() {
+        // The API is the source of truth for what it reports; models.json fills
+        // the gaps (aliases, efforts, and any field the API omits).
+        let merged = merge(vec![ApiModel {
+            id: Some("deepseek/deepseek-v4-pro".into()),
+            name: Some("Renamed By API".into()),
+            context_length: Some(555),
+        }])
+        .expect("merge succeeds");
+        let pro = merged
+            .iter()
+            .find(|m| m.id == "deepseek/deepseek-v4-pro")
+            .expect("static entry present");
+        assert_eq!(pro.display_name, "Renamed By API");
+        assert_eq!(pro.context_window, 555);
+    }
+
+    #[test]
+    fn duplicate_api_ids_appear_once() {
+        let merged = merge(vec![
+            ApiModel {
+                id: Some("brand/dupe".into()),
+                name: None,
+                context_length: None,
+            },
+            ApiModel {
+                id: Some("brand/dupe".into()),
+                name: None,
+                context_length: None,
+            },
+        ])
+        .expect("merge succeeds");
+        let count = merged.iter().filter(|m| m.id == "brand/dupe").count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
     fn an_unreachable_api_leaves_the_catalog_alone() {
         // Port 1 is not listening; the refresh must fail quietly.
         let store = CatalogStore::new();
         let after = store.refresh("http://127.0.0.1:1", "key");
         assert_eq!(after.ids.len(), 44);
+        assert_eq!(after.ids[0], "deepseek/deepseek-v4-pro");
+    }
+
+    #[test]
+    fn a_failed_refresh_is_not_retried_on_the_next_calls() {
+        // Without the failure window, an unreachable API would be re-fetched —
+        // and re-timed-out for 5s — on every single request. The guard is what
+        // keeps a down provider from stalling the proxy.
+        let store = CatalogStore::new();
+        let first = store.refresh("http://127.0.0.1:1", "key");
+        // The second call is short-circuited by the failure window, so it does
+        // not touch the network at all. That is asserted structurally — a
+        // timing assertion would measure how fast this machine refuses a
+        // connection, which varies (Windows retries the SYN for ~2s).
+        let started = std::time::Instant::now();
+        let second = store.refresh("http://127.0.0.1:1", "key");
+        let throttled = started.elapsed();
+        assert!(
+            throttled < Duration::from_millis(100),
+            "a throttled refresh must not reach the network, took {throttled:?}"
+        );
+        assert_eq!(first.ids, second.ids);
+        // The same catalog instance, so no reader observes a replacement.
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn the_catalog_is_shared_not_copied_per_reader() {
+        // Requests read the catalog on every call; cloning the Arc keeps that
+        // free, and a refresh is visible to readers that already held one.
+        let store = CatalogStore::new();
+        let held = store.current();
+        assert!(std::sync::Arc::ptr_eq(&held, &store.current()));
+        // A failed refresh must not replace what readers are holding.
+        let _ = store.refresh("http://127.0.0.1:1", "key");
+        assert_eq!(held.ids, store.current().ids);
     }
 }

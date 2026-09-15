@@ -324,6 +324,13 @@ async function runCase(name, { pathname, request, headers, scenario, models }) {
     downstream = { status: null, error: redact(String(err)), bodyKind: "transport-error" };
   }
   const upstream = await control("/__log");
+  // Whether every attempt used one session is read off the raw log, before
+  // redaction turns each threadId into "<uuid>". CC bills per session, so a
+  // retry that mints a new one charges the user twice for a single intent —
+  // and that is invisible in the recorded bodies, where the ids look alike.
+  const sessionIds = upstream.requests.map((r) => r.body?.threadId ?? null);
+  const headerIds = upstream.requests.map((r) => r.headers["x-session-id"] ?? null);
+  const stable = (values) => new Set(values).size <= 1;
   return {
     name,
     pathname,
@@ -335,6 +342,15 @@ async function runCase(name, { pathname, request, headers, scenario, models }) {
       headers: normaliseHeaders(r.headers),
       body: r.body ? normaliseJSON(r.body) : null,
     })),
+    session: {
+      attempts: upstream.requests.length,
+      // true when every attempt reused one threadId, i.e. CC sees one session.
+      threadIdStable: stable(sessionIds),
+      headerStable: stable(headerIds),
+      // The two must agree, or CC would see a session id that contradicts the
+      // body it was sent with.
+      bodyMatchesHeader: sessionIds.every((id, i) => id === headerIds[i]),
+    },
     downstream,
   };
 }

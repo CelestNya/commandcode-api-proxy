@@ -158,3 +158,122 @@ pub fn encoder_model(requested: &str, fallback: &str) -> String {
 pub fn requires_key(dialect: Dialect) -> bool {
     matches!(dialect, Dialect::Openai | Dialect::Anthropic)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn upstream_err(status: u16, message: &str) -> UpstreamError {
+        UpstreamError {
+            message: message.to_string(),
+            status_code: status,
+            retryable: false,
+        }
+    }
+
+    #[test]
+    fn only_a_403_naming_the_model_is_treated_as_discoverable() {
+        assert!(is_unknown_model_error(&upstream_err(
+            403,
+            "CC API 403: {\"error\":{\"message\":\"Model/provider not recognized\"}}"
+        )));
+        // Case differences in the upstream's wording must not defeat this.
+        assert!(is_unknown_model_error(&upstream_err(
+            403,
+            "CC API 403: Model/Provider Not Recognized"
+        )));
+    }
+
+    #[test]
+    fn unrelated_403s_do_not_trigger_a_catalog_refresh() {
+        // A refresh cannot fix an auth or quota rejection, so retrying one
+        // would only spend the user's quota a second time.
+        for message in [
+            "CC API 403: invalid api key",
+            "CC API 403: quota exceeded",
+            "CC API 403: {\"error\":{\"message\":\"forbidden\"}}",
+        ] {
+            assert!(
+                !is_unknown_model_error(&upstream_err(403, message)),
+                "{message} must not be treated as a discoverable model"
+            );
+        }
+    }
+
+    #[test]
+    fn the_message_alone_is_not_enough_without_a_403() {
+        // A 500 carrying the same wording is a server fault, not a resolution
+        // failure: no catalog refresh can help.
+        assert!(!is_unknown_model_error(&upstream_err(
+            500,
+            "Model/provider not recognized"
+        )));
+        assert!(!is_unknown_model_error(&upstream_err(
+            0,
+            "Upstream request failed: Model/provider not recognized"
+        )));
+    }
+
+    #[test]
+    fn discovery_is_skipped_for_a_name_that_already_resolves() {
+        // `discover_model` short-circuits before touching the network, so a
+        // full id or a known alias never costs a refresh. Passing an
+        // unreachable api_base proves no request is attempted.
+        let store = CatalogStore::new();
+        let tables = ModelTables::load();
+        assert!(!discover_model(
+            &store,
+            &tables,
+            "deepseek/deepseek-v4-pro",
+            "http://127.0.0.1:1",
+            "k"
+        ));
+        assert!(!discover_model(
+            &store,
+            &tables,
+            "deepseek-v4-pro",
+            "http://127.0.0.1:1",
+            "k"
+        ));
+        assert!(!discover_model(
+            &store,
+            &tables,
+            "",
+            "http://127.0.0.1:1",
+            "k"
+        ));
+        assert!(!discover_model(
+            &store,
+            &tables,
+            "default",
+            "http://127.0.0.1:1",
+            "k"
+        ));
+    }
+
+    #[test]
+    fn an_unknown_name_reports_unresolved_when_the_api_is_unreachable() {
+        let store = CatalogStore::new();
+        let tables = ModelTables::load();
+        // The refresh fails, so the name stays unknown and the caller reports
+        // the original 403 rather than retrying blindly.
+        assert!(!discover_model(
+            &store,
+            &tables,
+            "brand-new-model",
+            "http://127.0.0.1:1",
+            "k"
+        ));
+    }
+
+    #[test]
+    fn the_encoder_reports_the_requested_name_not_the_resolved_id() {
+        // The client sees the name it asked for; the id it resolves to is an
+        // upstream detail.
+        assert_eq!(encoder_model("deepseek-flash", "default"), "deepseek-flash");
+        // An OpenAI request with no model at all reports the literal "default".
+        assert_eq!(encoder_model("", "default"), "default");
+        // An Anthropic request always carries a model (validation requires it).
+        assert_eq!(encoder_model("claude-opus-5", ""), "claude-opus-5");
+    }
+}
