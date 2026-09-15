@@ -19,6 +19,7 @@ use serde_json::Value;
 pub use anthropic::{resolve_anthropic_model, to_cc_request as anthropic_to_cc};
 pub use anthropic_stream::AnthropicEncoder;
 pub use models::{needs_catalog_discovery, resolve_effort_for_model, resolve_model, ModelTables};
+pub use nonstream::{Collected, GenerationFailed, NonStreamingCollector};
 pub use openai::to_cc_request as openai_to_cc;
 pub use openai_stream::OpenAIEncoder;
 pub use util::{build_cc_config, extract_usage, prune_dangling_tools, truthy};

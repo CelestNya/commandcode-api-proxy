@@ -4,10 +4,15 @@
 //! M1 covers the surface that does not need the upstream: /health, /v1/models,
 //! the 404/401 paths, CORS and local validation rejections.
 
+use crate::catalog::CatalogStore;
 use crate::config::Config;
+use crate::generate;
 use crate::json_error;
 use crate::log;
-use crate::models::{self, Catalog};
+use crate::models::Catalog;
+use crate::stream_body::{self, Dialect, SseBody};
+use crate::translate;
+use crate::upstream::UpstreamError;
 use crate::usage::UsageTotals;
 use crate::validation;
 use serde_json::{json, Map, Value};
@@ -19,7 +24,13 @@ pub const PROXY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub struct AppState {
     pub config: Config,
-    pub catalog: Catalog,
+    /// Re-read per request: a model-discovery refresh replaces the catalog, and
+    /// subsequent requests must see the new one (the Node version reads a
+    /// module-level `current` the same way).
+    pub catalog: CatalogStore,
+    pub tables: crate::translate::ModelTables,
+    /// `ANTHROPIC_DEFAULT_MODEL` / `CC_NO_TOOLS_GUARD`, read once at startup.
+    pub translate_env: crate::translate::Env,
     pub usage: Mutex<UsageTotals>,
 }
 
@@ -28,7 +39,9 @@ pub type SharedState = Arc<AppState>;
 pub fn new_state(config: Config) -> SharedState {
     Arc::new(AppState {
         config,
-        catalog: models::static_catalog(),
+        catalog: CatalogStore::new(),
+        tables: crate::translate::ModelTables::load(),
+        translate_env: crate::translate::Env::from_process(),
         usage: Mutex::new(UsageTotals::default()),
     })
 }
@@ -328,11 +341,10 @@ fn handle_health(state: &SharedState, req: Request, ctx: &RequestId) {
     respond_json(req, 200, body, state, ctx);
 }
 
-fn handle_models(state: &SharedState, req: Request, ctx: &RequestId) {
-    let anthropic = is_anthropic(&req);
+fn render_models(models: &Catalog, req: &Request) -> Value {
+    let anthropic = is_anthropic(req);
     let body = if anthropic {
-        let items: Vec<Value> = state
-            .catalog
+        let items: Vec<Value> = models
             .models
             .iter()
             .map(|m| {
@@ -347,8 +359,8 @@ fn handle_models(state: &SharedState, req: Request, ctx: &RequestId) {
                 })
             })
             .collect();
-        let first = state.catalog.models.first().map(|m| m.id.clone());
-        let last = state.catalog.models.last().map(|m| m.id.clone());
+        let first = models.models.first().map(|m| m.id.clone());
+        let last = models.models.last().map(|m| m.id.clone());
         json!({
             "data": items,
             "has_more": false,
@@ -357,8 +369,7 @@ fn handle_models(state: &SharedState, req: Request, ctx: &RequestId) {
         })
     } else {
         let created = crate::now_epoch_secs();
-        let items: Vec<Value> = state
-            .catalog
+        let items: Vec<Value> = models
             .ids
             .iter()
             .map(|id| {
@@ -372,10 +383,16 @@ fn handle_models(state: &SharedState, req: Request, ctx: &RequestId) {
             .collect();
         json!({"object": "list", "data": items})
     };
+    body
+}
+
+fn handle_models(state: &SharedState, req: Request, ctx: &RequestId) {
+    let catalog = state.catalog.current();
+    let body = render_models(&catalog, &req);
     respond_json(req, 200, body, state, ctx);
 }
 
-/// M1: body parsing, validation and the 401 gate. The upstream call lands in M4.
+/// OpenAI `/v1/chat/completions`: validate, translate, generate.
 fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
     let raw = match parse_body(&mut req, state.config.max_body_bytes) {
         Ok(v) => v,
@@ -384,12 +401,81 @@ fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
     if let Err(validation::ValidationError(msg)) = validation::validate_openai_chat_request(&raw) {
         return respond_openai_error(req, 400, &msg, state, ctx);
     }
-    if extract_api_key(&req).is_none() {
+    let Some(api_key) = extract_api_key(&req) else {
         return respond_openai_error(req, 401, "Unauthorized", state, ctx);
+    };
+
+    let requested = raw
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("default");
+    let is_stream = raw.get("stream").and_then(Value::as_bool) == Some(true);
+    // The encoder reports the name the client asked for, not the resolved id.
+    let encoder_model = generate::encoder_model(requested, "default");
+
+    log_incoming(ctx, &raw, requested);
+
+    // One threadId per client request, shared by every upstream attempt so CC
+    // bills one session per intent.
+    let thread_id = uuid::Uuid::new_v4().to_string();
+    let build_body = |catalog: &Catalog| {
+        let mut body = translate::openai_to_cc(
+            &raw,
+            catalog,
+            &state.tables,
+            state.translate_env.no_tools_guard_off,
+        );
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("threadId".into(), Value::String(thread_id.clone()));
+        }
+        body
+    };
+
+    let opts = upstream_options(state, &api_key);
+    let stream = match generate::send_with_model_discovery(
+        &state.catalog,
+        &state.tables,
+        &opts,
+        requested,
+        &build_body,
+    ) {
+        Ok(s) => s,
+        Err(err) => return respond_upstream_error(req, &err, Dialect::Openai, state, ctx),
+    };
+
+    if is_stream {
+        serve_sse(
+            state,
+            req,
+            ctx,
+            stream,
+            Dialect::Openai,
+            &encoder_model,
+            &api_key,
+            &build_body,
+        );
+    } else {
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut stream = stream;
+        match stream_body::collect_non_streaming(&mut stream, Dialect::Openai, &encoder_model, &id)
+        {
+            Ok(collected) => {
+                record_usage(state, &collected.usage);
+                respond_json(req, 200, collected.body, state, ctx);
+            }
+            Err(f) => {
+                let err = UpstreamError {
+                    message: f.detail(),
+                    status_code: 0,
+                    retryable: false,
+                };
+                respond_upstream_error(req, &err, Dialect::Openai, state, ctx);
+            }
+        }
     }
-    respond_openai_error(req, 501, "Upstream wiring lands in M4", state, ctx);
 }
 
+/// Anthropic `/v1/messages`: validate, translate, generate.
 fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
     let raw = match parse_body(&mut req, state.config.max_body_bytes) {
         Ok(v) => v,
@@ -405,7 +491,7 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
     if let Err(validation::ValidationError(msg)) = validation::validate_anthropic_request(&raw) {
         return respond_anthropic_error(req, 400, "invalid_request_error", &msg, state, ctx);
     }
-    if extract_api_key(&req).is_none() {
+    let Some(api_key) = extract_api_key(&req) else {
         return respond_anthropic_error(
             req,
             401,
@@ -414,15 +500,72 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
             state,
             ctx,
         );
+    };
+
+    let requested = raw.get("model").and_then(Value::as_str).unwrap_or("");
+    let is_stream = raw.get("stream").and_then(Value::as_bool) == Some(true);
+    let encoder_model = generate::encoder_model(requested, "");
+
+    log::info(&format!("[{}] [Anthropic] Model: {requested}", ctx.id));
+
+    let thread_id = uuid::Uuid::new_v4().to_string();
+    let build_body = |catalog: &Catalog| {
+        let mut body =
+            translate::anthropic_to_cc_with_env(&raw, catalog, &state.tables, &state.translate_env);
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("threadId".into(), Value::String(thread_id.clone()));
+        }
+        body
+    };
+
+    let opts = upstream_options(state, &api_key);
+    let stream = match generate::send_with_model_discovery(
+        &state.catalog,
+        &state.tables,
+        &opts,
+        requested,
+        &build_body,
+    ) {
+        Ok(s) => s,
+        Err(err) => return respond_upstream_error(req, &err, Dialect::Anthropic, state, ctx),
+    };
+
+    if is_stream {
+        serve_sse(
+            state,
+            req,
+            ctx,
+            stream,
+            Dialect::Anthropic,
+            &encoder_model,
+            &api_key,
+            &build_body,
+        );
+    } else {
+        // The message id is minted before the body is built: it is part of the
+        // response the client reads and must be stable across the collapse.
+        let id = format!("msg_{}", uuid::Uuid::new_v4());
+        let mut stream = stream;
+        match stream_body::collect_non_streaming(
+            &mut stream,
+            Dialect::Anthropic,
+            &encoder_model,
+            &id,
+        ) {
+            Ok(collected) => {
+                record_usage(state, &collected.usage);
+                respond_json(req, 200, collected.body, state, ctx);
+            }
+            Err(f) => {
+                let err = UpstreamError {
+                    message: f.detail(),
+                    status_code: 0,
+                    retryable: false,
+                };
+                respond_upstream_error(req, &err, Dialect::Anthropic, state, ctx);
+            }
+        }
     }
-    respond_anthropic_error(
-        req,
-        501,
-        "api_error",
-        "Upstream wiring lands in M4",
-        state,
-        ctx,
-    );
 }
 
 fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
@@ -448,6 +591,172 @@ fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
 /// Parse a JSON request body into a map for the translation layer (M2+).
 pub fn body_object(raw: &Value) -> Map<String, Value> {
     raw.as_object().cloned().unwrap_or_default()
+}
+
+// ── generation plumbing ───────────────────────────────────
+
+fn upstream_options<'a>(state: &'a AppState, api_key: &'a str) -> generate::UpstreamOptions<'a> {
+    generate::UpstreamOptions {
+        api_base: &state.config.cc_api_base,
+        api_key,
+        cc_version: &state.config.cc_version,
+        timeout_ms: state.config.upstream_timeout_ms,
+        idle_timeout_ms: state.config.idle_timeout_ms,
+    }
+}
+
+/// The per-request tool summary the Node handler logs. Two facts only — the
+/// model and whether tools were offered — because that is what makes a
+/// "the model ignored my tool" report diagnosable from the log alone.
+fn log_incoming(ctx: &RequestId, raw: &Value, requested: &str) {
+    let tools = raw.get("tools").and_then(Value::as_array);
+    log::info(&format!(
+        "[{}] [Incoming Request] Model: {requested}",
+        ctx.id
+    ));
+    let count = tools.map_or(0, Vec::len);
+    log::info(&format!(
+        "[{}] [Incoming Request] Tools count: {count}",
+        ctx.id
+    ));
+    if let Some(names) = tools.filter(|t| !t.is_empty()) {
+        let list: Vec<&str> = names
+            .iter()
+            .filter_map(|t| t.pointer("/function/name").and_then(Value::as_str))
+            .collect();
+        log::info(&format!(
+            "[{}] [Incoming Request] Tools list: {}",
+            ctx.id,
+            list.join(", ")
+        ));
+    } else {
+        log::info(&format!(
+            "[{}] [Incoming Request] No tools were sent by the client!",
+            ctx.id
+        ));
+    }
+}
+
+fn record_usage(state: &AppState, usage: &Option<crate::usage::UsageData>) {
+    let Some(usage) = usage else { return };
+    // `recordUsage` counts only turns that actually reported a prompt token
+    // count, so a stream with no usage does not inflate the request counter.
+    let Some(prompt) = usage.prompt_tokens else {
+        return;
+    };
+    let cached = usage.cached_tokens.unwrap_or(0);
+    let completion = usage.completion_tokens.unwrap_or(0);
+    let snapshot = match state.usage.lock() {
+        Ok(mut totals) => {
+            totals.requests = totals.requests.saturating_add(1);
+            totals.prompt_tokens = totals.prompt_tokens.saturating_add(prompt);
+            totals.cached_tokens = totals.cached_tokens.saturating_add(cached);
+            totals.completion_tokens = totals.completion_tokens.saturating_add(completion);
+            totals.snapshot()
+        }
+        Err(_) => return,
+    };
+    log::info(&format!(
+        "[usage] {} 缓存 {}/{} tokens（{}%） 输出 {} | 累计 {}/{} tokens（{}%，{} 次请求）",
+        "", // model is not part of the snapshot; the line stays count-only
+        cached,
+        prompt,
+        pct(cached, prompt),
+        completion,
+        snapshot.cached_tokens,
+        snapshot.prompt_tokens,
+        snapshot.cache_rate,
+        snapshot.requests,
+    ));
+}
+
+fn pct(cached: u64, prompt: u64) -> f64 {
+    if prompt == 0 {
+        return 0.0;
+    }
+    ((cached as f64 / prompt as f64) * 1000.0).round() / 10.0
+}
+
+/// Stream the encoded records downstream as SSE.
+///
+/// The response is handed to tiny_http as a `Read`, so the body is pulled as
+/// the socket accepts bytes and a slow client throttles the upstream instead of
+/// being buffered. Nothing here can change the 200 once it is written, which is
+/// why failures after this point are reported in-band by `SseBody`.
+#[allow(clippy::too_many_arguments)]
+fn serve_sse(
+    state: &SharedState,
+    req: Request,
+    ctx: &RequestId,
+    stream: crate::upstream::UpstreamStream,
+    dialect: Dialect,
+    model: &str,
+    api_key: &str,
+    build_body: &dyn Fn(&Catalog) -> Value,
+) {
+    // The recovery re-send repeats the request that just failed. It rebuilds
+    // from the current catalog (which model discovery may have refreshed) but
+    // reuses the pinned threadId, so a recovery stays on one CC session.
+    let retry_state = Arc::clone(state);
+    let retry_key = api_key.to_string();
+    let retry_body = build_body(&retry_state.catalog.current());
+    let reconnect = Box::new(move || {
+        let opts = generate::UpstreamOptions {
+            api_base: &retry_state.config.cc_api_base,
+            api_key: &retry_key,
+            cc_version: &retry_state.config.cc_version,
+            timeout_ms: retry_state.config.upstream_timeout_ms,
+            idle_timeout_ms: retry_state.config.idle_timeout_ms,
+        };
+        generate::resend(&retry_state.catalog, &opts, &|_catalog| retry_body.clone())
+            .map_err(|e| crate::sse::StreamFailure::Other(e.message))
+    });
+
+    let usage_slot = SseBody::new_slot();
+    let body = SseBody::new(
+        stream,
+        dialect,
+        model,
+        Some(reconnect),
+        Arc::clone(&usage_slot),
+    );
+
+    let mut headers = Vec::new();
+    push_header(&mut headers, "Content-Type", "text/event-stream");
+    push_header(&mut headers, "Cache-Control", "no-cache");
+    push_header(&mut headers, "Connection", "keep-alive");
+    cors_headers(state, &mut headers);
+
+    // tiny_http already picks chunked for a body with no known length; the
+    // explicit threshold keeps that choice from depending on how many bytes
+    // happen to be buffered when the response is written.
+    let response =
+        Response::new(StatusCode(200), headers, body, None, None).with_chunked_threshold(0);
+    log::debug(&format!("[{}] -> 200 text/event-stream", ctx.id));
+    // `respond` drives the body to EOF, at which point the usage the encoder
+    // observed (if any) has been published. Recording after this point rather
+    // than inside the body keeps the accounting off the write path.
+    let _ = req.respond(response);
+    let observed = usage_slot.lock().ok().and_then(|g| g.clone());
+    record_usage(state, &observed);
+}
+
+/// Map an upstream failure to the downstream envelope for `dialect`.
+fn respond_upstream_error(
+    req: Request,
+    err: &UpstreamError,
+    dialect: Dialect,
+    state: &AppState,
+    ctx: &RequestId,
+) {
+    let status = err.downstream_status();
+    match dialect {
+        Dialect::Openai => respond_openai_error(req, status, &err.message, state, ctx),
+        Dialect::Anthropic => {
+            let kind = anthropic_error_type(status);
+            respond_anthropic_error(req, status, kind, &err.message, state, ctx);
+        }
+    }
 }
 
 // ── accept loop ───────────────────────────────────────────

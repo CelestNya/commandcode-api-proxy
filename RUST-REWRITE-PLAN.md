@@ -140,7 +140,7 @@ M0–M5 约 7–11 个工作日；M6–M8 追加 3–4 天。
 | M0 | ✅ | `064c6ab` 本文 `3da1aca`(---exe) `4ff3e7a`(工件剔除) `56d139f`(spec 修正) | |
 | M1 | ✅ | `e299ff1` 等 | httpSurface 8 + validation 7 + modelResolution 6 零差异 |
 | M2 | ✅ | `5f163a7` `662065f` | translate.json 52/52 绿；夹具补录输入侧，输出逐字节未变 |
-| M3 | 🟡 | | NDJSON/SSE/encoder 进行中 |
-| M4 | ⬜ | | |
+| M3 | ✅ | `5c2057b` | NDJSON/SSE/两 encoder；32 流用例 + 6 非流用例绿 |
+| M4 | 🟡 | | 上游客户端 + 全链路进行中 |
 | M5 | ⬜ | | |
 | M6–M8 | ⬜ | | 后续 |

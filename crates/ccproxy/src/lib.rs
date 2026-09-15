@@ -23,14 +23,18 @@
     )
 )]
 
+pub mod catalog;
 pub mod config;
+pub mod generate;
 pub mod log;
 pub mod models;
 pub mod ndjson;
 pub mod server;
 pub mod sse;
+pub mod stream_body;
 pub mod tool_arguments;
 pub mod translate;
+pub mod upstream;
 pub mod usage;
 pub mod validation;
 
