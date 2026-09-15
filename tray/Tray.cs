@@ -1011,6 +1011,12 @@ namespace CCProxyTray
                 psi.EnvironmentVariables["HTTP_PROXY"] = url;
             }
             psi.EnvironmentVariables["NO_PROXY"] = BuildNoProxy();
+            // 日志级别：托盘默认不改，让 node 侧用自己的默认（info）。设了
+            // CC_LOG_LEVEL 就透传 —— 排查生产问题时开 debug 不必改代码重编，
+            // 也不必去动服务进程的启动环境。
+            var level = Environment.GetEnvironmentVariable("CC_LOG_LEVEL");
+            if (!string.IsNullOrEmpty(level))
+                psi.EnvironmentVariables["LOG_LEVEL"] = level;
             // 测试实例用独立端口，避免与生产实例抢端口
             if (Program.Ns.Length > 0)
                 psi.EnvironmentVariables["PORT"] = Port().ToString();

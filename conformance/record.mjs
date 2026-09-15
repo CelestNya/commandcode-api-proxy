@@ -155,7 +155,13 @@ function parseSSE(text) {
  * is not part of the contract, and redact run-varying scalars.
  */
 function normaliseJSON(value, key = "") {
-  if (typeof value === "string") return redact(value);
+  if (typeof value === "string") {
+    // The upstream request carries today's date in `config.date`; it changes
+    // daily and is not part of the contract, so pin it — otherwise every case
+    // fails the morning after the golden was recorded.
+    if (key === "date" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return "<date>";
+    return redact(value);
+  }
   // Unix timestamps and other wall-clock scalars vary per run by design; the
   // contract is their presence and type, not their value.
   if (typeof value === "number") {
