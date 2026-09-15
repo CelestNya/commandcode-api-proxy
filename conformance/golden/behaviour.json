@@ -7771,32 +7771,32 @@
   "modelResolution": [
     {
       "requested": "deepseek-v4-pro",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-pro",
       "threadIdStable": true
     },
     {
       "requested": "deepseek-v4",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-pro",
       "threadIdStable": true
     },
     {
       "requested": "deepseek-flash",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-flash",
       "threadIdStable": true
     },
     {
       "requested": "glm-5.3",
-      "sentUpstream": null,
+      "sentUpstream": "zai-org/GLM-5.3",
       "threadIdStable": true
     },
     {
       "requested": "unknown-model-xyz",
-      "sentUpstream": null,
+      "sentUpstream": "unknown-model-xyz",
       "threadIdStable": true
     },
     {
       "requested": "deepseek/deepseek-v4-pro",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-pro",
       "threadIdStable": true
     }
   ]

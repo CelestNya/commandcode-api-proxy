@@ -479,7 +479,9 @@ async function main() {
       const body = log.requests[0]?.body;
       transcript.modelResolution.push({
         requested,
-        sentUpstream: body?.model ?? null,
+        // The model travels in `params.model`; reading `body.model` recorded
+        // null for every case, so this group asserted nothing about resolution.
+        sentUpstream: body?.params?.model ?? null,
         threadIdStable: typeof body?.threadId === "string",
       });
     }
