@@ -117,17 +117,19 @@ tag `v0.5.0-rc`。
 
 ## 4. 风险（短表）
 
-| 风险 | 对策 |
+| 风险 | 状态 |
 | --- | --- |
-| CC 头校验拒绝 Rust 请求 | 头逐字复刻 + M4 末真上游冒烟 |
-| golden 还有隐藏 Node 工件 | 不绿先分类；golden 变更必须单独 commit + review |
-| 背压期间丢 idle 计时 → 永久挂起 | M4 专项场景：慢消费者 + 上游 stall |
-| chunked 截断被当正常 EOF | ureq 层按错误传播（已实测可区分） |
+| CC 头校验拒绝 Rust 请求 | ✅ 已排除：真 key 会话级验收 13/13 |
+| golden 还有隐藏 Node 工件 | ⚠️ 已发现两处（CLI 版本、响应头等待期），见 `ADEVIATIONS.md` |
+| 背压期间丢 idle 计时 → 永久挂起 | ✅ 已证伪（M4 专项：慢消费者 + 上游 stall） |
+| chunked 截断被当正常 EOF | ✅ 已实测可区分（ureq 报 `Error while decoding chunks`） |
+| 上游迟迟不发响应头时 Rust 误判失败 | ⚠️ **已知未修**：此时按 idle 超时判断并重试，最多 3 次请求 |
+| npm 版本刷新偶发超时（约 1/6） | ⚠️ 环境问题，Node 同端点同样失败率；失败静默回退 |
 
 ## 5. 切换与回滚
 
 托盘热更新目录就是回滚路径：Rust 包进 `CCProxy-current` 前旧版本目录保留。
-M5 通过前生产始终是 Node 版。
+M5 已通过；但 M6（托盘）未就绪前，生产切换尚无自动接管路径。
 
 ## 6. 工期
 
@@ -142,7 +144,7 @@ M0–M5 约 7–11 个工作日；M6–M8 追加 3–4 天。
 | M2 | ✅ | `5f163a7` `662065f` | translate.json 52/52 绿；夹具补录输入侧，输出逐字节未变 |
 | M3 | ✅ | `5c2057b` | NDJSON/SSE/两 encoder；32 流用例 + 6 非流用例绿 |
 | M4 | ✅ | `36aa360` `fa0ff0c` 等 | behaviour 67/67 绿（`--exe` 直测二进制）；真上游冒烟见下 |
-| M5 | 🟡 | | RSS/体积已测；待真实 CC key 的会话级验证 + tag |
+| M5 | ✅ | `9e752c2` | 真 key 会话级验收 13/13；RSS/体积已测；tag `v0.5.0-rc` |
 | M6–M8 | ⬜ | | 后续 |
 
 ### M4 发现并修掉的夹具缺陷（都是「夹具在验证空气」）
@@ -164,6 +166,17 @@ M0–M5 约 7–11 个工作日；M6–M8 追加 3–4 天。
 | exe 体积 | < 10 MB | **2.08 MB** | Node 版需捆绑 88 MB node |
 | RSS 空载 | 显著低于 Node | **6.3–6.8 MB** | 生产 Node 进程 **166.5 MB** |
 | RSS 40 并发挂起流 | 不爆炸 | **10.5 MB**（86 线程，回落至 5–6） | — |
+| 真上游会话级验收 | 对话 + 工具调用走通 | **13/13 通过** | 见下 |
+
+**真上游会话级验收**（`node conformance/acceptance.mjs --exe target/release/ccproxy.exe`）：
+在隔离端口起 Rust 二进制、用 ZCode 配置里的真 CC key 打真上游，13 项全过：
+- 对话轮（Anthropic 方言）：HTTP 200、`message_start` → `message_stop`、无 error 记录、
+  正文正常返回
+- 工具调用轮（OpenAI 方言）：HTTP 200、产出 `record_value` 工具调用、
+  `finish_reason: tool_calls`
+- `/health` 记录到 2 次请求；key 不出现在日志里；CLI 版本刷新到 npm 上的 **1.54.0**
+
+**结论：Rust 版通过真 CC 上游的头校验，具备替代生产的行为资格。**
 
 **背压 × idle 计时专项**（计划列为风险项，已证伪）：慢消费者在代理写入阻塞期间
 暂停 5 秒（idle 超时设 2 秒），流仍在 7.0 秒正常终止并落地 idle-timeout 错误，
@@ -171,12 +184,26 @@ M0–M5 约 7–11 个工作日；M6–M8 追加 3–4 天。
 tiny_http 按 socket 可接收量拉取，上游读取只在本次 `read` 内发生，
 idle 时钟由 ureq 的 `timeout_read` 在 socket 层把守，与下游写入互不阻塞。
 
-### M4 真上游冒烟（无 key，但已排除最大风险）
+### M4 真上游冒烟（无 key 时的头校验门）
 
-真 key 无处可取（代理是纯透传，不存 key）。改为验证**头校验门**：
+真 key 当时无处可取（代理是纯透传，不存 key）。改为验证**头校验门**：
 用完整头集合 + 伪造 key 打真上游 → **401 `UNAUTHORIZED`**；
 剥掉 CLI 识别头 → **403 Cloudflare `error code: 1010`**。
 两者可区分即证明头集合被 CC 接受（`Proxy use detected` 类拒绝不会返回 401）。
 Rust 二进制同上跑通两个方言，并确认：401 不重试（2 请求 = 2 次拒绝，非 6 次）、
 key 不落日志、真上游错误体脱敏后透传。
-**M5 仍需真 key 做会话级验证（对话 + 工具调用）。**
+
+**M5 已用真 key 完成会话级验证**（见上表），本节的门只是当时的替代手段。
+
+### M5 期间发现并补掉的两处 parity 缺口（golden 看不见）
+
+1. **CLI 版本没有刷新**：常量 `0.40.3`，而 npm 上已是 **1.54.0**。
+   CC 会拦版本过旧的请求 —— 这会让真 key 验收直接失败。已按 spec §5.1
+   补上启动刷新（`cli_version.rs`，含 4 个注入 fetch 的单测）。
+2. **响应头等待期由 idle 超时把守**（已知差异，记录而非修复）：
+   ureq 整条连接只有一个 socket 读超时，无法在响应头到达后放宽；Node 用
+   `CC_UPSTREAM_TIMEOUT_MS` 把守这一段。实测（`probe-slow-headers.mjs`）：
+   mock 延迟 2s 发头、idle=500ms 时，Node 存活、Rust 502 并重试 3 次。
+   修它要手写 TLS + chunked 解码，不划算；**这是已知的、唯一会多烧 CC 配额的点**，
+   已写进 `ADEVIATIONS.md` 并留下可复跑的探针。
+
