@@ -4,6 +4,7 @@
 //! M1 covers the surface that does not need the upstream: /health, /v1/models,
 //! the 404/401 paths, CORS and local validation rejections.
 
+use crate::billing;
 use crate::catalog::CatalogStore;
 use crate::config::Config;
 use crate::generate;
@@ -12,7 +13,7 @@ use crate::log;
 use crate::models::Catalog;
 use crate::stream_body::{self, Dialect, SseBody};
 use crate::translate;
-use crate::upstream::UpstreamError;
+use crate::upstream::{AttemptSink, UpstreamError};
 use crate::usage::UsageTotals;
 use crate::validation;
 use serde_json::{json, Map, Value};
@@ -431,7 +432,14 @@ fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
         body
     };
 
-    let opts = upstream_options(state, &api_key);
+    // One ledger per client request, counting one row per upstream attempt.
+    let ledger = Arc::new(billing::RequestLedger::new(
+        &ctx.id,
+        &encoder_model,
+        billing::Wire::Openai,
+        is_stream,
+    ));
+    let opts = upstream_options(state, &api_key, ledger.clone());
     let stream = match generate::send_with_model_discovery(
         &state.catalog,
         &state.tables,
@@ -440,7 +448,10 @@ fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
         &build_body,
     ) {
         Ok(s) => s,
-        Err(err) => return respond_upstream_error(req, &err, Dialect::Openai, state, ctx),
+        Err(err) => {
+            record_attempt_failure(&ledger, &err);
+            return respond_upstream_error(req, &err, Dialect::Openai, state, ctx);
+        }
     };
 
     if is_stream {
@@ -453,6 +464,7 @@ fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
             &encoder_model,
             &api_key,
             &build_body,
+            ledger,
         );
     } else {
         let id = uuid::Uuid::new_v4().to_string();
@@ -460,10 +472,12 @@ fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
         match stream_body::collect_non_streaming(&mut stream, Dialect::Openai, &encoder_model, &id)
         {
             Ok(collected) => {
+                ledger.end_attempt(billing::AttemptStatus::Ok, collected.usage.as_ref(), None);
                 record_usage(state, &collected.usage);
                 respond_json(req, 200, collected.body, state, ctx);
             }
             Err(f) => {
+                ledger.end_attempt(billing::AttemptStatus::Error, None, Some(f.tag()));
                 let err = UpstreamError {
                     message: f.detail(),
                     status_code: 0,
@@ -518,7 +532,14 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
         body
     };
 
-    let opts = upstream_options(state, &api_key);
+    // One ledger per client request, counting one row per upstream attempt.
+    let ledger = Arc::new(billing::RequestLedger::new(
+        &ctx.id,
+        &encoder_model,
+        billing::Wire::Anthropic,
+        is_stream,
+    ));
+    let opts = upstream_options(state, &api_key, ledger.clone());
     let stream = match generate::send_with_model_discovery(
         &state.catalog,
         &state.tables,
@@ -527,7 +548,10 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
         &build_body,
     ) {
         Ok(s) => s,
-        Err(err) => return respond_upstream_error(req, &err, Dialect::Anthropic, state, ctx),
+        Err(err) => {
+            record_attempt_failure(&ledger, &err);
+            return respond_upstream_error(req, &err, Dialect::Anthropic, state, ctx);
+        }
     };
 
     if is_stream {
@@ -540,6 +564,7 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
             &encoder_model,
             &api_key,
             &build_body,
+            ledger,
         );
     } else {
         // The message id is minted before the body is built: it is part of the
@@ -553,10 +578,12 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
             &id,
         ) {
             Ok(collected) => {
+                ledger.end_attempt(billing::AttemptStatus::Ok, collected.usage.as_ref(), None);
                 record_usage(state, &collected.usage);
                 respond_json(req, 200, collected.body, state, ctx);
             }
             Err(f) => {
+                ledger.end_attempt(billing::AttemptStatus::Error, None, Some(f.tag()));
                 let err = UpstreamError {
                     message: f.detail(),
                     status_code: 0,
@@ -595,14 +622,34 @@ pub fn body_object(raw: &Value) -> Map<String, Value> {
 
 // ── generation plumbing ───────────────────────────────────
 
-fn upstream_options<'a>(state: &'a AppState, api_key: &'a str) -> generate::UpstreamOptions<'a> {
+fn upstream_options<'a>(
+    state: &'a AppState,
+    api_key: &'a str,
+    ledger: Arc<billing::RequestLedger>,
+) -> generate::UpstreamOptions<'a> {
     generate::UpstreamOptions {
         api_base: &state.config.cc_api_base,
         api_key,
         cc_version: &state.config.cc_version,
         timeout_ms: state.config.upstream_timeout_ms,
         idle_timeout_ms: state.config.idle_timeout_ms,
+        attempts: Some(ledger),
     }
+}
+
+/// Record the final failure of a generation that never got a stream open.
+///
+/// The transport retry loop accounts for each attempt it abandons, so this
+/// covers the last one, which nobody else owns. A rejected dispatch has no
+/// usage to report, so the row carries NULL — a 0 would claim CC generated
+/// something without consuming tokens.
+fn record_attempt_failure(ledger: &billing::RequestLedger, err: &UpstreamError) {
+    let tag = if err.status_code == 0 {
+        "http-network".to_string()
+    } else {
+        format!("http-{}", err.status_code)
+    };
+    ledger.end_attempt(billing::AttemptStatus::Error, None, Some(&tag));
 }
 
 /// The per-request tool summary the Node handler logs. Two facts only — the
@@ -693,6 +740,7 @@ fn serve_sse(
     model: &str,
     api_key: &str,
     build_body: &dyn Fn(&Catalog) -> Value,
+    ledger: Arc<billing::RequestLedger>,
 ) {
     // The recovery re-send repeats the request that just failed. It rebuilds
     // from the current catalog (which model discovery may have refreshed) but
@@ -700,6 +748,9 @@ fn serve_sse(
     let retry_state = Arc::clone(state);
     let retry_key = api_key.to_string();
     let retry_body = build_body(&retry_state.catalog.current());
+    // The replacement is another attempt of the same client request, so it
+    // reports to the same ledger.
+    let retry_ledger = Arc::clone(&ledger);
     let reconnect = Box::new(move || {
         let opts = generate::UpstreamOptions {
             api_base: &retry_state.config.cc_api_base,
@@ -707,18 +758,20 @@ fn serve_sse(
             cc_version: &retry_state.config.cc_version,
             timeout_ms: retry_state.config.upstream_timeout_ms,
             idle_timeout_ms: retry_state.config.idle_timeout_ms,
+            attempts: Some(Arc::clone(&retry_ledger) as Arc<dyn AttemptSink>),
         };
         generate::resend(&retry_state.catalog, &opts, &|_catalog| retry_body.clone())
             .map_err(|e| crate::sse::StreamFailure::Other(e.message))
     });
 
     let usage_slot = SseBody::new_slot();
-    let body = SseBody::new(
+    let body = SseBody::with_outcome(
         stream,
         dialect,
         model,
         Some(reconnect),
         Arc::clone(&usage_slot),
+        Some(Arc::clone(&ledger) as Arc<dyn stream_body::StreamOutcomeSink>),
     );
 
     let mut headers = Vec::new();
@@ -738,6 +791,11 @@ fn serve_sse(
     // than inside the body keeps the accounting off the write path.
     let _ = req.respond(response);
     let observed = usage_slot.lock().ok().and_then(|g| g.clone());
+    // A failure that ended the turn was already recorded by the body, as it
+    // happened; reaching here unsettled means the last attempt succeeded.
+    if !ledger.is_settled() {
+        ledger.end_attempt(billing::AttemptStatus::Ok, observed.as_ref(), None);
+    }
     record_usage(state, &observed);
 }
 
@@ -760,6 +818,27 @@ fn respond_upstream_error(
 }
 
 // ── accept loop ───────────────────────────────────────────
+
+/// Serve on an ephemeral loopback port, in a background thread.
+///
+/// Exists so integration tests can drive the real request path — routing,
+/// translation, the upstream client and the billing ledger — without a fixed
+/// port that would collide with a running instance. Returns the bound port and
+/// the serving thread's handle.
+#[doc(hidden)]
+pub fn serve_on_ephemeral_port(
+    state: SharedState,
+) -> std::io::Result<(u16, std::thread::JoinHandle<()>)> {
+    let server =
+        tiny_http::Server::http("127.0.0.1:0").map_err(|e| std::io::Error::other(e.to_string()))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map(|addr| addr.port())
+        .ok_or_else(|| std::io::Error::other("no ip address"))?;
+    let handle = std::thread::spawn(move || serve(server, state));
+    Ok((port, handle))
+}
 
 /// Max concurrent connection threads. Past the cap a connection is refused
 /// rather than queued: the failure being defended against is a slow or

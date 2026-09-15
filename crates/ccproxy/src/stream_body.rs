@@ -34,6 +34,27 @@ pub enum Dialect {
 /// `respond`, so the totals cannot be read off the encoders afterwards.
 pub type UsageSlot = Arc<Mutex<Option<UsageData>>>;
 
+/// Where a streaming attempt's outcome is reported, as it happens.
+///
+/// A stream is not one attempt: a failure part-way through may be followed by a
+/// splice onto a replacement, so the attempt that died must be recorded *then*,
+/// while the replacement's own outcome comes later. That timing is why this is
+/// a callback rather than a return value — by the time the body is consumed, the
+/// per-attempt detail is gone.
+pub trait StreamOutcomeSink: Send + Sync {
+    /// An attempt died after delivering only thinking, and a replacement is
+    /// being spliced on. Its usage is unknowable: CC reports usage only in the
+    /// terminal `finish` event, so a broken stream has no numbers to give.
+    fn interrupted(&self, tag: &str);
+    /// The client went away, so the attempt was cut short deliberately. This is
+    /// not CC's fault and must not be recorded as an upstream error.
+    fn aborted(&self, tag: &str);
+    /// An attempt failed for good; the client is being told.
+    fn failed(&self, tag: &str, usage: Option<&UsageData>);
+    /// The first byte is being handed downstream (time to first byte).
+    fn ttfb(&self);
+}
+
 /// The SSE byte stream for one response.
 pub struct SseBody {
     upstream: UpstreamStream,
@@ -47,11 +68,15 @@ pub struct SseBody {
     finished: bool,
     /// One replacement attempt is allowed while nothing has been delivered.
     retried: bool,
+    /// Tracks whether the first byte has been reported yet.
+    ttfb_reported: bool,
     /// Re-sends the request for a replacement attempt. `None` disables the
     /// recovery path (used where re-sending would be wrong, e.g. tests).
     reconnect: Option<Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send>>,
     /// Where the observed usage is published once the stream is done.
     usage: UsageSlot,
+    /// Where each attempt's outcome is reported. `None` when unaccounted.
+    outcome: Option<Arc<dyn StreamOutcomeSink>>,
 }
 
 impl SseBody {
@@ -62,6 +87,18 @@ impl SseBody {
         reconnect: Option<Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send>>,
         usage: UsageSlot,
     ) -> Self {
+        Self::with_outcome(upstream, dialect, model, reconnect, usage, None)
+    }
+
+    /// As `new`, but reporting each attempt's outcome to `outcome`.
+    pub fn with_outcome(
+        upstream: UpstreamStream,
+        dialect: Dialect,
+        model: &str,
+        reconnect: Option<Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send>>,
+        usage: UsageSlot,
+        outcome: Option<Arc<dyn StreamOutcomeSink>>,
+    ) -> Self {
         Self {
             upstream,
             dialect,
@@ -71,8 +108,10 @@ impl SseBody {
             out_pos: 0,
             finished: false,
             retried: false,
+            ttfb_reported: false,
             reconnect,
             usage,
+            outcome,
         }
     }
 
@@ -144,6 +183,19 @@ impl SseBody {
         }
         self.finished = true;
         self.publish_usage();
+        // Report a failure that ends the turn for good. A failure that is about
+        // to be spliced is reported by `try_replacement` instead, so this only
+        // sees the attempt the client is actually told about.
+        if let (Some(sink), Some(f)) = (self.outcome.as_ref(), failure.as_ref()) {
+            let observed = self.last_usage();
+            match f {
+                // The client left, so this attempt was cut short on purpose:
+                // recording it as an upstream error would blame CC for our own
+                // abort.
+                StreamFailure::ClientGone => sink.aborted(f.tag()),
+                _ => sink.failed(f.tag(), observed.as_ref()),
+            }
+        }
         match (self.dialect, failure) {
             (Dialect::Openai, Some(f)) => {
                 // The error envelope and nothing else: a finish chunk after it
@@ -195,7 +247,7 @@ impl SseBody {
                         // or a record after the terminal one), so keep pulling.
                     }
                     Err(f) => {
-                        if self.try_replacement()? {
+                        if self.try_replacement(&f)? {
                             continue;
                         }
                         self.terminal(Some(f));
@@ -207,13 +259,21 @@ impl SseBody {
                     return Ok(());
                 }
                 Err(f) => {
-                    if self.try_replacement()? {
+                    if self.try_replacement(&f)? {
                         continue;
                     }
                     self.terminal(Some(f));
                     return Ok(());
                 }
             }
+        }
+    }
+
+    /// The usage the encoders have observed so far, if any.
+    fn last_usage(&self) -> Option<UsageData> {
+        match self.dialect {
+            Dialect::Openai => self.openai.last_usage.clone(),
+            Dialect::Anthropic => self.anthropic.last_usage.clone(),
         }
     }
 
@@ -224,7 +284,7 @@ impl SseBody {
     /// to the writer cannot be taken back, so the replacement must continue the
     /// stream rather than restart it — hence `begin_continuation`, which drops
     /// the replayed opening and reasoning.
-    fn try_replacement(&mut self) -> Result<bool, StreamFailure> {
+    fn try_replacement(&mut self, failure: &StreamFailure) -> Result<bool, StreamFailure> {
         if self.retried || self.out_pos > 0 || !self.can_splice_retry() {
             return Ok(false);
         }
@@ -233,7 +293,14 @@ impl SseBody {
         };
         self.retried = true;
         crate::log::warn("[stream] continuing after upstream failure");
-        self.upstream = reconnect()?;
+        let replaced = reconnect()?;
+        // The attempt that just died is recorded before the replacement is read:
+        // its usage is unknowable (CC reports usage only at the end), so this
+        // becomes a NULL row rather than a fabricated zero.
+        if let Some(sink) = self.outcome.as_ref() {
+            sink.interrupted(failure.tag());
+        }
+        self.upstream = replaced;
         self.begin_continuation();
         Ok(true)
     }
@@ -289,6 +356,14 @@ impl Read for SseBody {
             .map_err(|f| std::io::Error::other(f.tagged()))?;
         if self.out.is_empty() {
             return Ok(0);
+        }
+        // The first bytes are about to be handed over, so this is the moment
+        // the client actually waited for.
+        if !self.ttfb_reported {
+            self.ttfb_reported = true;
+            if let Some(sink) = self.outcome.as_ref() {
+                sink.ttfb();
+            }
         }
         Ok(self.take_out(buf))
     }

@@ -17,8 +17,9 @@ use crate::log;
 use crate::models::Catalog;
 use crate::stream_body::Dialect;
 use crate::translate::{self, ModelTables};
-use crate::upstream::{self, UpstreamError, UpstreamStream};
+use crate::upstream::{self, AttemptSink, UpstreamError, UpstreamStream};
 use serde_json::Value;
+use std::sync::Arc;
 
 /// Where and how to reach CC, resolved from the proxy's config.
 pub struct UpstreamOptions<'a> {
@@ -27,6 +28,14 @@ pub struct UpstreamOptions<'a> {
     pub cc_version: &'a str,
     pub timeout_ms: u64,
     pub idle_timeout_ms: u64,
+    /// Records every upstream attempt this request makes, so an abandoned
+    /// retry leaves a row instead of vanishing. `None` for callers that do not
+    /// account usage.
+    ///
+    /// Held as an `Arc` rather than a borrow because the streaming-recovery
+    /// closure outlives this call and must share the same ledger: the
+    /// replacement request is another attempt of the same client request.
+    pub attempts: Option<Arc<dyn AttemptSink>>,
 }
 
 /// One transport-level send. Caller aborts are not modelled: the stop-loss for
@@ -42,6 +51,7 @@ fn send_once(opts: &UpstreamOptions, body: Value) -> Result<UpstreamStream, Upst
         body,
         opts.timeout_ms,
         opts.idle_timeout_ms,
+        opts.attempts.as_ref(),
     )
 }
 
@@ -106,6 +116,11 @@ pub fn send_with_model_discovery(
     log::info(&format!(
         "Model catalog learned \"{model}\"; retrying with the resolved id"
     ));
+    // This dispatch was rejected before generating anything, but it did reach
+    // CC, so it gets its own row with unknown usage.
+    if let Some(sink) = opts.attempts.as_ref() {
+        sink.failed("http-403-model-unknown");
+    }
     send_once(opts, build_body(&store.current()))
 }
 

@@ -25,11 +25,26 @@ use crate::ndjson::{parse_cc_line, CCEvent, ParsedChunk};
 use crate::sse::StreamFailure;
 use serde_json::Value;
 use std::io::Read;
+use std::sync::Arc;
 use std::time::Duration;
 
 const MAX_RETRIES: u32 = 2;
 const RETRY_BACKOFF_MS: u64 = 500;
 const MAX_ERROR_BODY_BYTES: usize = 16 * 1024;
+
+/// Where the retry layers report the attempts they make and abandon.
+///
+/// Defined here because this is the layer that *decides* to retry, and whoever
+/// abandons an attempt is who accounts for it — that way the same attempt is
+/// never recorded twice. See [`crate::billing::RequestLedger`].
+pub trait AttemptSink: Send + Sync {
+    /// Called immediately before a request really goes out. An attempt that
+    /// fails mid-flight has already reached CC and may already have been billed.
+    fn started(&self);
+    /// Called when this layer abandons the attempt it just made in order to
+    /// retry. `tag` classifies the failure, for attribution.
+    fn failed(&self, tag: &str);
+}
 
 /// A failed upstream request, with the fields the error mapping needs.
 #[derive(Debug, Clone)]
@@ -309,6 +324,7 @@ pub fn send_to_cc(
     mut body: Value,
     timeout_ms: u64,
     idle_timeout_ms: u64,
+    attempts: Option<&Arc<dyn AttemptSink>>,
 ) -> Result<UpstreamStream, UpstreamError> {
     // CC's endpoint is always streaming; the downstream `stream` flag is
     // applied when the collected events are collapsed into a response.
@@ -320,6 +336,11 @@ pub fn send_to_cc(
     let mut last: Option<UpstreamError> = None;
 
     for attempt in 1..=MAX_RETRIES + 1 {
+        // Reported before the request goes out: a request that fails mid-flight
+        // has already reached CC, so it is an attempt that may have been billed.
+        if let Some(sink) = attempts {
+            sink.started();
+        }
         let outcome = attempt_send(
             &url,
             api_key,
@@ -337,6 +358,11 @@ pub fn send_to_cc(
                         "CC upstream {}, retrying {attempt}/{MAX_RETRIES}...",
                         err.status_code
                     ));
+                    // This attempt is abandoned in favour of the retry, so this
+                    // layer records it; the final attempt is the caller's.
+                    if let Some(sink) = attempts {
+                        sink.failed(&format!("http-{}", err.status_code));
+                    }
                     last = Some(err);
                     sleep_ms(RETRY_BACKOFF_MS.saturating_mul(u64::from(attempt)));
                     continue;
@@ -348,6 +374,11 @@ pub fn send_to_cc(
                     log::warn(&format!(
                         "CC upstream timeout/error, retrying {attempt}/{MAX_RETRIES}..."
                     ));
+                    if let Some(sink) = attempts {
+                        // status_code 0 means no HTTP response at all, so the
+                        // distinction is transport failure vs. timeout.
+                        sink.failed(timeout_tag(&err));
+                    }
                     last = Some(err);
                     sleep_ms(RETRY_BACKOFF_MS.saturating_mul(u64::from(attempt)));
                     continue;
@@ -362,6 +393,20 @@ pub fn send_to_cc(
         status_code: 0,
         retryable: true,
     }))
+}
+
+/// Classify a transport failure for the ledger.
+///
+/// A read that exceeded the idle deadline and a connection that broke look the
+/// same from the outside but are different problems, so the tag keeps them
+/// apart: one is an upstream stall, the other a dropped socket.
+fn timeout_tag(err: &UpstreamError) -> &'static str {
+    let lowered = err.message.to_lowercase();
+    if lowered.contains("timed out") || lowered.contains("timeout") {
+        "http-timeout"
+    } else {
+        "http-network"
+    }
 }
 
 /// One attempt. `Err` is a transport-level failure, `Ok(Failed)` a non-2xx.
