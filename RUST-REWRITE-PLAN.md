@@ -141,6 +141,42 @@ M0–M5 约 7–11 个工作日；M6–M8 追加 3–4 天。
 | M1 | ✅ | `e299ff1` 等 | httpSurface 8 + validation 7 + modelResolution 6 零差异 |
 | M2 | ✅ | `5f163a7` `662065f` | translate.json 52/52 绿；夹具补录输入侧，输出逐字节未变 |
 | M3 | ✅ | `5c2057b` | NDJSON/SSE/两 encoder；32 流用例 + 6 非流用例绿 |
-| M4 | 🟡 | | 上游客户端 + 全链路进行中 |
-| M5 | ⬜ | | |
+| M4 | ✅ | `36aa360` `fa0ff0c` 等 | behaviour 67/67 绿（`--exe` 直测二进制）；真上游冒烟见下 |
+| M5 | 🟡 | | RSS/体积已测；待真实 CC key 的会话级验证 + tag |
 | M6–M8 | ⬜ | | 后续 |
+
+### M4 发现并修掉的夹具缺陷（都是「夹具在验证空气」）
+
+1. `modelResolution` 读 `body?.model`，而 model 在 `params.model` —— 6 个样本全部记为
+   `null`，无论代理发什么都通过。修正后记录到真实解析结果
+   （`glm-5.3 → zai-org/GLM-5.3`，大小写保留）。`17dd185`
+2. 上游请求头顺序被逐字节比对，而顺序由 HTTP 客户端库决定（Node fetch vs ureq 不同），
+   HTTP 不定义其语义；下游 `Content-Length` 同理（Node chunked / tiny-http identity）。
+   归一化后 golden 语义不变（排序比对证明）。`9052a4c`
+3. **threadId 复用无验证**：所有 threadId 被 `redact` 成 `<uuid>`，10 个多轮尝试用例
+   看不出重试是否另开 CC 会话（会重复计费）。现在在脱敏前记录
+   `session.{attempts,threadIdStable,headerStable,bodyMatchesHeader}`。`fa0ff0c`
+
+### M5 已测指标（可测的都测了）
+
+| 指标 | 目标 | 实测 | 对比 |
+| --- | --- | --- | --- |
+| exe 体积 | < 10 MB | **2.08 MB** | Node 版需捆绑 88 MB node |
+| RSS 空载 | 显著低于 Node | **6.3–6.8 MB** | 生产 Node 进程 **166.5 MB** |
+| RSS 40 并发挂起流 | 不爆炸 | **10.5 MB**（86 线程，回落至 5–6） | — |
+
+**背压 × idle 计时专项**（计划列为风险项，已证伪）：慢消费者在代理写入阻塞期间
+暂停 5 秒（idle 超时设 2 秒），流仍在 7.0 秒正常终止并落地 idle-timeout 错误，
+437 KB 全部送达 —— 没有永久挂起。原因：`SseBody` 是 pull 型 `Read`，
+tiny_http 按 socket 可接收量拉取，上游读取只在本次 `read` 内发生，
+idle 时钟由 ureq 的 `timeout_read` 在 socket 层把守，与下游写入互不阻塞。
+
+### M4 真上游冒烟（无 key，但已排除最大风险）
+
+真 key 无处可取（代理是纯透传，不存 key）。改为验证**头校验门**：
+用完整头集合 + 伪造 key 打真上游 → **401 `UNAUTHORIZED`**；
+剥掉 CLI 识别头 → **403 Cloudflare `error code: 1010`**。
+两者可区分即证明头集合被 CC 接受（`Proxy use detected` 类拒绝不会返回 401）。
+Rust 二进制同上跑通两个方言，并确认：401 不重试（2 请求 = 2 次拒绝，非 6 次）、
+key 不落日志、真上游错误体脱敏后透传。
+**M5 仍需真 key 做会话级验证（对话 + 工具调用）。**
