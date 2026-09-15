@@ -4,9 +4,27 @@
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let env = |k: &str| std::env::var(k).ok();
-    let config = ccproxy::config::load(&argv, &env);
+    let mut config = ccproxy::config::load(&argv, &env);
 
     ccproxy::log::init(&config.log_level);
+
+    // CC's server blocks a stale `x-command-code-version`, so the published
+    // version is consulted once before the listener opens. An explicit
+    // CC_CLI_VERSION pins it and skips the lookup, so offline runs never wait
+    // on DNS.
+    let pinned = env("CC_CLI_VERSION");
+    let before = config.cc_version.clone();
+    config.cc_version = ccproxy::cli_version::resolve_cli_version(
+        pinned.as_deref(),
+        &config.cc_version,
+        ccproxy::cli_version::fetch_latest_cli_version,
+    );
+    if config.cc_version != before {
+        ccproxy::log::debug(&format!(
+            "CLI version refreshed from npm: {}",
+            config.cc_version
+        ));
+    }
 
     if config.port < 1024 {
         ccproxy::log::warn(&format!(

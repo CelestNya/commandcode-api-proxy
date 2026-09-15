@@ -24,6 +24,7 @@
 )]
 
 pub mod catalog;
+pub mod cli_version;
 pub mod config;
 pub mod generate;
 pub mod log;
