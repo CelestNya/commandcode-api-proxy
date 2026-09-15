@@ -83,10 +83,15 @@ function startProxy() {
     CC_UPSTREAM_TIMEOUT_MS: "1200",
     CORS_ORIGIN: "*",
   };
-  const proc = spawn(process.execPath, [path.join(ROOT, "dist", "proxy.js")], {
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // --exe <path> spawns that binary directly (e.g. the Rust build) instead of
+  // node + dist/proxy.js. The scenarios, mock and golden stay shared.
+  const exe = flag("exe", null);
+  const proc = exe
+    ? spawn(exe, { env, stdio: ["ignore", "pipe", "pipe"] })
+    : spawn(process.execPath, [path.join(ROOT, "dist", "proxy.js")], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
   proc.stdout.on("data", () => {});
   proc.stderr.on("data", (d) => process.stderr.write(`[proxy] ${d}`));
   return proc;
