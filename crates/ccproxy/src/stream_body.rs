@@ -100,6 +100,27 @@ impl SseBody {
         }
     }
 
+    /// Whether a failed attempt can be recovered by splicing a replacement
+    /// stream onto the response already in flight.
+    ///
+    /// Wider than [`Self::has_emitted_content`]: reasoning already delivered
+    /// does not block recovery, because the replacement's replayed reasoning is
+    /// dropped. Answer text does block it, because the user would read the same
+    /// paragraph twice.
+    fn can_splice_retry(&self) -> bool {
+        match self.dialect {
+            Dialect::Openai => self.openai.can_splice_retry(),
+            Dialect::Anthropic => self.anthropic.can_splice_retry(),
+        }
+    }
+
+    fn begin_continuation(&mut self) {
+        match self.dialect {
+            Dialect::Openai => self.openai.begin_continuation(),
+            Dialect::Anthropic => self.anthropic.begin_continuation(),
+        }
+    }
+
     fn encode(&mut self, event: crate::ndjson::CCEvent) -> Result<(), StreamFailure> {
         match self.dialect {
             Dialect::Openai => {
@@ -196,21 +217,24 @@ impl SseBody {
         }
     }
 
-    /// Re-send upstream once, reusing the same encoders so the replacement
-    /// stream continues the same response. Returns whether it was replaced.
+    /// Re-send upstream once, splicing the replacement onto the same response.
+    /// Returns whether it was replaced.
     ///
-    /// Only safe while nothing has been delivered: bytes already handed to the
-    /// writer cannot be taken back, and a second attempt would duplicate them.
+    /// Safe while nothing worth keeping has been delivered. Bytes already handed
+    /// to the writer cannot be taken back, so the replacement must continue the
+    /// stream rather than restart it — hence `begin_continuation`, which drops
+    /// the replayed opening and reasoning.
     fn try_replacement(&mut self) -> Result<bool, StreamFailure> {
-        if self.retried || self.out_pos > 0 || self.has_emitted_content() {
+        if self.retried || self.out_pos > 0 || !self.can_splice_retry() {
             return Ok(false);
         }
         let Some(reconnect) = self.reconnect.as_mut() else {
             return Ok(false);
         };
         self.retried = true;
-        crate::log::warn("[stream] no output yet; re-sending to upstream once");
+        crate::log::warn("[stream] continuing after upstream failure");
         self.upstream = reconnect()?;
+        self.begin_continuation();
         Ok(true)
     }
 

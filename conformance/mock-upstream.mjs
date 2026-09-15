@@ -17,11 +17,14 @@ import { readFileSync } from "node:fs";
 
 const PORT = Number(process.argv[2] ?? 19888);
 
-/** @type {{name: string, status?: number, headers?: Record<string,string>, ndjson?: unknown[], raw?: string, delayMs?: number, resetAfterBytes?: number, resetAfterMs?: number, hangAfterEvents?: number}} */
+/** @type {{name: string, status?: number, headers?: Record<string,string>, ndjson?: unknown[], raw?: string, delayMs?: number, resetAfterBytes?: number, resetAfterMs?: number, hangAfterEvents?: number, attempts?: object[]}} */
 let scenario = { name: "unset", ndjson: [] };
 
 /** Every request the proxy sent upstream, in order. */
 let requestLog = [];
+
+/** How many /alpha/generate requests this scenario has served. */
+let served = 0;
 
 /** Models payload for the catalog endpoint; scenarios may override it. */
 let modelsPayload = {
@@ -63,6 +66,7 @@ const server = http.createServer(async (req, res) => {
     scenario = parsed.scenario ?? scenario;
     if (parsed.models) modelsPayload = parsed.models;
     requestLog = [];
+    served = 0;
     return sendJson(res, 200, { loaded: scenario.name });
   }
 
@@ -82,7 +86,19 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── scripted responses ──
-  const s = scenario;
+  //
+  // `attempts` scripts a different response per /alpha/generate request, which
+  // is what makes the retry paths recordable: the first attempt can end in a
+  // mid-stream error and the second can succeed, and the transcript then shows
+  // the spliced downstream records plus `session.attempts: 2`. Beyond the
+  // scripted attempts the last one repeats, so a retry that should not have
+  // happened is visible as an extra identical response rather than a hang.
+  let s = scenario;
+  if (Array.isArray(s.attempts) && s.attempts.length > 0) {
+    const index = Math.min(served, s.attempts.length - 1);
+    s = s.attempts[index];
+  }
+  served += 1;
 
   if (s.delayMs) {
     await new Promise((r) => setTimeout(r, s.delayMs));

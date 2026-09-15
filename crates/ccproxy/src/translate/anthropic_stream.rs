@@ -73,6 +73,18 @@ pub struct AnthropicEncoder {
     started: bool,
     pinged: bool,
     saw_finish: bool,
+    /// Answer text or a tool call has gone out (`thinking` does not count).
+    ///
+    /// Distinct from `started`, which flips on the first content event of any
+    /// kind. Replayed thinking is tolerable to a user (the block collapses);
+    /// replayed answer text is not.
+    saw_answer: bool,
+    /// A replacement stream is being spliced onto what was already sent, so its
+    /// replayed `start` and thinking are dropped.
+    ///
+    /// Measured in conformance/client-probes/retry-splice.mjs: re-sending
+    /// `message_start` makes Anthropic clients drop the entire message.
+    splice_replay: bool,
     pub last_usage: Option<UsageData>,
 }
 
@@ -89,6 +101,8 @@ impl AnthropicEncoder {
             started: false,
             pinged: false,
             saw_finish: false,
+            saw_answer: false,
+            splice_replay: false,
             last_usage: None,
         }
     }
@@ -111,6 +125,26 @@ impl AnthropicEncoder {
         self.started
     }
 
+    /// Whether a failed attempt can be recovered by splicing a replacement
+    /// stream onto the response the client is already reading.
+    ///
+    /// Allowed while no answer text and no tool call have gone out. A thinking
+    /// block that already went out does not block it: the replayed thinking is
+    /// dropped, so the client reads one continuous response. The 2026-09-15
+    /// incident is exactly this case — CC errored after 7662 characters of
+    /// reasoning with no answer, and the old `!started` gate refused to retry,
+    /// losing the turn. 75 of 77 non-cancel in-stream failures rated on
+    /// production logs land in this cell.
+    pub fn can_splice_retry(&self) -> bool {
+        !self.saw_answer
+    }
+
+    /// Enter splice mode: the next stream is a continuation, so its replayed
+    /// `start` and thinking must be dropped rather than forwarded twice.
+    pub fn begin_continuation(&mut self) {
+        self.splice_replay = self.started;
+    }
+
     /// Translate one CC event. An in-band `error` before any content is
     /// returned as `Err` so the caller can re-send upstream.
     pub fn emit(
@@ -124,8 +158,12 @@ impl AnthropicEncoder {
 
         match kind {
             "start" => {
-                self.block_index = 0;
-                self.current_block_type = None;
+                // A replayed `start` must not reset the block index: the
+                // indices already handed out are part of what the client saw.
+                if !self.splice_replay {
+                    self.block_index = 0;
+                    self.current_block_type = None;
+                }
                 self.pending_start = Some(data.clone());
                 Ok(Vec::new())
             }
@@ -133,7 +171,11 @@ impl AnthropicEncoder {
             "error" => {
                 let message = error_message(data);
                 crate::log::error(&format!("[CC upstream error] {message}"));
-                if !self.started {
+                if self.can_splice_retry() {
+                    // Recoverable: the caller splices a replacement stream on
+                    // and the client sees one continuous response. A thinking
+                    // block already delivered does not block this — its replay
+                    // is dropped while splicing.
                     return Err(StreamFailure::UpstreamEvent(message));
                 }
                 self.saw_finish = true;
@@ -236,6 +278,13 @@ impl AnthropicEncoder {
 
         match kind {
             "text-delta" => {
+                if data
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| !t.is_empty())
+                {
+                    self.saw_answer = true;
+                }
                 self.ensure_block_open(
                     &mut records,
                     BlockType::Text,
@@ -248,6 +297,11 @@ impl AnthropicEncoder {
             }
 
             "reasoning-delta" => {
+                // Replayed thinking during a splice is content the user has
+                // already seen; sending it again would show the block twice.
+                if self.splice_replay {
+                    return Ok(records);
+                }
                 self.ensure_block_open(
                     &mut records,
                     BlockType::Thinking,
@@ -260,6 +314,7 @@ impl AnthropicEncoder {
             }
 
             "tool-call-delta" => {
+                self.saw_answer = true;
                 let id = data.get("toolCallId").and_then(Value::as_str).unwrap_or("");
                 let name = data.get("name").and_then(Value::as_str).unwrap_or("");
                 let index = self.ensure_tool_block(&mut records, id, name);
@@ -284,6 +339,7 @@ impl AnthropicEncoder {
             }
 
             "tool-call" => {
+                self.saw_answer = true;
                 let id = data.get("toolCallId").and_then(Value::as_str).unwrap_or("");
                 let name = data
                     .get("toolName")

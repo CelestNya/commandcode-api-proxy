@@ -11,7 +11,14 @@
 //   node conformance/record.mjs --check          (compare instead of write)
 
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+  existsSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -86,15 +93,55 @@ function startProxy() {
   // --exe <path> spawns that binary directly (e.g. the Rust build) instead of
   // node + dist/proxy.js. The scenarios, mock and golden stay shared.
   const exe = flag("exe", null);
-  const proc = exe
-    ? spawn(exe, { env, stdio: ["ignore", "pipe", "pipe"] })
-    : spawn(process.execPath, [path.join(ROOT, "dist", "proxy.js")], {
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+  let proc;
+  if (exe) {
+    // Named on stdout so a run always states what it drove: passing the wrong
+    // --exe (or none) is otherwise indistinguishable from a passing result.
+    console.error(`[recorder] proxy under test: ${exe}`);
+    proc = spawn(exe, { env, stdio: ["ignore", "pipe", "pipe"] });
+  } else {
+    // Refuse to record against a build older than the sources rather than
+    // silently reporting stale behaviour as a pass. This repo carries a copy of
+    // the Node tree, so an un-rebuilt dist/ here once produced a clean
+    // "everything matches" run that had proven nothing.
+    const entry = path.join(ROOT, "dist", "proxy.js");
+    if (!existsSync(entry)) {
+      console.error(
+        `[recorder] ${entry} is missing — build first (npm run build), ` +
+          `or pass --exe <path> to drive a binary directly.`,
+      );
+      process.exit(2);
+    }
+    if (newestMtime(path.join(ROOT, "src")) > statSync(entry).mtimeMs) {
+      console.error(
+        `[recorder] dist/proxy.js is older than src/ — the transcript would describe ` +
+          `stale behaviour. Run \`npm run build\` first, or pass --exe <path>.`,
+      );
+      process.exit(2);
+    }
+    console.error(`[recorder] proxy under test: ${entry}`);
+    proc = spawn(process.execPath, [entry], { env, stdio: ["ignore", "pipe", "pipe"] });
+  }
   proc.stdout.on("data", () => {});
   proc.stderr.on("data", (d) => process.stderr.write(`[proxy] ${d}`));
   return proc;
+}
+
+/** Newest mtime under `dir`, recursively. 0 when the directory is absent. */
+function newestMtime(dir) {
+  let newest = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    const mtime = entry.isDirectory() ? newestMtime(full) : statSync(full).mtimeMs;
+    if (mtime > newest) newest = mtime;
+  }
+  return newest;
 }
 
 // ── normalisation ───────────────────────────────────────────────────────────
@@ -235,6 +282,19 @@ function normaliseJSON(value, key = "") {
     // the field is filled from the environment, not what the path is.
     if (key === "workingDir" && /^([A-Za-z]:[\\/]|\/)/.test(value)) return "<cwd>";
     return redact(value);
+  }
+  // `/health`'s `cache` block is a running total of every request this process
+  // has served, so its numbers encode how many scenarios the recorder walked
+  // rather than the endpoint's contract. Pinning them would make every added
+  // scenario fail the whole surface group for an unrelated reason — the
+  // contract is that the block exists with numeric fields, which the shape
+  // check below still enforces.
+  if (key === "cache" && value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((k) => [k, typeof value[k] === "number" ? "<count>" : normaliseJSON(value[k], k)]),
+    );
   }
   // Unix timestamps and other wall-clock scalars vary per run by design; the
   // contract is their presence and type, not their value.

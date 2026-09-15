@@ -112,21 +112,57 @@ fn assert_records_match(case_name: &str, got: Vec<Value>) {
     );
 }
 
+/// The upstream scripts a scenario defines, in the order they are served.
+///
+/// A scenario is either one script (`ndjson`) served to every request, or an
+/// `attempts` list where each entry answers one request — that is what lets a
+/// retry be recorded: attempt 1 can die mid-stream and attempt 2 succeed.
+fn scripts(scenario: &Value) -> Vec<Vec<(String, Value)>> {
+    let mut out = Vec::new();
+    if let Some(attempts) = scenario["attempts"].as_array() {
+        for attempt in attempts {
+            out.push(parse_events(attempt["ndjson"].as_array()));
+        }
+    }
+    if out.is_empty() {
+        out.push(parse_events(scenario["ndjson"].as_array()));
+    }
+    out
+}
+
+fn parse_events(ndjson: Option<&Vec<Value>>) -> Vec<(String, Value)> {
+    let mut events = Vec::new();
+    for event in ndjson.cloned().unwrap_or_default() {
+        let line = format!("data: {event}");
+        if let ParsedChunk::Event(e) = parse_cc_line(&line) {
+            events.push((e.kind, e.data));
+        }
+    }
+    events
+}
+
 /// Drive one scenario through the OpenAI encoder, mirroring the pump.
 ///
-/// The pump allows exactly one replacement attempt, and only while the encoder
-/// reports no emitted content. A replacement **reuses the same encoder**, which
-/// is why a recovered failure still shows the opening role chunk twice in the
-/// golden: the first attempt's role chunk was already written downstream, and
-/// the retry's own start emits another. Clients merge a repeated role delta, so
-/// this is invisible to them.
+/// The pump allows exactly one replacement attempt, decided by
+/// `can_splice_retry` — answer text or a tool call already sent blocks it,
+/// reasoning alone does not, because the replacement's replayed reasoning is
+/// dropped. A replacement **reuses the same encoder**: with nothing sent yet,
+/// the retry's own opening role chunk is what the client sees, which is why a
+/// recovered failure still shows the role chunk twice in the golden (clients
+/// merge a repeated role delta, so this is invisible to them).
 fn run_openai(scenario_name: &str, ending: Ending) -> Vec<Value> {
     let s = scenarios()["scenarios"][scenario_name].clone();
-    let ndjson = s["ndjson"].as_array().cloned().unwrap_or_default();
-    let mut attempt: Vec<(String, Value)> = Vec::new();
-    feed(&ndjson, |kind, data| {
-        attempt.push((kind.to_string(), data.clone()));
-    });
+    let attempts = scripts(&s);
+    // Beyond the scripted attempts the last one repeats, matching the mock:
+    // a retry that should not have happened shows up as duplicate output
+    // rather than as a hang.
+    let script_for = |n: usize| -> &Vec<(String, Value)> {
+        attempts
+            .get(n.min(attempts.len().saturating_sub(1)))
+            .unwrap_or(&attempts[0])
+    };
+    let mut attempt = script_for(0).clone();
+    let mut served = 1usize;
 
     let mut encoder = OpenAIEncoder::new(MODEL);
     let mut out: Vec<Value> = Vec::new();
@@ -146,13 +182,16 @@ fn run_openai(scenario_name: &str, ending: Ending) -> Vec<Value> {
         match failed {
             None => break,
             Some(failure) => {
-                if retried || encoder.has_emitted_content() {
+                if retried || !encoder.can_splice_retry() {
                     // Report the failure and stop.
                     out.extend(encoder.stream_error_chunks(&failure));
                     out.push(Value::String("<DONE>".into()));
                     return out;
                 }
                 retried = true;
+                encoder.begin_continuation();
+                attempt = script_for(served).clone();
+                served += 1;
             }
         }
     }
@@ -167,9 +206,10 @@ fn run_openai(scenario_name: &str, ending: Ending) -> Vec<Value> {
         Ending::Failure(failure) => {
             // A transport failure arrives outside the event loop; the pump
             // applies the same retry rule to it.
-            if !retried && !encoder.has_emitted_content() {
+            if !retried && encoder.can_splice_retry() {
                 // Re-send, then fail again: the second failure is reported.
-                for (kind, data) in &attempt {
+                encoder.begin_continuation();
+                for (kind, data) in script_for(served) {
                     if let Ok(chunks) = encoder.emit(kind, data) {
                         out.extend(chunks);
                     }
@@ -187,11 +227,14 @@ fn run_openai(scenario_name: &str, ending: Ending) -> Vec<Value> {
 /// (the buffered `start` produces none of its own until content arrives).
 fn run_anthropic(scenario_name: &str, ending: Ending) -> Vec<AnthropicRecord> {
     let s = scenarios()["scenarios"][scenario_name].clone();
-    let ndjson = s["ndjson"].as_array().cloned().unwrap_or_default();
-    let mut attempt: Vec<(String, Value)> = Vec::new();
-    feed(&ndjson, |kind, data| {
-        attempt.push((kind.to_string(), data.clone()));
-    });
+    let attempts = scripts(&s);
+    let script_for = |n: usize| -> &Vec<(String, Value)> {
+        attempts
+            .get(n.min(attempts.len().saturating_sub(1)))
+            .unwrap_or(&attempts[0])
+    };
+    let mut attempt = script_for(0).clone();
+    let mut served = 1usize;
 
     let mut encoder = AnthropicEncoder::new(MODEL);
     let mut out: Vec<AnthropicRecord> = Vec::new();
@@ -211,11 +254,16 @@ fn run_anthropic(scenario_name: &str, ending: Ending) -> Vec<AnthropicRecord> {
         match failed {
             None => break,
             Some(failure) => {
-                if retried || encoder.has_emitted_content() {
+                if retried || !encoder.can_splice_retry() {
                     out.extend(encoder.error_records(&failure, true));
                     return out;
                 }
                 retried = true;
+                // The replacement stream replays its `start` and thinking; both
+                // are already in the client's hands.
+                encoder.begin_continuation();
+                attempt = script_for(served).clone();
+                served += 1;
             }
         }
     }
@@ -340,6 +388,38 @@ fn anthropic_in_band_error_matches() {
     assert_records_match("stream/anthropic/error-after-content", records);
 }
 
+/// The 2026-09-15 production shape: the upstream dies mid-stream after
+/// reasoning but before any answer text.
+///
+/// Thinking already delivered must not block recovery (its replay is
+/// suppressed), so the transcript shows two attempts spliced into one
+/// continuous response — one `message_start`, the first attempt's thinking,
+/// then the second attempt's answer. The old gate refused this and lost the
+/// whole turn.
+#[test]
+fn retry_splice_recovers_after_reasoning_only() {
+    let records = records_to_json(&run_anthropic(
+        "error-after-reasoning-recovered",
+        Ending::Eof,
+    ));
+    assert_records_match("stream/anthropic/error-after-reasoning-recovered", records);
+
+    let chunks = chunks_to_json(&run_openai("error-after-reasoning-recovered", Ending::Eof));
+    assert_records_match("stream/openai/error-after-reasoning-recovered", chunks);
+}
+
+/// Answer text already delivered: retrying would show the user the same
+/// paragraph twice, so exactly one attempt is made and the failure is reported
+/// after the partial answer.
+#[test]
+fn retry_is_refused_once_answer_text_exists() {
+    let records = records_to_json(&run_anthropic("error-after-text-no-retry", Ending::Eof));
+    assert_records_match("stream/anthropic/error-after-text-no-retry", records);
+
+    let chunks = chunks_to_json(&run_openai("error-after-text-no-retry", Ending::Eof));
+    assert_records_match("stream/openai/error-after-text-no-retry", chunks);
+}
+
 #[test]
 fn openai_transport_failures_match() {
     let reset = StreamFailure::ConnectionReset;
@@ -374,6 +454,8 @@ fn every_stream_case_is_covered() {
                 "error-after-content",
                 "reset-mid-stream",
                 "hang-after-start",
+                "error-after-reasoning-recovered",
+                "error-after-text-no-retry",
             ]
             .iter(),
         )

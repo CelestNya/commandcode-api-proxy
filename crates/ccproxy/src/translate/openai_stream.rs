@@ -46,6 +46,19 @@ pub struct OpenAIEncoder {
     tool_call_index: usize,
     saw_finish: bool,
     emitted_content: bool,
+    /// Answer text or a tool call has gone out (`reasoning` does not count).
+    ///
+    /// Distinct from `emitted_content`, which flips on the first reasoning
+    /// delta: replayed reasoning is nearly invisible to a user, replayed answer
+    /// text is not. The two gate different decisions.
+    saw_answer: bool,
+    /// A replacement stream is being spliced onto what was already sent, so its
+    /// replayed opening (role chunk) and reasoning are dropped.
+    ///
+    /// Measured in conformance/client-probes/retry-splice.mjs: a client that
+    /// receives the answer twice is worse off than one that gets an honest
+    /// error.
+    splice_replay: bool,
     pub last_usage: Option<UsageData>,
     tool_call_id_to_index: HashMap<String, usize>,
     tool_arguments: HashMap<usize, String>,
@@ -62,6 +75,8 @@ impl OpenAIEncoder {
             tool_call_index: 0,
             saw_finish: false,
             emitted_content: false,
+            saw_answer: false,
+            splice_replay: false,
             last_usage: None,
             tool_call_id_to_index: HashMap::new(),
             tool_arguments: HashMap::new(),
@@ -82,6 +97,26 @@ impl OpenAIEncoder {
     /// failed attempt can be re-sent invisibly.
     pub fn has_emitted_content(&self) -> bool {
         self.emitted_content
+    }
+
+    /// Whether a failed attempt can be recovered by splicing a replacement
+    /// stream onto the response the client is already reading.
+    ///
+    /// Allowed while no answer text and no tool call have gone out. Reasoning
+    /// already delivered does not block it: the replayed reasoning is dropped,
+    /// and a user barely notices a thinking block restarting. Answer text does
+    /// block it, because the user would read the same paragraph twice.
+    pub fn can_splice_retry(&self) -> bool {
+        !self.saw_answer
+    }
+
+    /// Enter splice mode: the next stream is a continuation, so its replayed
+    /// opening and reasoning are duplicates and must be dropped.
+    ///
+    /// Only suppresses replay when something was already sent — with nothing
+    /// sent, that opening *is* what the client sees first.
+    pub fn begin_continuation(&mut self) {
+        self.splice_replay = self.emitted_content;
     }
 
     fn envelope(&self, choices: Value) -> Value {
@@ -189,6 +224,13 @@ impl OpenAIEncoder {
 
         match kind {
             "start" => {
+                // A replayed `start` re-numbers tool calls from zero, which
+                // would collide with indices already handed out, and repeats a
+                // role chunk the client has merged. With nothing sent yet it is
+                // the opening of the response and must go out.
+                if self.splice_replay {
+                    return Ok(Vec::new());
+                }
                 self.tool_call_index = 0;
                 Ok(vec![self.delta_chunk(json!({"role": "assistant"}))])
             }
@@ -198,10 +240,16 @@ impl OpenAIEncoder {
                     return Ok(Vec::new());
                 };
                 self.emitted_content = true;
+                self.saw_answer = true;
                 Ok(vec![self.delta_chunk(json!({"content": text}))])
             }
 
             "reasoning-delta" => {
+                // Replayed reasoning during a splice is content the user has
+                // already seen.
+                if self.splice_replay {
+                    return Ok(Vec::new());
+                }
                 let Some(text) = text_of(data) else {
                     return Ok(Vec::new());
                 };
@@ -211,6 +259,7 @@ impl OpenAIEncoder {
 
             "tool-call-delta" => {
                 self.emitted_content = true;
+                self.saw_answer = true;
                 let tool_call_id = data.get("toolCallId").and_then(Value::as_str);
                 let upstream_index = data.get("index").and_then(Value::as_u64);
                 let index = self.resolve_tool_call_index(tool_call_id, upstream_index);
@@ -251,6 +300,7 @@ impl OpenAIEncoder {
 
             "tool-call" => {
                 self.emitted_content = true;
+                self.saw_answer = true;
                 let tool_call_id = data
                     .get("toolCallId")
                     .and_then(Value::as_str)
@@ -325,9 +375,12 @@ impl OpenAIEncoder {
 
             "error" => {
                 let message = error_message(data);
-                if !self.emitted_content {
-                    // Recoverable: the caller re-sends and the client sees one
-                    // clean response.
+                if self.can_splice_retry() {
+                    // Recoverable: the caller splices a replacement stream on
+                    // and the client sees one continuous response. The role
+                    // chunk alone does not count as output (clients merge a
+                    // repeated one), and neither does reasoning, which is
+                    // dropped while splicing.
                     return Err(StreamFailure::UpstreamEvent(message));
                 }
                 self.saw_finish = true;
