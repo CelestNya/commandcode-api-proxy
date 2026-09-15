@@ -34,6 +34,11 @@ const OUT_DIR = path.join(HERE, flag("out", "golden"));
 // A fixed key keeps the recorded transcript free of real credentials.
 const FIXTURE_KEY = "conformance-fixture-key";
 
+// Pinned so the recorded `x-command-code-version` header is reproducible.
+// It is an arbitrary valid-looking version; the contract is that the header is
+// present and carries the configured value, not which value that is.
+const PINNED_CC_VERSION = "0.0.0-conformance";
+
 // ── harness plumbing ────────────────────────────────────────────────────────
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -68,6 +73,11 @@ function startProxy() {
     PORT: String(PROXY_PORT),
     HOST: "127.0.0.1",
     CC_API_BASE: `http://127.0.0.1:${MOCK_PORT}`,
+    // Pin the advertised CLI version. At startup the proxy may refresh this
+    // from the npm registry, and may serve a cached value from an earlier run —
+    // so without this the recorded `x-command-code-version` depends on whether
+    // the machine happened to be online, making the golden non-reproducible.
+    CC_CLI_VERSION: PINNED_CC_VERSION,
     LOG_LEVEL: "error",
     CC_IDLE_TIMEOUT_MS: "800",
     CC_UPSTREAM_TIMEOUT_MS: "1200",
@@ -93,6 +103,21 @@ function normaliseHeaders(h) {
   for (const [k, v] of Object.entries(h)) {
     const key = k.toLowerCase();
     if (key === "date" || key === "connection" || key === "keep-alive") continue;
+    // The advertised CLI version is configuration, not behaviour: it is
+    // refreshed from npm at startup, so its value depends on the machine and
+    // the day. The contract is that the header is present and version-shaped.
+    if (key === "x-command-code-version" && /^\S+$/.test(String(v))) {
+      out[key] = "<version>";
+      continue;
+    }
+    // content-length is derived from the body, and the body embeds the working
+    // directory — so the length leaks how long that path is (moving the repo
+    // changes every case by the difference in path length). The body is
+    // recorded in full and compared separately, so the length adds nothing.
+    if (key === "content-length") {
+      out[key] = "<len>";
+      continue;
+    }
     out[key] = redact(String(v));
   }
   return out;
@@ -114,7 +139,14 @@ function redact(s) {
     )
     .replace(/(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])/gi, "<trace-id>")
     .replace(/(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])/gi, "<span-id>")
-    .replace(/commandcode-cli\/[\d.]+ Node\.js\/v[\d.]+/g, "commandcode-cli/<ver> Node.js/<ver>")
+    // The User-Agent carries the CLI version, which is configured per run (and
+    // refreshed from npm at startup). The contract is the header's shape, not
+    // which version this machine happened to advertise — so normalise both the
+    // version and the node version, including pre-release/build suffixes.
+    .replace(
+      /commandcode-cli\/[^\s]+ Node\.js\/v[^\s]+/g,
+      "commandcode-cli/<ver> Node.js/<ver>",
+    )
     .replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/g, "<timestamp>");
 }
 
@@ -160,6 +192,15 @@ function normaliseJSON(value, key = "") {
     // daily and is not part of the contract, so pin it — otherwise every case
     // fails the morning after the golden was recorded.
     if (key === "date" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return "<date>";
+    // `/health` reports the proxy's own version. A release bump is not a
+    // behaviour change, so pin it too — otherwise every version bump fails the
+    // whole surface group for a reason that has nothing to do with the contract.
+    if (key === "version" && /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(value)) return "<version>";
+    // `config.workingDir` is the directory the proxy was started in. It comes
+    // from process.cwd(), so it changes when the repo moves and would make
+    // every case fail against a golden recorded elsewhere. The contract is that
+    // the field is filled from the environment, not what the path is.
+    if (key === "workingDir" && /^([A-Za-z]:[\\/]|\/)/.test(value)) return "<cwd>";
     return redact(value);
   }
   // Unix timestamps and other wall-clock scalars vary per run by design; the

@@ -18,14 +18,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -37,7 +37,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -165,14 +165,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -184,7 +184,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -315,14 +315,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -334,7 +334,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -480,14 +480,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -499,7 +499,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -651,14 +651,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -670,7 +670,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -816,14 +816,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -835,7 +835,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -1016,14 +1016,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -1035,7 +1035,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -1223,14 +1223,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -1242,7 +1242,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -1414,14 +1414,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -1433,7 +1433,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -1553,14 +1553,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -1572,7 +1572,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -1704,14 +1704,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -1723,7 +1723,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -1871,14 +1871,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -1890,7 +1890,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2053,14 +2053,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2072,7 +2072,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2164,14 +2164,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2183,7 +2183,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2278,14 +2278,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2297,7 +2297,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2407,14 +2407,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2426,7 +2426,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2556,14 +2556,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2575,7 +2575,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2608,14 +2608,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2627,7 +2627,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2731,14 +2731,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2750,7 +2750,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2782,14 +2782,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2801,7 +2801,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -2892,14 +2892,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -2911,7 +2911,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3015,14 +3015,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3034,7 +3034,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3160,14 +3160,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3179,7 +3179,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3289,14 +3289,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3308,7 +3308,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3438,14 +3438,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3457,7 +3457,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3567,14 +3567,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3586,7 +3586,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3716,14 +3716,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3735,7 +3735,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3809,14 +3809,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3828,7 +3828,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -3923,14 +3923,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -3942,7 +3942,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4016,14 +4016,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4035,7 +4035,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4130,14 +4130,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4149,7 +4149,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4253,14 +4253,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4272,7 +4272,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4398,14 +4398,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4417,7 +4417,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4450,14 +4450,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4469,7 +4469,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4573,14 +4573,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4592,7 +4592,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4624,14 +4624,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4643,7 +4643,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4734,14 +4734,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4753,7 +4753,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4828,14 +4828,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4847,7 +4847,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -4917,14 +4917,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -4936,7 +4936,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5004,14 +5004,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5023,7 +5023,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5098,14 +5098,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5117,7 +5117,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5193,14 +5193,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5212,7 +5212,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5286,14 +5286,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5305,7 +5305,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5362,14 +5362,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5381,7 +5381,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5438,14 +5438,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5457,7 +5457,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5514,14 +5514,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5533,7 +5533,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5590,14 +5590,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5609,7 +5609,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5666,14 +5666,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5685,7 +5685,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5742,14 +5742,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5761,7 +5761,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5794,14 +5794,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5813,7 +5813,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5846,14 +5846,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5865,7 +5865,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5922,14 +5922,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5941,7 +5941,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -5973,14 +5973,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -5992,7 +5992,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6024,14 +6024,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6043,7 +6043,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6100,14 +6100,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6119,7 +6119,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6152,14 +6152,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6171,7 +6171,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6204,14 +6204,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6223,7 +6223,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6280,14 +6280,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6299,7 +6299,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6331,14 +6331,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6350,7 +6350,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6382,14 +6382,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6401,7 +6401,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6458,14 +6458,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6477,7 +6477,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6510,14 +6510,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6529,7 +6529,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6562,14 +6562,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6581,7 +6581,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6638,14 +6638,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6657,7 +6657,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6689,14 +6689,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6708,7 +6708,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6740,14 +6740,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6759,7 +6759,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6816,14 +6816,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "873"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6835,7 +6835,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6892,14 +6892,14 @@
             "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
             "x-cli-environment": "production",
-            "x-command-code-version": "1.54.0",
+            "x-command-code-version": "<version>",
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
             "x-project-slug": "cc-proxy",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
-            "content-length": "490"
+            "content-length": "<len>"
           },
           "body": {
             "config": {
@@ -6911,7 +6911,7 @@
               "mainBranch": "",
               "recentCommits": [],
               "structure": [],
-              "workingDir": "C:\\Users\\CelestNya\\.zcode\\workspace\\default\\cc-proxy"
+              "workingDir": "<cwd>"
             },
             "memory": "",
             "params": {
@@ -6976,7 +6976,7 @@
           "requests": 4
         },
         "status": "ok",
-        "version": "0.4.3"
+        "version": "<version>"
       }
     },
     {
