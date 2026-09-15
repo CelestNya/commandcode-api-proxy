@@ -1,0 +1,12 @@
+[package]
+name = "ccproxy"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tiny_http = { workspace = true }
+ureq = { workspace = true }
+uuid = { workspace = true }
