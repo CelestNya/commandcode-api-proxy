@@ -22,7 +22,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -169,7 +169,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -319,7 +319,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -484,7 +484,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -655,7 +655,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -820,7 +820,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -1020,7 +1020,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -1227,7 +1227,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -1418,7 +1418,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -1557,7 +1557,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -1708,7 +1708,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -1875,7 +1875,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2057,7 +2057,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2168,7 +2168,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2282,7 +2282,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2411,7 +2411,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2560,7 +2560,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2612,7 +2612,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2735,7 +2735,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2786,7 +2786,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -2896,7 +2896,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3019,7 +3019,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3164,7 +3164,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3293,7 +3293,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3442,7 +3442,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3571,7 +3571,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3720,7 +3720,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3813,7 +3813,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -3927,7 +3927,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4020,7 +4020,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4134,7 +4134,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4257,7 +4257,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4402,7 +4402,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4454,7 +4454,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4577,7 +4577,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4628,7 +4628,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4738,7 +4738,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4832,7 +4832,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -4921,7 +4921,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5008,7 +5008,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5102,7 +5102,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5197,7 +5197,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5290,7 +5290,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5366,7 +5366,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5442,7 +5442,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5518,7 +5518,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5594,7 +5594,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5670,7 +5670,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5746,7 +5746,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5798,7 +5798,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5850,7 +5850,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5926,7 +5926,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -5977,7 +5977,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6028,7 +6028,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6104,7 +6104,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6156,7 +6156,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6208,7 +6208,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6284,7 +6284,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6335,7 +6335,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6386,7 +6386,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6462,7 +6462,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6514,7 +6514,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6566,7 +6566,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6642,7 +6642,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6693,7 +6693,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6744,7 +6744,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6820,7 +6820,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"
@@ -6896,7 +6896,7 @@
             "x-session-id": "<uuid>",
             "x-co-flag": "false",
             "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
             "sec-fetch-mode": "cors",
             "content-length": "<len>"

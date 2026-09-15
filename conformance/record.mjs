@@ -118,6 +118,14 @@ function normaliseHeaders(h) {
       out[key] = "<len>";
       continue;
     }
+    // The project slug is derived from the working-directory basename, so it
+    // changes whenever the checkout is renamed and would fail every case for a
+    // reason unrelated to behaviour. The contract is the header's presence and
+    // slug shape, not which slug.
+    if (key === "x-project-slug" && /^[a-z0-9-]+$/.test(String(v))) {
+      out[key] = "<slug>";
+      continue;
+    }
     out[key] = redact(String(v));
   }
   return out;
