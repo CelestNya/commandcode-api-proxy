@@ -146,6 +146,10 @@ function launchProxy() {
       LOG_LEVEL: "debug",
       CC_IDLE_TIMEOUT_MS: String(TIMEOUT_MS),
       CC_UPSTREAM_TIMEOUT_MS: String(TIMEOUT_MS),
+      // The few real turns this drives are still not production traffic, and
+      // the ledger lives in a fixed directory shared with the live proxy, so
+      // keep them in their own namespace rather than in the real history.
+      CC_TRAY_NS: "acceptance",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

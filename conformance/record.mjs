@@ -89,6 +89,12 @@ function startProxy() {
     CC_IDLE_TIMEOUT_MS: "800",
     CC_UPSTREAM_TIMEOUT_MS: "1200",
     CORS_ORIGIN: "*",
+    // Keep the usage ledger out of the production database. The data directory
+    // is `%LOCALAPPDATA%\cc-proxy` plus this namespace, so a conformance run
+    // writes its hundreds of synthetic attempts (fixture models, injected 5xx)
+    // into a directory of its own instead of mixing them with real billing
+    // history that the tray and any future reporting read.
+    CC_TRAY_NS: "conformance",
   };
   // --exe <path> spawns that binary directly (e.g. the Rust build) instead of
   // node + dist/proxy.js. The scenarios, mock and golden stay shared.
