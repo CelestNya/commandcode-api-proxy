@@ -1,17 +1,34 @@
 // Anthropic 思考参数的透传：thinking.type 的三种取值 + output_config.effort。
 //
-// 背景（2026-09-15 实测）：
-//   · ZCode 用 `thinking.type` 传开关（enabled / disabled / adaptive），用
-//     `output_config.effort` 传强度档位（low|medium|high|xhigh|max）。
-//   · 代理原先只认 `type:"enabled"`，把"关闭思考"直接 400 拒绝——用户看到
-//     `Field 'thinking.type' must be "enabled" when thinking is set`。
-//   · 代理原先只从 `budget_tokens` 推算 effort，**完全不读 `output_config.effort`**，
-//     所以无论选哪档，发出去的都是由 budget 推出的同一个值（实测恒为 high）。
+// 真实请求体（从 ZCode 的 rollout model-io 记录里逐条解析，1160 条 v4.1-flash）：
+//   thinking=enabled  effort=low      n=224    ← 绝大多数请求
+//   thinking=enabled  effort=high     n=132
+//   thinking=disabled (无 effort)     n=35     ← 这是"关闭思考"的真实形状
+//   thinking=enabled  effort=max      n=10
+//   thinking=enabled  effort=off      n=1      ← 被 400 拒的那次
+//   thinking=enabled  effort=xlow     n=1
+// 关键结论：UI 选"关闭"时 ZCode 发的是 `thinking.type:"disabled"` 且**不带
+// output_config**；`off`/`xlow` 是手工测试值，不是 UI 路径。但两者都必须被
+// 正确接住——客户端确实会发出它们，而任何非法值都会被本地校验或上游拒掉。
 //
-// 上游能力（直接打 api.commandcode.ai 实测）：
-//   · `params.reasoning_effort` 有效：同 prompt 下 max 的 reasoningTokens 是基线的 5 倍。
-//   · `none`/`disabled`/`off`/`minimal`/`adaptive` 一律 400 —— 上游**没有**"关闭"
-//     这个档位，所以"关闭思考"只能在低档位上做降级近似。
+// 上游能力（CC 网关自身的 schema 错误信息，实测）：
+//   · `params.reasoning_effort` 是 Zod enum，**只认五个离散字符串**：
+//       Invalid option: expected one of "low"|"medium"|"high"|"xhigh"|"max"
+//   · `none`/`disabled`/`off`/`minimal` 一律 400；数字（0-100）与数字字符串
+//     同样 400 —— CC 不接受 DeepSeek 文档里那种连续标度。
+//   · CC 的 schema 是 non-strict：未知字段（thinking / reasoning_budget /
+//     thinking_budget …）被**静默丢弃**，返回 200 但完全不生效。判别方法是喂
+//     非法值：仍 200 即证明该字段根本没被识别。
+//     ⇒ 因此**无法**借别的字段名真正关闭思考，只能落到最低档近似。
+//   · 官方 CLI 自己也把"关思考"表达为省略字段
+//     （`thinkingHook: if(!n||"off"===n) return;`）。
+//
+// 生产 bug（2026-09-15，v0.4.3）：两层叠加，症状都是"关了思考还在大量思考"。
+//   1. 校验层：`output_config.effort:"off"` 被本地校验拒成 400
+//      （`must be one of: low, medium, high, xhigh, max`）。
+//   2. 档位表层：models.json 里 v4.1-flash 等写成 ["high","max"]，**缺 "low"**，
+//      于是最低档请求被裁剪逻辑**升档**成 high。官方 CLI 的表是 ["low","high","max"]。
+//   "明明关了思考，还在大量思考"。
 import { describe, it, expect } from "vitest";
 import { toCCRequest } from "@/translate/anthropic.js";
 import { validateAnthropicRequest } from "@/translate/validation.js";
@@ -123,5 +140,86 @@ describe("关闭思考：上游没有对应档位，降级为最低强度", () =
   it('thinking.type="adaptive" 仍尊重显式 effort', () => {
     const req = base({ thinking: { type: "adaptive" }, output_config: { effort: "max" } });
     expect(effortOf(req)).toBe("max");
+  });
+});
+
+describe("effort=\"off\"：生产里被拒的那条请求", () => {
+  // 这是 2026-09-15 生产日志里的原样请求形状：
+  //   [reject] 400 invalid_request_error: Field 'output_config.effort' must be one of: ...
+  // ZCode 的"关闭思考"档位就是这个字面值 "off"。
+  const offReq = () => base({ output_config: { effort: "off" } as never });
+
+  it("不报错（此前直接 400）", () => {
+    expect(() => validateAnthropicRequest(offReq())).not.toThrow();
+  });
+
+  it("映射到该模型支持的最低档", () => {
+    // base 用的 deepseek-v4-flash 只支持 {high,max}，因此最低档是 high。
+    // 为什么不是"省略字段"？交错实测（4 轮 × 每条件，v4.1-flash）：
+    //   显式 low = 1416 字符 < 省略 = 1705 < high = 2196 < max = 4199
+    // 省略等于把选择权交还上游默认值，反而比显式最低档思考更多 ——
+    // 正是用户按"关闭"想避开的东西。
+    expect(effortOf(offReq())).toBe("high");
+  });
+
+  it("支持 low 档的模型上，off 落到 low（不再升到 high）", () => {
+    const req = base({
+      model: "deepseek/deepseek-v4.1-flash",
+      output_config: { effort: "off" } as never,
+    });
+    expect(effortOf(req)).toBe("low");
+  });
+
+  it("与 thinking.type=\"disabled\" 同时出现时，同样落到最低档", () => {
+    const req = base({ thinking: { type: "disabled" }, output_config: { effort: "off" } as never });
+    expect(() => validateAnthropicRequest(req)).not.toThrow();
+    expect(effortOf(req)).toBe("high");
+  });
+
+  // 大小写：客户端可能发 "OFF"。
+  it("接受大写 OFF", () => {
+    const req = base({ output_config: { effort: "OFF" } as never });
+    expect(() => validateAnthropicRequest(req)).not.toThrow();
+    expect(effortOf(req)).toBe("high");
+  });
+
+  // 仍要拦住真正无意义的值，别把校验放松成"什么都收"。
+  // 注意 reasoning_effort 的 none/disabled/minimal 在上游是 400，所以这些
+  // 同样按"关闭"处理；"bogus" 这种则必须是错误。
+  it("仍然拒绝无意义的值", () => {
+    expect(() =>
+      validateAnthropicRequest(base({ output_config: { effort: "bogus" } as never })),
+    ).toThrow(/output_config\.effort/);
+  });
+});
+
+describe("档位表与上游官方 CLI 对齐", () => {
+  // 之前 models.json 里 deepseek-v4.1-flash / GLM-5.3 等写成 ["high","max"]，
+  // 少了 "low"，于是"最低档"请求会被裁剪升档到 high。官方 CLI 的表是
+  // ["low","high","max"]。这里锁住实际在用的模型，防止再手抄错。
+  const req = (model: string, effort: string) =>
+    toCCRequest({
+      model,
+      max_tokens: 8192,
+      messages: [{ role: "user", content: "hi" }],
+      output_config: { effort } as never,
+    }).params.reasoning_effort;
+
+  it.each([
+    ["deepseek/deepseek-v4.1-flash", "low"],
+    ["deepseek/deepseek-v4-flash-fast", "low"],
+    ["zai-org/GLM-5.3", "low"],
+    ["z-ai/glm-5.3-flash", "low"],
+  ])("%s 支持 low 档（不再升档成 high）", (model, effort) => {
+    expect(req(model, effort)).toBe("low");
+  });
+
+  it("xai/grok-4.6 支持 xhigh（不再降档成 high）", () => {
+    expect(req("xai/grok-4.6", "xhigh")).toBe("xhigh");
+  });
+
+  // deepseek-v4-pro 官方表确实只有 {high,max}，低档请求应当被夹到 high。
+  it("deepseek/deepseek-v4-pro 仍把 low 夹到 high", () => {
+    expect(req("deepseek/deepseek-v4-pro", "low")).toBe("high");
   });
 });

@@ -31,8 +31,12 @@ export interface AnthropicRequest {
    * through a thinking budget. Takes precedence over `thinking.budget_tokens`
    * when both are present: effort is the explicit intent, the budget is the
    * older convention.
+   *
+   * "off" is not an upstream level — it is a client's "no extended thinking"
+   * position, which the translator turns into the model's lowest level. It is
+   * typed here because clients do send it (see isEffortOff in validation.ts).
    */
-  output_config?: { effort?: "low" | "medium" | "high" | "xhigh" | "max" };
+  output_config?: { effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" };
   service_tier?: string;
 }
 

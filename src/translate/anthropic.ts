@@ -23,6 +23,7 @@ import type {
 } from "@/translate/types.js";
 import { resolveAnthropicModel } from "@/translate/anthropic-models.js";
 import { resolveEffortForModel } from "@/translate/models.js";
+import { isEffortOff } from "@/translate/validation.js";
 import { extractUsage, pruneDanglingTools, buildCCConfig } from "@/translate/util.js";
 import { tagStreamError, UpstreamEventError } from "@/stream.js";
 import { logger } from "@/logger.js";
@@ -43,13 +44,16 @@ const ANTHROPIC_STOP_REASON_MAP: Record<string, AnthropicStopReason> = {
 };
 const INITIAL_OUTPUT_TOKENS = 1;
 /**
- * Level used when a client asks for thinking to be off.
+ * Level used when a client asks for thinking to be off — via
+ * `thinking.type:"disabled"` or an "off" marker in `output_config.effort`.
  *
  * The upstream accepts no "off" value, so this is the closest expressible
  * intent: the lowest level the model supports (clipping raises it to the
- * model's floor, e.g. "high" for deepseek). Chosen deliberately over dropping
- * the field, which would leave the upstream free to pick anything — including
- * its default, which is what a user turning thinking off is trying to avoid.
+ * model's floor, e.g. "high" for deepseek-v4-pro). Chosen deliberately over
+ * dropping the field: measured over interleaved rounds on v4.1-flash, sending
+ * "low" produced less reasoning than sending nothing at all (1416 vs 1705
+ * chars), because omitting the field hands the choice back to the upstream's
+ * own default — exactly what a user turning thinking off is trying to avoid.
  */
 const DISABLED_THINKING_EFFORT = "low";
 /**
@@ -188,6 +192,7 @@ function toCCPartByBlock(block: AnthropicContentBlock): CCContentPart | null {
  *   2. `output_config.effort` → the explicit level. This is what current
  *      clients send; reading only `budget_tokens` (as this used to) silently
  *      discarded the user's choice and sent the same level every time.
+ *      An "off" marker here (see isEffortOff) means the same as case 1.
  *   3. `thinking.budget_tokens` (also accepted as `budgetTokens`) → the older
  *      convention, mapped onto a level.
  *
@@ -198,8 +203,14 @@ function toCCPartByBlock(block: AnthropicContentBlock): CCContentPart | null {
  */
 function resolveReasoningEffort(req: AnthropicRequest): string | undefined {
   const thinking = req.thinking;
-  if (thinking?.type === "disabled") return DISABLED_THINKING_EFFORT;
-  if (req.output_config?.effort) return req.output_config.effort;
+  const explicit = req.output_config?.effort;
+  // An "off" marker on either channel means "no extended thinking". Mapping it
+  // to the model's floor beats dropping the field: measured on v4.1-flash, the
+  // floor produced less reasoning than sending nothing (1416 vs 1705 chars
+  // median-ish over 4 interleaved rounds) — omitting hands the choice back to
+  // the upstream's own default, which is what the user was trying to leave.
+  if (thinking?.type === "disabled" || isEffortOff(explicit)) return DISABLED_THINKING_EFFORT;
+  if (explicit) return explicit;
   if (!thinking || thinking.type !== "enabled") return undefined;
 
   // Clients differ on the spelling: the Messages API field is snake_case, some

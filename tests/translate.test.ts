@@ -263,6 +263,40 @@ describe("toCCRequest", () => {
     // Non-effort model (not catalogued) → pass through unchanged.
     expect(toCCRequest(withModel("Qwen/Qwen3.7-Max", "high")).params.reasoning_effort).toBe("high");
   });
+
+  // OpenAI 协议的 "none"/"minimal" 与 Anthropic 的 "off" 是同一个意思：不要
+  // 扩展思考。按 rank 裁剪会把它排到最低档**之上**，从而选出一个中间档 ——
+  // 正是"关了思考还在大量思考"的成因。必须落到该模型的最低档。
+  it("none/minimal/disabled/off 落到该模型最低档，而不是被裁剪升档", () => {
+    const withEffort = (model: string, effort: string): OpenAIChatRequest => ({
+      model,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: effort as OpenAIChatRequest["reasoning_effort"],
+    });
+    // v4.1-flash 支持 {low,high,max}：最低档是 low，不是 high。
+    // 用全名：裸名要靠 live catalog 刷新后才能解析，测试里不该依赖网络。
+    for (const marker of ["none", "minimal", "disabled", "off", "OFF"]) {
+      expect(
+        toCCRequest(withEffort("deepseek/deepseek-v4.1-flash", marker)).params.reasoning_effort,
+      ).toBe("low");
+    }
+    // 最低档就是 high 的模型，落到 high 是正确结果（不是 bug）。
+    expect(toCCRequest(withEffort("deepseek-v4-pro", "none")).params.reasoning_effort).toBe("high");
+  });
+
+  // 目录未刷新（冷启动 / 离线）时档位表查不到，此时 "off" 仍必须被换掉：
+  // 原样透传会让上游 400，正是这次故障的形状。
+  it("未编目模型上的 off 也不会泄漏到上游", () => {
+    const withEffort = (model: string, effort: string): OpenAIChatRequest => ({
+      model,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: effort as OpenAIChatRequest["reasoning_effort"],
+    });
+    for (const marker of ["off", "none", "disabled", "minimal"]) {
+      const got = toCCRequest(withEffort("totally/unknown-model", marker)).params.reasoning_effort;
+      expect(got).toBe("low");
+    }
+  });
 });
 
 // ──────────────────────────────────────────

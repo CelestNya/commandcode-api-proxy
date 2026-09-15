@@ -145,6 +145,23 @@ const THINKING_TYPES = new Set(["enabled", "disabled", "adaptive"]);
 /** Accepted `output_config.effort` values — the discrete levels CC accepts. */
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
+/**
+ * Explicit "no extended thinking" markers a client may send as an effort.
+ *
+ * The upstream has no such level (`off`/`none`/`disabled`/`minimal` all 400),
+ * but clients do send them: one whose UI offers an "off" position — as ZCode
+ * does when the model's configured `reasoningLevel.values` include it — passes
+ * that literal through. Rejecting it turned a normal setting into a local 400
+ * that looks like a connectivity failure downstream; the translator instead
+ * resolves it to the model's lowest supported level.
+ */
+const EFFORT_OFF_VALUES = new Set(["off", "none", "disabled", "minimal"]);
+
+/** Whether an effort value means "no extended thinking" rather than a level. */
+export function isEffortOff(value: unknown): boolean {
+  return typeof value === "string" && EFFORT_OFF_VALUES.has(value.trim().toLowerCase());
+}
+
 const BUILT_IN_TOOL_TYPES = new Set([
   "computer_20241022",
   "bash_20241022",
@@ -219,10 +236,15 @@ export function validateAnthropicRequest(body: unknown): AnthropicRequest {
     if (oc === null || typeof oc !== "object") {
       throw new ValidationError("Field 'output_config' must be an object");
     }
-    if (oc.effort !== undefined && !EFFORT_LEVELS.has(oc.effort as string)) {
-      throw new ValidationError(
-        `Field 'output_config.effort' must be one of: ${[...EFFORT_LEVELS].join(", ")}`,
-      );
+    if (oc.effort !== undefined) {
+      const effort = oc.effort as string;
+      // Case-insensitive: clients have sent "OFF"/"Low". "off" is a valid
+      // client-side setting, not a level — see isEffortOff.
+      if (!EFFORT_LEVELS.has(effort.toLowerCase()) && !isEffortOff(effort)) {
+        throw new ValidationError(
+          `Field 'output_config.effort' must be one of: ${[...EFFORT_LEVELS].join(", ")}`,
+        );
+      }
     }
   }
 

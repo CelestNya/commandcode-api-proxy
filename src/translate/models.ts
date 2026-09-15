@@ -2,6 +2,7 @@
 
 import modelsData from "@/models.json" with { type: "json" };
 import { getCatalog, refreshCatalog } from "@/translate/catalog.js";
+import { isEffortOff } from "@/translate/validation.js";
 import { logger } from "@/logger.js";
 
 const BUILTIN_MODELS: string[] = modelsData.builtin;
@@ -11,6 +12,15 @@ const REASONING_EFFORTS: Record<string, string[]> = modelsData.reasoningEfforts 
 
 /** Rank ordering of effort levels (low → max). Used to clip to the nearest valid. */
 const EFFORT_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
+
+/**
+ * What an "off" marker becomes when the model's level set is unknown.
+ *
+ * "low" is the safest concrete level: most models accept it, and CC coerces an
+ * unsupported level silently (it does not 400), so sending a level the model
+ * can't use is harmless — while sending "off" is a hard 400.
+ */
+const LOWEST_EFFORT = "low";
 
 export function getDefaultModels(): string[] {
   return getCatalog().ids;
@@ -78,10 +88,17 @@ export async function discoverModel(
  * honor caller intent without sending a value the model can't use:
  *   - If the model isn't catalogued (no known effort set), pass the request
  *     through unchanged — we don't know better, so don't regress.
- *   - If the model has a known effort set, clip an unsupported request to the
- *     nearest valid level (highest supported rank ≤ requested, else the lowest
- *     supported). E.g. deepseek-v4-pro supports only {high, max}, so a request
- *     for "low"/"medium" becomes "high", and "max" stays reachable.
+ *   - An "off"-style marker ("off"/"none"/"disabled"/"minimal") resolves to the
+ *     model's lowest supported level. It is not a request for "a little
+ *     thinking"; it is a request for none, and the upstream has no such level.
+ *     Clipping it by rank instead would sort it *above* nothing and pick a
+ *     middle level — the bug behind "I turned thinking off and it still thinks
+ *     a lot". The lowest level is also measurably less reasoning than omitting
+ *     the field (which hands the choice back to the upstream's default).
+ *   - Otherwise clip an unsupported request to the nearest valid level (highest
+ *     supported rank ≤ requested, else the lowest supported). E.g.
+ *     deepseek-v4-pro supports only {high, max}, so "low"/"medium" → "high",
+ *     and "max" stays reachable.
  *   - If no effort was requested, return undefined and let CC pick its default.
  */
 export function resolveEffortForModel(
@@ -92,7 +109,21 @@ export function resolveEffortForModel(
   // Uncatalogued/empty effort set, or nothing requested → preserve as-is
   // (undefined or the value). The empty-array guard matters: `[]` is truthy,
   // and reduce() on it below would otherwise throw.
-  if (!supported || supported.length === 0 || !requested) return requested;
+  //
+  // An "off" marker is the one exception: it must never reach the upstream,
+  // catalog or no catalog. The upstream 400s on it, so passing it through on a
+  // cold catalog (before the first refresh) would reproduce the very outage
+  // this guards against. Pick the lowest *known-rankable* level instead.
+  if (!supported || supported.length === 0 || !requested) {
+    if (isEffortOff(requested)) return LOWEST_EFFORT;
+    return requested;
+  }
+
+  const rank = (e: string): number => EFFORT_RANK[e] ?? 2;
+  const lowest = (set: string[]): string =>
+    set.reduce((best, e) => (rank(e) < rank(best) ? e : best));
+
+  if (isEffortOff(requested)) return lowest(supported);
 
   if (!(requested in EFFORT_RANK)) {
     logger.warn(`Unknown reasoning_effort "${requested}" for ${canonicalModel}, clipping as "high"`);
@@ -100,12 +131,11 @@ export function resolveEffortForModel(
 
   if (supported.includes(requested)) return requested;
 
-  const rank = (e: string): number => EFFORT_RANK[e] ?? 2;
   const reqRank = rank(requested);
   const atOrBelow = supported.filter((e) => rank(e) <= reqRank);
   if (atOrBelow.length > 0) {
     return atOrBelow.reduce((best, e) => (rank(e) > rank(best) ? e : best));
   }
   // Requested rank is below every supported level → use the lowest supported.
-  return supported.reduce((best, e) => (rank(e) < rank(best) ? e : best));
+  return lowest(supported);
 }
