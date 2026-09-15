@@ -4,6 +4,17 @@
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let env = |k: &str| std::env::var(k).ok();
+
+    // A one-shot maintenance command rather than a server flag: importing the
+    // legacy history is something you run once after upgrading, and it must not
+    // be entangled with starting the listener.
+    if argv.iter().any(|a| a == "--import-legacy-usage") {
+        let mut config = ccproxy::config::load(&argv, &env);
+        ccproxy::log::init(&config.log_level);
+        config.log_level = "info".into();
+        std::process::exit(import_legacy_usage(&config, &argv));
+    }
+
     let mut config = ccproxy::config::load(&argv, &env);
 
     ccproxy::log::init(&config.log_level);
@@ -57,4 +68,61 @@ fn main() {
     ));
 
     ccproxy::server::serve(server, state);
+}
+
+/// Import the pre-M7 `usage.jsonl` history into the ledger, then exit.
+///
+/// `--dir <path>` names a directory to search (repeatable, where the old builds
+/// kept `logs/usage.jsonl`); with none given, the directories next to the
+/// running executable and the release folder above it are scanned.
+fn import_legacy_usage(config: &ccproxy::config::Config, argv: &[String]) -> i32 {
+    let _ = config;
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    let mut iter = argv.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--dir" {
+            if let Some(value) = iter.next() {
+                dirs.push(std::path::PathBuf::from(value));
+            }
+        }
+    }
+    if dirs.is_empty() {
+        dirs = legacy_search_dirs();
+    }
+    let dir = ccproxy::billing::billing_dir();
+    let Some(conn) = ccproxy::billing::open_database(&dir) else {
+        ccproxy::log::error(&format!("cannot open {}", dir.join("billing.db").display()));
+        return 2;
+    };
+    let count = ccproxy::billing::import_legacy_jsonl(&conn, &dirs);
+    if count == 0 {
+        ccproxy::log::info(&format!(
+            "[billing] nothing to import into {} (already imported, or no usage.jsonl in {} director(ies))",
+            dir.join("billing.db").display(),
+            dirs.len()
+        ));
+    }
+    0
+}
+
+/// Version directories to scan for a legacy `usage.jsonl`.
+fn legacy_search_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    // Beside the executable, and one level up: the release layout is
+    // `CCProxy-Release/CCProxy-v0.4.4/dist/proxy.js`, with `logs/` next to it.
+    if let Ok(exe) = std::env::current_exe() {
+        for ancestor in exe.ancestors().skip(1).take(3) {
+            dirs.push(ancestor.to_path_buf());
+        }
+    }
+    // The upgrade layout keeps every version side by side.
+    let release = std::path::Path::new("CCProxy-Release");
+    if release.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(release) {
+            for entry in entries.flatten() {
+                dirs.push(entry.path());
+            }
+        }
+    }
+    dirs
 }

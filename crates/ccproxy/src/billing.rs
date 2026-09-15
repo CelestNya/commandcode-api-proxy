@@ -127,7 +127,15 @@ create table if not exists billing (
 );
 create index if not exists billing_ts on billing (ts);
 create index if not exists billing_reqId on billing (reqId);
+create table if not exists meta (
+  key   text primary key,
+  value text not null
+);
 ";
+
+/// Records that the legacy `usage.jsonl` has been imported, so the import runs
+/// once per database rather than duplicating history on every startup.
+const LEGACY_IMPORT_KEY: &str = "legacy_jsonl_imported";
 
 /// Messages the writer thread handles.
 enum Message {
@@ -289,6 +297,16 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
+/// Open the ledger database in `dir`, creating the directory and schema.
+///
+/// Exposed for the one-shot legacy import, which needs the same schema and
+/// pragmas as the running proxy — opening the file directly would leave the
+/// tables missing and quietly import nothing.
+pub fn open_database(dir: &Path) -> Option<Connection> {
+    std::fs::create_dir_all(dir).ok()?;
+    open_connection(&dir.join("billing.db")).ok()
+}
+
 /// Delete rows older than [`RETENTION_DAYS`]. Best effort.
 fn prune_old_rows(conn: &Connection) {
     let cutoff =
@@ -298,6 +316,117 @@ fn prune_old_rows(conn: &Connection) {
         Ok(n) => crate::log::debug(&format!("[billing] pruned {n} row(s) past retention")),
         Err(err) => crate::log::debug(&format!("[billing] prune failed: {err}")),
     }
+}
+
+// ── legacy import ─────────────────────────────────────────
+
+/// One row of the Node build's `logs/usage.jsonl`.
+#[derive(serde::Deserialize)]
+struct LegacyRow {
+    ts: String,
+    model: String,
+    #[serde(rename = "promptTokens")]
+    prompt_tokens: Option<u64>,
+    #[serde(rename = "cachedTokens")]
+    cached_tokens: Option<u64>,
+    #[serde(rename = "completionTokens")]
+    completion_tokens: Option<u64>,
+}
+
+/// Import the pre-M7 `usage.jsonl` files, once per database.
+///
+/// The old format recorded one line per *client request* with five fields, so
+/// the rows it can produce are not equivalent to the new per-attempt ones. They
+/// are imported rather than discarded because they are real billed usage, and
+/// the fields the old format never had (`wire`, `durationMs`, `ttfbMs`, …) take
+/// the closest honest value: `attempt` is 1, `status` is ok, and the timing
+/// fields are NULL because the old format did not record them.
+///
+/// `dirs` are searched for `usage.jsonl`; a version directory each kept its own
+/// copy, so importing all of them is what makes the history continuous across
+/// upgrades.
+pub fn import_legacy_jsonl(conn: &Connection, dirs: &[PathBuf]) -> usize {
+    if already_imported(conn) {
+        return 0;
+    }
+    let mut imported = 0usize;
+    for dir in dirs {
+        imported = imported.saturating_add(import_jsonl_file(conn, &dir.join("usage.jsonl")));
+    }
+    // The marker is only set once something was actually found. A scan that
+    // turned up nothing must stay retryable: the first run may happen before
+    // the old directory is reachable, and recording "imported" then would
+    // permanently discard the history it was meant to preserve.
+    if imported > 0 {
+        mark_imported(conn, imported);
+        crate::log::info(&format!(
+            "[billing] imported {imported} row(s) from the legacy usage.jsonl"
+        ));
+    }
+    imported
+}
+
+/// Whether this database has already run the import.
+fn already_imported(conn: &Connection) -> bool {
+    conn.query_row(
+        "select value from meta where key = ?1",
+        [LEGACY_IMPORT_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .is_ok()
+}
+
+fn mark_imported(conn: &Connection, count: usize) {
+    let _ = conn.execute(
+        "insert or replace into meta (key, value) values (?1, ?2)",
+        rusqlite::params![LEGACY_IMPORT_KEY, count.to_string()],
+    );
+}
+
+/// Read one JSONL file, tolerating the damage a crash mid-write would leave.
+///
+/// A malformed line is skipped rather than aborting the file: the whole point
+/// is to preserve what history there is.
+fn import_jsonl_file(conn: &Connection, path: &Path) -> usize {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return 0;
+    };
+    let mut records = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(row) = serde_json::from_str::<LegacyRow>(line) else {
+            continue;
+        };
+        records.push(AttemptRecord {
+            ts: row.ts,
+            // The old format carried no request id; an empty one keeps the
+            // column honest rather than inventing an identifier.
+            req_id: String::new(),
+            model: row.model,
+            // The old data does not say which dialect it came from.
+            wire: Wire::Openai,
+            stream: true,
+            attempt: 1,
+            status: AttemptStatus::Ok,
+            error_tag: None,
+            prompt_tokens: row.prompt_tokens,
+            cached_tokens: row.cached_tokens,
+            completion_tokens: row.completion_tokens,
+            reasoning_tokens: None,
+            duration_ms: 0,
+            ttfb_ms: None,
+        });
+    }
+    if records.is_empty() {
+        return 0;
+    }
+    if insert_batch(conn, &records).is_err() {
+        return 0;
+    }
+    records.len()
 }
 
 /// The writer thread: pull messages, batch them, commit on size or timeout.
@@ -1092,5 +1221,156 @@ mod tests {
         }
         ledger.flush();
         assert_eq!(rows(&dir).len(), total);
+    }
+
+    // ── the legacy import ──
+
+    /// A temp directory holding a `usage.jsonl` with `lines` verbatim.
+    fn legacy_dir(tag: &str, lines: &[&str]) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ccproxy-legacy-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(dir.join("usage.jsonl"), lines.join("\n")).expect("write");
+        dir
+    }
+
+    fn imported_rows(dir: &Path) -> Vec<(String, String, Option<i64>, Option<i64>)> {
+        let conn = Connection::open(dir.join("billing.db")).expect("open");
+        let mut stmt = conn
+            .prepare("select ts, model, promptTokens, cachedTokens from billing order by id")
+            .expect("prepare");
+        stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .expect("query")
+        .filter_map(Result::ok)
+        .collect()
+    }
+
+    #[test]
+    fn the_legacy_jsonl_is_imported_with_its_numbers_intact() {
+        let src = legacy_dir(
+            "basic",
+            &[
+                r#"{"ts":"2026-09-13T10:10:29.613Z","model":"deepseek-v4.1-flash","promptTokens":71445,"cachedTokens":71296,"completionTokens":191}"#,
+                r#"{"ts":"2026-09-13T10:10:33.881Z","model":"deepseek-v4.1-flash","promptTokens":254046,"cachedTokens":253696,"completionTokens":167}"#,
+            ],
+        );
+        let (ledger, dir) = temp_ledger("legacy-import");
+        drop(ledger);
+        let conn = Connection::open(dir.join("billing.db")).expect("open");
+        let count = import_legacy_jsonl(&conn, std::slice::from_ref(&src));
+        assert_eq!(
+            count, 2,
+            "both lines are real billed usage and must survive"
+        );
+        let rows = imported_rows(&dir);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.first().map(|r| r.0.clone()),
+            Some("2026-09-13T10:10:29.613Z".to_string()),
+            "the original timestamp is preserved, not rewritten to now"
+        );
+        assert_eq!(
+            rows.first().map(|r| (r.2, r.3)),
+            Some((Some(71445), Some(71296)))
+        );
+    }
+
+    #[test]
+    fn the_import_runs_only_once_per_database() {
+        // Without the marker every startup would duplicate the whole history.
+        let src = legacy_dir(
+            "once",
+            &[
+                r#"{"ts":"2026-09-13T10:10:29.613Z","model":"m","promptTokens":1,"cachedTokens":0,"completionTokens":1}"#,
+            ],
+        );
+        let (ledger, dir) = temp_ledger("legacy-once");
+        drop(ledger);
+        let conn = Connection::open(dir.join("billing.db")).expect("open");
+        assert_eq!(import_legacy_jsonl(&conn, std::slice::from_ref(&src)), 1);
+        assert_eq!(
+            import_legacy_jsonl(&conn, std::slice::from_ref(&src)),
+            0,
+            "a second import must be a no-op"
+        );
+        assert_eq!(imported_rows(&dir).len(), 1, "the row is not duplicated");
+    }
+
+    #[test]
+    fn a_malformed_legacy_line_is_skipped_not_fatal() {
+        // A crash mid-write can leave a partial final line; the rest of the
+        // history is still worth importing.
+        let src = legacy_dir(
+            "damaged",
+            &[
+                r#"{"ts":"2026-09-13T10:10:29.613Z","model":"m","promptTokens":5,"cachedTokens":1,"completionTokens":2}"#,
+                r#"{"ts":"2026-09-13T10:10:30.000Z","model":"m","promptTok"#,
+                "",
+                r#"{"ts":"2026-09-13T10:10:31.000Z","model":"m","promptTokens":7,"cachedTokens":3,"completionTokens":4}"#,
+            ],
+        );
+        let (ledger, dir) = temp_ledger("legacy-damaged");
+        drop(ledger);
+        let conn = Connection::open(dir.join("billing.db")).expect("open");
+        let count = import_legacy_jsonl(&conn, std::slice::from_ref(&src));
+        assert_eq!(count, 2, "the two intact lines are imported");
+    }
+
+    #[test]
+    fn a_missing_legacy_file_imports_nothing_and_does_not_fail() {
+        let empty =
+            std::env::temp_dir().join(format!("ccproxy-legacy-empty-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&empty).expect("mkdir");
+        let (ledger, dir) = temp_ledger("legacy-missing");
+        drop(ledger);
+        let conn = Connection::open(dir.join("billing.db")).expect("open");
+        assert_eq!(import_legacy_jsonl(&conn, std::slice::from_ref(&empty)), 0);
+        // Every version directory is scanned, so one present and one absent is
+        // the normal case.
+        let src = legacy_dir(
+            "mixed",
+            &[
+                r#"{"ts":"2026-09-13T10:10:29.613Z","model":"m","promptTokens":1,"cachedTokens":0,"completionTokens":1}"#,
+            ],
+        );
+        assert_eq!(
+            import_legacy_jsonl(&conn, &[empty, src]),
+            1,
+            "a directory without the file contributes nothing"
+        );
+    }
+
+    #[test]
+    fn an_imported_row_has_no_invented_values() {
+        // The old format had no wire, timing or request id: those must stay
+        // absent rather than be filled with a plausible-looking guess.
+        let src = legacy_dir(
+            "uninvented",
+            &[
+                r#"{"ts":"2026-09-13T10:10:29.613Z","model":"m","promptTokens":1,"cachedTokens":0,"completionTokens":1}"#,
+            ],
+        );
+        let (ledger, dir) = temp_ledger("legacy-uninvented");
+        drop(ledger);
+        let conn = Connection::open(dir.join("billing.db")).expect("open");
+        import_legacy_jsonl(&conn, std::slice::from_ref(&src));
+        let (req_id, duration, ttfb, reasoning): (
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        ) = conn
+            .query_row(
+                "select reqId, durationMs, ttfbMs, reasoningTokens from billing",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("query");
+        assert_eq!(duration, Some(0), "the old format recorded no duration");
+        assert_eq!(ttfb, None, "and no TTFB: NULL, not a guess");
+        assert_eq!(reasoning, None, "and no reasoning split");
+        assert_eq!(req_id.as_deref(), Some(""), "and no request id to invent");
     }
 }
