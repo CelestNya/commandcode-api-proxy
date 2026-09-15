@@ -129,6 +129,12 @@ function normaliseHeaders(h) {
     // keeps the golden language-neutral (the Rust client must not have to
     // fabricate a browser header to match a Node quirk).
     if (key === "sec-fetch-mode") continue;
+    // HTTP framing is chosen by the server library, not by the proxy's logic:
+    // Node streams without a known length (chunked) while tiny-http buffers
+    // small bodies and sends content-length. Which one appears is an artifact
+    // of the runtime; the body itself is recorded and compared in full. The
+    // Server header is likewise injected by tiny-http.
+    if (key === "transfer-encoding" || key === "server") continue;
     // The project slug is derived from the working-directory basename, so it
     // changes whenever the checkout is renamed and would fail every case for a
     // reason unrelated to behaviour. The contract is the header's presence and
@@ -510,6 +516,10 @@ async function main() {
 /** Deep-compare two transcripts, reporting the first path that differs per case. */
 function diffTranscripts(a, b) {
   const diffs = [];
+  // `cases` is keyed by name; the three surface groups are flat arrays. All of
+  // them are part of the contract — comparing only `cases` silently skipped
+  // 21 samples (httpSurface, validation, modelResolution), which is precisely
+  // the set a partially-implemented rewrite can get wrong.
   const casesA = new Map(a.cases.map((c) => [c.name, c]));
   const casesB = new Map(b.cases.map((c) => [c.name, c]));
   for (const name of casesA.keys()) {
@@ -523,6 +533,22 @@ function diffTranscripts(a, b) {
   }
   for (const name of casesB.keys()) {
     if (!casesA.has(name)) diffs.push(`new case not in golden: ${name}`);
+  }
+  for (const group of ["httpSurface", "validation", "modelResolution"]) {
+    const ga = new Map((a[group] ?? []).map((c) => [c.name, c]));
+    const gb = new Map((b[group] ?? []).map((c) => [c.name, c]));
+    for (const name of ga.keys()) {
+      if (!gb.has(name)) {
+        diffs.push(`${group} missing in current run: ${name}`);
+        continue;
+      }
+      if (JSON.stringify(ga.get(name)) !== JSON.stringify(gb.get(name))) {
+        diffs.push(`${group} differs: ${name}`);
+      }
+    }
+    for (const name of gb.keys()) {
+      if (!ga.has(name)) diffs.push(`${group} new case not in golden: ${name}`);
+    }
   }
   return diffs;
 }

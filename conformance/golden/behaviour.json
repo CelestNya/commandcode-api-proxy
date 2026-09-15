@@ -66,7 +66,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -211,7 +210,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -361,7 +359,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -524,7 +521,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -695,7 +691,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -858,7 +853,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1058,7 +1052,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1263,7 +1256,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1454,7 +1446,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1591,7 +1582,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1742,7 +1732,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1907,7 +1896,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2089,7 +2077,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2198,7 +2185,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2312,7 +2298,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2439,7 +2424,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2639,7 +2623,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2810,7 +2793,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2920,7 +2902,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3041,7 +3022,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3186,7 +3166,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3313,7 +3292,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3462,7 +3440,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3589,7 +3566,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3738,7 +3714,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3829,7 +3804,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3943,7 +3917,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4034,7 +4007,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4148,7 +4120,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4269,7 +4240,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4465,7 +4435,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4636,7 +4605,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4745,7 +4713,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -4837,7 +4804,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -4926,7 +4892,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5011,7 +4976,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5105,7 +5069,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5198,7 +5161,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5291,7 +5253,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5365,7 +5326,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5441,7 +5401,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5515,7 +5474,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5591,7 +5549,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5665,7 +5622,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5843,7 +5799,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6017,7 +5972,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6195,7 +6149,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6369,7 +6322,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6547,7 +6499,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6721,7 +6672,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6797,7 +6747,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6871,7 +6820,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6895,7 +6843,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -6920,7 +6867,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7203,7 +7149,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7620,7 +7565,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7649,7 +7593,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7666,7 +7609,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7686,7 +7628,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7708,7 +7649,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7727,7 +7667,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7746,7 +7685,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7765,7 +7703,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7784,7 +7721,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7803,7 +7739,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7822,7 +7757,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
