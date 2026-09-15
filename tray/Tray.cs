@@ -504,8 +504,14 @@ namespace CCProxyTray
         /// 让位监视线程。职责分离：
         ///  - 首任实例(owner)：收到 Standby → 暂停服务(进程存活) → 释放锁 →
         ///    等 Commit/Abort：Commit 则退出，Abort 则重启服务继续当班。
-        ///  - 继任者(successor)：启动后轮询端口确认自己在服务 → 广播 Commit；
-        ///    超时未服务则广播 Abort 并自行退出，把服务还给现任。
+        ///  - 继任者(successor)：启动后轮询端口确认自己在服务 → 广播 Commit →
+        ///    **接着当在职实例继续监听**；超时未服务则广播 Abort 并自行退出。
+        ///
+        /// 继任者接班后必须落进同一个在职监听循环：它现在是新的现任，下一次
+        /// 热更新要找的就是它。早先这里验证成功就 return，线程随之结束，导致
+        /// 接班的实例再也不响应让位请求 —— 热更新于是只成功得了一次（2026-09-15
+        /// 实测：v0.4.2 于前一天以继任者身份接班，此后从未记录过
+        /// 「收到让位请求」，v0.4.3 请求让位无人应答而中止）。
         /// </summary>
         static void OwnerHandoverLoop(bool isSuccessor, TrayContext ctx, EventWaitHandle shutdownEvent)
         {
@@ -520,19 +526,29 @@ namespace CCProxyTray
                 //
                 // 版本一致性由用户可见的两处保证：托盘 tooltip 与 /health.version。
                 var sw = Stopwatch.StartNew();
+                bool serving = false;
                 while (sw.ElapsedMilliseconds < SERVE_VERIFY_MS)
                 {
                     if (PortServing(InstancePort()))
                     {
                         TrayLog("交接成功：:" + InstancePort() + " 已有代理应答 /health，通知现任退出");
                         commitEvent.Set();
-                        return;
+                        serving = true;
+                        break;
                     }
                     Thread.Sleep(500);
                 }
-                TrayLog("交接失败：未能在期限内提供可应答的 /health，通知现任回滚");
-                abortEvent.Set();
-                return;
+                if (!serving)
+                {
+                    TrayLog("交接失败：未能在期限内提供可应答的 /health，通知现任回滚");
+                    abortEvent.Set();
+                    return;
+                }
+                // 前任收到 Commit 后会退出，它占用的 standby 事件在它退场后
+                // 仍是同一个内核对象（命名事件由引用计数管理），所以这里直接
+                // 接着当在职实例即可，无需重建。清掉前任可能留下的 Standby
+                // 置位，否则下面第一轮会立刻误判成"收到让位请求"。
+                standbyEvent.Reset();
             }
 
             // 在职实例：等待让位请求

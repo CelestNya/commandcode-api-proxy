@@ -122,21 +122,50 @@ def main():
     verdict2 = ok2 and alive2 and p1_exited and len(procs) == 1
     print(f"场景2 判定: {'✓ 接管正确（新实例服务、旧实例退出）' if verdict2 else '✗ 交接异常'}", flush=True)
 
+    # ── 场景 2b：再接一次班 ───────────────────────────────────────────────
+    # 关键回归：B 是以「继任者」身份启动的。接班成功后它必须转成在职实例继续
+    # 监听让位事件，否则下一次热更新无人应答。该缺陷只在**连续两次交接**时
+    # 才暴露（2026-09-15 生产实测：接班的实例从此不再响应让位请求，导致热更新
+    # 只成功得了一次）。
+    print("\n=== 场景2b：第三次启动（B 已是现任，必须能再次让位）===", flush=True)
+    p3 = start()
+    ok3 = serving(30)
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if p2.poll() is not None:
+            break
+        time.sleep(0.5)
+    p2_exited = p2.poll() is not None
+    ok3 = serving(30)
+    time.sleep(2)
+    procs3 = set(tray_procs()) - baseline
+    alive3 = p3.poll() is None
+    print(f"C 启动 pid={p3.pid} | 端口服务={'✓' if ok3 else '✗'}", flush=True)
+    print(f"接管后：B存活={not p2_exited} C存活={alive3} 测试实例数={len(procs3)}（期望 1）", flush=True)
+    verdict2b = ok3 and alive3 and p2_exited and len(procs3) == 1
+    print(
+        f"场景2b 判定: {'✓ 第二次交接成功（接班的实例仍能再让位）' if verdict2b else '✗ 接班的实例无法再让位'}",
+        flush=True,
+    )
+
     print("\n=== 场景3：生产实例未受影响 ===", flush=True)
     after = set(tray_procs())
     untouched = baseline.issubset(after)
     print(f"生产托盘仍在={untouched}（原 PID {sorted(baseline)} 现存 {sorted(after & baseline)}）", flush=True)
 
     print("\n=== 交接日志 ===", flush=True)
-    for line in log_tail():
+    for line in log_tail(20):
         print("  " + line, flush=True)
 
     print(f"\n=== 清理测试实例 ===", flush=True)
-    cleanup(list(procs) + [p2.pid])
+    cleanup(list(procs3) + [p3.pid])
     print(f"剩余测试实例: {sorted(set(tray_procs()) - baseline)}", flush=True)
 
-    print("\n结果: " + ("PASS" if (ok1 and verdict2 and untouched) else "FAIL"), flush=True)
-    return 0 if (ok1 and verdict2 and untouched) else 1
+    print(
+        "\n结果: " + ("PASS" if (ok1 and verdict2 and verdict2b and untouched) else "FAIL"),
+        flush=True,
+    )
+    return 0 if (ok1 and verdict2 and verdict2b and untouched) else 1
 
 
 if __name__ == "__main__":
