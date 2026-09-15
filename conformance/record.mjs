@@ -100,12 +100,20 @@ function startProxy() {
 // ── normalisation ───────────────────────────────────────────────────────────
 
 /**
- * Normalise a header map: lowercase keys, drop values that legitimately vary
- * per run (trace ids, dates, versions) so diffs stay meaningful.
+ * Normalise a header map: lowercase keys, sort by name, drop values that
+ * legitimately vary per run (trace ids, dates, versions) so diffs stay
+ * meaningful.
+ *
+ * Sorting matters because the order headers appear on the wire is chosen by
+ * the HTTP client or server library, not by the proxy: Node's fetch and ureq
+ * emit them in different orders, and no HTTP contract makes the order
+ * significant. Without this, every case with an upstream request would differ
+ * for a reason that carries no behaviour.
  */
 function normaliseHeaders(h) {
   const out = {};
-  for (const [k, v] of Object.entries(h)) {
+  const entries = Object.entries(h).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [k, v] of entries) {
     const key = k.toLowerCase();
     if (key === "date" || key === "connection" || key === "keep-alive") continue;
     // The advertised CLI version is configuration, not behaviour: it is
@@ -249,7 +257,16 @@ async function readResponse(res) {
   const ctype = res.headers.get("content-type") ?? "";
   const base = {
     status: res.status,
-    headers: normaliseHeaders(Object.fromEntries(res.headers)),
+    // A response's framing is chosen by the server library, not by the proxy's
+    // own logic: Node streams an unknown-length body (chunked) while tiny-http
+    // sends a content-length for a body it buffered. Which one appears is a
+    // runtime artifact, and the body is recorded in full and compared, so the
+    // header is dropped here rather than pinned to whichever server is running.
+    headers: normaliseHeaders(
+      Object.fromEntries(
+        [...res.headers].filter(([k]) => k.toLowerCase() !== "content-length"),
+      ),
+    ),
   };
   if (ctype.includes("text/event-stream")) {
     return { ...base, bodyKind: "sse", records: parseSSE(text) };
