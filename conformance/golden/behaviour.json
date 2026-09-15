@@ -24,7 +24,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -171,7 +170,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -321,7 +319,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -486,7 +483,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -657,7 +653,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -822,7 +817,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -1022,7 +1016,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -1229,7 +1222,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -1420,7 +1412,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -1559,7 +1550,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -1710,7 +1700,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -1877,7 +1866,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2059,7 +2047,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2170,7 +2157,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2284,7 +2270,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2413,7 +2398,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2562,7 +2546,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2614,7 +2597,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2737,7 +2719,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2788,7 +2769,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -2898,7 +2878,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3021,7 +3000,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3166,7 +3144,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3295,7 +3272,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3444,7 +3420,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3573,7 +3548,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3722,7 +3696,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3815,7 +3788,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -3929,7 +3901,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4022,7 +3993,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4136,7 +4106,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4259,7 +4228,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4404,7 +4372,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4456,7 +4423,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4579,7 +4545,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4630,7 +4595,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4740,7 +4704,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4834,7 +4797,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -4923,7 +4885,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5010,7 +4971,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5104,7 +5064,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5199,7 +5158,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5292,7 +5250,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5368,7 +5325,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5444,7 +5400,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5520,7 +5475,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5596,7 +5550,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5672,7 +5625,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5748,7 +5700,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5800,7 +5751,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5852,7 +5802,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5928,7 +5877,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -5979,7 +5927,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6030,7 +5977,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6106,7 +6052,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6158,7 +6103,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6210,7 +6154,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6286,7 +6229,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6337,7 +6279,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6388,7 +6329,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6464,7 +6404,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6516,7 +6455,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6568,7 +6506,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6644,7 +6581,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6695,7 +6631,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6746,7 +6681,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6822,7 +6756,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {
@@ -6898,7 +6831,6 @@
             "x-taste-learning": "false",
             "x-project-slug": "<slug>",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
             "content-length": "<len>"
           },
           "body": {

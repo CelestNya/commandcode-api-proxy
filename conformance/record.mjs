@@ -123,6 +123,12 @@ function normaliseHeaders(h) {
       out[key] = "<len>";
       continue;
     }
+    // sec-fetch-mode is injected by Node's undici fetch, not by the proxy's
+    // own header-building code. It is a runtime artifact of the current
+    // implementation, not a contract — CC does not require it. Dropping it
+    // keeps the golden language-neutral (the Rust client must not have to
+    // fabricate a browser header to match a Node quirk).
+    if (key === "sec-fetch-mode") continue;
     // The project slug is derived from the working-directory basename, so it
     // changes whenever the checkout is renamed and would fail every case for a
     // reason unrelated to behaviour. The contract is the header's presence and
