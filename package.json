@@ -1,6 +1,6 @@
 {
   "name": "commandcode-api-proxy",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Personal build: OpenAI/Anthropic-compatible proxy for Command Code, with passthrough auth and a Windows tray.",
   "keywords": [
     "ai-proxy",

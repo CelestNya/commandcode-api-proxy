@@ -279,11 +279,63 @@ and retries once with the resolved ID.
 ### Reasoning effort
 
 Some models support a `reasoning_effort` (`low` | `medium` | `high` | `xhigh` | `max`), and
-each accepts a different subset. The proxy sends the closest valid level for the model
-(e.g. `deepseek-v4-pro` supports only `high`/`max`, so `low` is clipped up to `high` and
-`max` is reachable). Models without a discrete effort set ignore the value. Pass the
-effort via OpenAI's `reasoning_effort`, or Anthropic's `thinking.budget_tokens`
-(larger budget → higher effort).
+each accepts a different subset. The upstream validates the field as an enum and rejects
+anything else, so the proxy resolves every request to a level the model actually accepts
+before sending it.
+
+How a client expresses the level depends on the dialect:
+
+| Dialect | Field |
+| ------- | ----- |
+| OpenAI | `reasoning_effort` |
+| Anthropic | `output_config.effort`, falling back to `thinking.budget_tokens` (larger budget → higher effort) |
+
+Anthropic clients also signal "no extended thinking" with `thinking.type: "disabled"`, and
+some send an off-style marker (`off` / `none` / `disabled` / `minimal`) as the effort
+itself. The upstream has no such level — all of those are rejected upstream — so the proxy
+resolves them to the model's lowest supported level. That is the closest expressible
+intent, and it produces measurably less reasoning than omitting the field, which would
+hand the choice back to the model's own default.
+
+```mermaid
+flowchart TD
+    A[Client request] --> B{dialect}
+    B -->|OpenAI| C["req.reasoning_effort"]
+    B -->|Anthropic| D{thinking.type == disabled<br/>or effort is off-style?}
+    D -->|yes| E["level = the model's lowest"]
+    D -->|no| F{output_config.effort set?}
+    F -->|yes| G[level = effort]
+    F -->|no| H{thinking.budget_tokens set?}
+    H -->|no| I[omit reasoning_effort<br/>let upstream decide]
+    H -->|yes| J[map budget to a level]
+    C --> K{model in effort table?}
+    G --> K
+    J --> K
+    E --> K
+
+    K -->|no| L{off-style marker?}
+    L -->|yes| M[level = low<br/>never forward the marker itself]
+    L -->|no| N[forward unchanged<br/>we cannot know better]
+
+    K -->|yes| O{off-style marker?}
+    O -->|yes| E2["level = the model's lowest"]
+    O -->|no| P{supported as-is?}
+    P -->|yes| Q[forward unchanged]
+    P -->|no| R[clip to the highest<br/>supported level not above it,<br/>else the lowest supported]
+
+    I --> Z[POST /alpha/generate]
+    M --> Z
+    N --> Z
+    Q --> Z
+    R --> Z
+    E2 --> Z
+```
+
+The model → levels table lives in `src/models.json` (`reasoningEfforts`). The upstream API
+does **not** report it — `/provider/v1/models` returns only id/name/context for every
+model — so the table is mirrored from the official CLI's embedded copy and pinned by a
+snapshot: see [`conformance/README.md`](conformance/README.md#official-effortsjson--the-upstream-cannot-enumerate-so-we-vendor-a-copy)
+for why, and `tests/effort-table.test.ts` for the guard that fails when the two drift.
 
 ## Windows tray & hot-swap
 

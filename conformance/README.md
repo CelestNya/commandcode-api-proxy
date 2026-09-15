@@ -23,6 +23,8 @@ conformance/
 ├── mock-upstream.mjs        scriptable CC upstream (NDJSON scripts, fault injection)
 ├── record.mjs               drives the proxy over HTTP, writes golden/behaviour.json
 ├── record-translate.mjs     pure-function samples, writes golden/translate.json
+├── extract-official-efforts.mjs  pulls the official reasoning-effort table out of the CLI bundle
+├── official-efforts.json    generated snapshot of that table; tests diff models.json against it
 ├── scenarios/
 │   └── upstream-scenarios.json   the scripted upstream event sequences
 ├── client-probes/           what the *client* does with what we send (not diffed)
@@ -51,6 +53,43 @@ Each `stream`/`failure` case also records **the upstream request** the proxy
 made — method, path, headers and body. CC rejects requests that don't look like
 the official CLI, so the header set (including the CLI-identifying ones) is part
 of the contract, not an implementation detail.
+
+## `official-efforts.json` — the upstream cannot enumerate, so we vendor a copy
+
+`src/models.json` carries a hand-maintained `reasoningEfforts` map, and it
+decides whether a request gets **clipped to a different level**. Getting it
+wrong is a silent behaviour change, so a snapshot of the authoritative table is
+checked in and `tests/effort-table.test.ts` diffs the two.
+
+Why not just ask the API:
+
+- **`/provider/v1/models` does not report capabilities.** Verified 2026-09-15:
+  all 69 entries carry only `id`, `object`, `created`, `owned_by`, `name`,
+  `context_length`. Nothing about reasoning.
+- **The official CLI does not ask either.** It ships the table inside its own
+  bundle (`yr = new Map([[model, levelSet], ...])`) and falls back to it when a
+  provider's config declares nothing. Client-side config
+  (`models.<id>.reasoningEfforts`) is the only override; there is no discovery
+  path.
+
+So the CLI bundle is the only authoritative enumeration available:
+
+```bash
+npm pack command-code && tar xzf command-code-*.tgz
+node conformance/extract-official-efforts.mjs --bundle package/dist/cli.mjs
+```
+
+The extractor reads *string literals* out of the minified bundle (identifiers
+are mangled, literals are not), resolves the level-set constants the table
+references, and **refuses to write a partial table** — an unresolved entry would
+make the diff test pass on wrong data, which is worse than failing loudly. It is
+generated, never hand-edited; re-run it when the CLI is bumped.
+
+The concrete cost of a wrong entry, from the 2026-09-15 incident: the table had
+`deepseek/deepseek-v4.1-flash: ["high","max"]` (missing `low`). A client asking
+for its lowest thinking level sent `low`, which the clip rule then raised to
+`high` — so "thinking off" still reasoned heavily. The official set is
+`["low","high","max"]`.
 
 ## `client-probes/` — the other half of the contract
 
