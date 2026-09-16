@@ -15,7 +15,6 @@
 use crate::catalog::CatalogStore;
 use crate::log;
 use crate::models::Catalog;
-use crate::stream_body::Dialect;
 use crate::translate::{self, ModelTables};
 use crate::upstream::{self, AttemptSink, UpstreamError, UpstreamStream};
 use serde_json::Value;
@@ -134,28 +133,6 @@ pub fn resend(opts: &UpstreamOptions, body: Value) -> Result<UpstreamStream, Ups
     send_once(opts, body)
 }
 
-/// A generation-streaming failure as it reaches the client.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GenerationError {
-    /// CC reported failure in the stream itself (or produced a body that
-    /// collapsed into a failure). The client is told
-    /// "CC upstream generation failed".
-    Failed,
-    /// The transport died mid-stream, or the upstream contradicted itself.
-    Transport(crate::sse::StreamFailure),
-}
-
-impl GenerationError {
-    /// The message the downstream client sees. A transport failure keeps its
-    /// own wording, so the client can tell a stall from a rejection.
-    pub fn message(&self) -> String {
-        match self {
-            Self::Failed => "CC upstream generation failed".to_string(),
-            Self::Transport(f) => f.detail(),
-        }
-    }
-}
-
 /// The dialect-specific model name an encoder reports downstream: the name the
 /// client asked for, not the id it resolves to (matching the Node encoders).
 pub fn encoder_model(requested: &str, fallback: &str) -> String {
@@ -166,10 +143,6 @@ pub fn encoder_model(requested: &str, fallback: &str) -> String {
     }
 }
 
-/// Which upstream-facing request builder a dialect needs.
-pub fn requires_key(dialect: Dialect) -> bool {
-    matches!(dialect, Dialect::Openai | Dialect::Anthropic)
-}
 
 #[cfg(test)]
 mod tests {

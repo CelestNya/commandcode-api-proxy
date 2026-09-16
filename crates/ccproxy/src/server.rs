@@ -160,7 +160,6 @@ fn respond_openai_error(
 /// Anthropic error `type` for a status. `overloaded_error` is used for 529;
 /// anything unmapped falls back to `api_error` (upstream 5xx never reaches
 /// here — the upstream layer maps them to 502 first).
-#[allow(dead_code)] // used by the upstream error mapping in M4
 pub fn anthropic_error_type(status: u16) -> &'static str {
     match status {
         400 => "invalid_request_error",
@@ -613,11 +612,6 @@ fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
     // Local estimate: no key required, no upstream call (matches Node).
     let estimate = crate::usage::estimate_tokens(&raw);
     respond_json(req, 200, json!({"input_tokens": estimate}), state, ctx);
-}
-
-/// Parse a JSON request body into a map for the translation layer (M2+).
-pub fn body_object(raw: &Value) -> Map<String, Value> {
-    raw.as_object().cloned().unwrap_or_default()
 }
 
 // ── generation plumbing ───────────────────────────────────

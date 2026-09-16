@@ -458,14 +458,10 @@ fn attempt_send(
 
     let mut request = agent
         .post(url)
-        .set("Content-Type", "application/json")
-        // ureq's own default is `gzip`, which would hide the framing this
-        // client must see; the CLI advertises all three explicitly.
-        .set("Accept-Encoding", "gzip, deflate, br");
+        .set("Content-Type", "application/json");
+    // ureq's own default is `gzip`, which would hide the framing this client
+    // must see; `build_headers` advertises all three explicitly.
     for (name, value) in build_headers(api_key, cc_version, thread_id, working_dir) {
-        if name.eq_ignore_ascii_case("accept-encoding") {
-            continue;
-        }
         request = request.set(&name, &value);
     }
 
