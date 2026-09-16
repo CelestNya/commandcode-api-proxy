@@ -30,7 +30,7 @@ const FETCH_TIMEOUT_MS: u64 = 10_000;
 /// shared pooled agent, while undici succeeded 10/10.
 ///
 /// The value is not cosmetic: CC blocks a stale `x-command-code-version`, so a
-/// failed lookup silently pins the whole process to the `0.40.3` fallback. One
+/// failed lookup silently pins the whole process to the fallback version. One
 /// retry takes a ~10% failure rate down to ~1%.
 const FETCH_ATTEMPTS: usize = 2;
 

@@ -176,9 +176,17 @@ fn fetch_and_merge(api_base: &str, api_key: &str) -> Option<Vec<ModelMeta>> {
     let parsed: ApiModelsResponse = match response {
         Ok(r) => match r.into_string() {
             Ok(text) => serde_json::from_str(&text).unwrap_or_else(|_| ApiModelsResponse::empty()),
-            Err(_) => return None,
+            Err(_) => {
+                crate::log::warn("model catalog fetch: response body unreadable");
+                return None;
+            }
         },
-        Err(_) => return None,
+        Err(err) => {
+            // A silent failure here reads as "the model does not exist" — log
+            // it so an unreachable API is diagnosable from the proxy log.
+            crate::log::warn(&format!("model catalog fetch failed: {err}"));
+            return None;
+        }
     };
     merge(parsed.data)
 }

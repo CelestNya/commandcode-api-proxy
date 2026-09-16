@@ -2,8 +2,10 @@
 //! per-field fallbacks as the Node `loadConfig()` (src/config.ts).
 
 /// Hardcoded CLI version fallback. The real CLI ships frequent releases;
-/// CC's server actively blocks requests whose version looks stale or absent.
-pub const DEFAULT_CC_VERSION: &str = "0.40.3";
+/// CC's server actively blocks requests whose version looks stale or absent,
+/// so this must stay at or above the server's `minVersion`. It is only used
+/// when the startup npm lookup fails — keep it current when the CLI bumps.
+pub const DEFAULT_CC_VERSION: &str = "1.54.1";
 pub const DEFAULT_CC_API_BASE: &str = "https://api.commandcode.ai";
 
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -207,7 +209,7 @@ mod tests {
         assert_eq!(c.host, "127.0.0.1");
         assert_eq!(c.port, 8787);
         assert_eq!(c.cc_api_base, "https://api.commandcode.ai");
-        assert_eq!(c.cc_version, "0.40.3");
+        assert_eq!(c.cc_version, "1.54.1");
         assert_eq!(c.log_level, "info");
         assert_eq!(c.cors_origin, "*");
         assert_eq!(c.upstream_timeout_ms, 600_000);
