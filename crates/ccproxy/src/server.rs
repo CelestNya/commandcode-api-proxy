@@ -40,7 +40,7 @@ pub type SharedState = Arc<AppState>;
 pub fn new_state(config: Config) -> SharedState {
     Arc::new(AppState {
         config,
-        catalog: CatalogStore::new(),
+        catalog: CatalogStore::with_cache(crate::catalog::cache_file()),
         tables: crate::translate::ModelTables::load(),
         translate_env: crate::translate::Env::from_process(),
         usage: Mutex::new(UsageTotals::default()),

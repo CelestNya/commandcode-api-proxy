@@ -11,8 +11,9 @@
 //! converges on the live list without stalling every request behind a 5s fetch.
 
 use crate::models::{Catalog, ModelMeta};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -87,6 +88,10 @@ impl ApiModelsResponse {
 /// The catalog plus the state that decides when to refresh it.
 pub struct CatalogStore {
     inner: Mutex<Inner>,
+    /// Where the learned catalog is persisted, if anywhere. Every successful
+    /// refresh rewrites it, so a restarted proxy serves the first request from
+    /// disk instead of paying a 403 round-trip to learn the names again.
+    cache_path: Option<PathBuf>,
 }
 
 struct Inner {
@@ -101,6 +106,12 @@ impl Default for CatalogStore {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct CachedCatalog {
+    ids: Vec<String>,
+    names: HashMap<String, String>,
+}
+
 impl CatalogStore {
     pub fn new() -> Self {
         Self {
@@ -109,6 +120,23 @@ impl CatalogStore {
                 last_fetch_at: None,
                 last_attempt_at: None,
             }),
+            cache_path: None,
+        }
+    }
+
+    /// Use `path` as the persistence location, seeding the in-memory catalog
+    /// from it when the file parses. A missing, stale, or corrupt file is not
+    /// an error — the static catalog is the fallback and the next refresh
+    /// rewrites the cache.
+    pub fn with_cache(path: PathBuf) -> Self {
+        let seeded = read_cache(&path);
+        Self {
+            inner: Mutex::new(Inner {
+                current: Arc::new(seeded.unwrap_or_else(crate::models::static_catalog)),
+                last_fetch_at: None,
+                last_attempt_at: None,
+            }),
+            cache_path: Some(path),
         }
     }
 
@@ -145,7 +173,9 @@ impl CatalogStore {
 
         let merged = fetch_and_merge(api_base, api_key);
         if let Some(models) = merged {
-            guard.current = Arc::new(build(models));
+            let catalog = build(models);
+            write_cache(self.cache_path.as_deref(), &catalog);
+            guard.current = Arc::new(catalog);
             guard.last_fetch_at = Some(Instant::now());
         }
         Arc::clone(&guard.current)
@@ -157,6 +187,61 @@ fn build(models: Vec<ModelMeta>) -> Catalog {
         ids: models.iter().map(|m| m.id.clone()).collect(),
         models,
     }
+}
+
+/// Where the learned catalog is persisted. Same directory and namespace rules
+/// as the billing ledger, so a test instance cannot pollute production.
+pub fn cache_file() -> PathBuf {
+    crate::billing::billing_dir().join("model-catalog.json")
+}
+
+/// Persist `catalog` as bare ids + display names. Atomic: write a temp file
+/// then rename, so a reader never sees a half-written cache. Best effort —
+/// an unwritable directory costs the next start its warm catalog, nothing more.
+fn write_cache(path: Option<&Path>, catalog: &Catalog) {
+    let Some(path) = path else { return };
+    let cached = CachedCatalog {
+        ids: catalog.ids.clone(),
+        names: catalog
+            .models
+            .iter()
+            .map(|m| (m.id.clone(), m.display_name.clone()))
+            .collect(),
+    };
+    let Ok(text) = serde_json::to_string(&cached) else {
+        return;
+    };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, text).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+/// Load a persisted catalog. `None` on any failure — the caller falls back to
+/// the static catalog and the next refresh rewrites the file.
+fn read_cache(path: &Path) -> Option<Catalog> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let cached: CachedCatalog = serde_json::from_str(&text).ok()?;
+    if cached.ids.is_empty() {
+        return None;
+    }
+    let models: Vec<ModelMeta> = cached
+        .ids
+        .iter()
+        .map(|id| ModelMeta {
+            id: id.clone(),
+            display_name: cached
+                .names
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| id.rsplit('/').next().unwrap_or(id).to_string()),
+            context_window: DEFAULT_CONTEXT_WINDOW,
+        })
+        .collect();
+    Some(Catalog {
+        ids: cached.ids,
+        models,
+    })
 }
 
 /// Fetch the API list and merge it with the static builtins.
@@ -423,5 +508,50 @@ mod tests {
         // A failed refresh must not replace what readers are holding.
         let _ = store.refresh("http://127.0.0.1:1", "key");
         assert_eq!(held.ids, store.current().ids);
+    }
+
+    #[test]
+    fn a_persisted_catalog_is_restored_on_start() {
+        // The whole point of the cache: a restarted proxy serves the first
+        // request from disk instead of re-learning the names via a 403.
+        let dir = std::env::temp_dir().join(format!("cc-catalog-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("model-catalog.json");
+        std::fs::write(
+            &path,
+            r#"{"ids":["deepseek/deepseek-v4.1-flash"],"names":{"deepseek/deepseek-v4.1-flash":"DeepSeek v4.1 Flash"}}"#,
+        )
+        .unwrap();
+        let store = CatalogStore::with_cache(path.clone());
+        // The bare name resolves through the persisted entry's last segment.
+        let tables = crate::translate::ModelTables::load();
+        assert_eq!(
+            crate::translate::resolve_model("deepseek-v4.1-flash", &store.current(), &tables),
+            "deepseek/deepseek-v4.1-flash"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_or_corrupt_cache_falls_back_to_static() {
+        let dir = std::env::temp_dir().join(format!("cc-catalog-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("model-catalog.json");
+        std::fs::write(&path, "not json at all").unwrap();
+        let store = CatalogStore::with_cache(path);
+        // The static catalog is the fallback; the next refresh rewrites the file.
+        assert_eq!(store.current().ids, crate::models::static_catalog().ids);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_empty_cache_is_not_a_catalog() {
+        let dir = std::env::temp_dir().join(format!("cc-catalog-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("model-catalog.json");
+        std::fs::write(&path, r#"{"ids":[],"names":{}}"#).unwrap();
+        let store = CatalogStore::with_cache(path);
+        assert_eq!(store.current().ids, crate::models::static_catalog().ids);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
