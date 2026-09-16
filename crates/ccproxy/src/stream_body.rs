@@ -284,8 +284,13 @@ impl SseBody {
     /// to the writer cannot be taken back, so the replacement must continue the
     /// stream rather than restart it — hence `begin_continuation`, which drops
     /// the replayed opening and reasoning.
+    ///
+    /// `can_splice_retry` is the whole gate: this runs only from `produce()`,
+    /// which `read()` calls only with the buffer drained (`out_pos == 0`), so
+    /// undelivered bytes cannot leak out and delivered ones are covered by
+    /// `saw_answer`.
     fn try_replacement(&mut self, failure: &StreamFailure) -> Result<bool, StreamFailure> {
-        if self.retried || self.out_pos > 0 || !self.can_splice_retry() {
+        if self.retried || !self.can_splice_retry() {
             return Ok(false);
         }
         let Some(reconnect) = self.reconnect.as_mut() else {
