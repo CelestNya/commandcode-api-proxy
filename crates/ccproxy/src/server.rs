@@ -472,7 +472,7 @@ fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
         match stream_body::collect_non_streaming(&mut stream, Dialect::Openai, &encoder_model, &id)
         {
             Ok(collected) => {
-                ledger.end_attempt(billing::AttemptStatus::Ok, collected.usage.as_ref(), None);
+                ledger.settle_ok(collected.usage.as_ref());
                 record_usage(state, &collected.usage);
                 respond_json(req, 200, collected.body, state, ctx);
             }
@@ -578,7 +578,7 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
             &id,
         ) {
             Ok(collected) => {
-                ledger.end_attempt(billing::AttemptStatus::Ok, collected.usage.as_ref(), None);
+                ledger.settle_ok(collected.usage.as_ref());
                 record_usage(state, &collected.usage);
                 respond_json(req, 200, collected.body, state, ctx);
             }
@@ -644,12 +644,7 @@ fn upstream_options<'a>(
 /// usage to report, so the row carries NULL — a 0 would claim CC generated
 /// something without consuming tokens.
 fn record_attempt_failure(ledger: &billing::RequestLedger, err: &UpstreamError) {
-    let tag = if err.status_code == 0 {
-        "http-network".to_string()
-    } else {
-        format!("http-{}", err.status_code)
-    };
-    ledger.end_attempt(billing::AttemptStatus::Error, None, Some(&tag));
+    ledger.end_attempt(billing::AttemptStatus::Error, None, Some(&err.error_tag()));
 }
 
 /// The per-request tool summary the Node handler logs. Two facts only — the
@@ -792,10 +787,9 @@ fn serve_sse(
     let _ = req.respond(response);
     let observed = usage_slot.lock().ok().and_then(|g| g.clone());
     // A failure that ended the turn was already recorded by the body, as it
-    // happened; reaching here unsettled means the last attempt succeeded.
-    if !ledger.is_settled() {
-        ledger.end_attempt(billing::AttemptStatus::Ok, observed.as_ref(), None);
-    }
+    // happened; settle_ok keeps that row and only records a success when the
+    // turn reached the end without one.
+    ledger.settle_ok(observed.as_ref());
     record_usage(state, &observed);
 }
 

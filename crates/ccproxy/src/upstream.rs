@@ -56,6 +56,19 @@ pub struct UpstreamError {
 }
 
 impl UpstreamError {
+    /// The ledger tag for this failure, in the vocabulary the upstream layer
+    /// already uses for its own rows: `http-<status>` when CC answered, and
+    /// `http-timeout` / `http-network` for the transport classes (see
+    /// `timeout_tag`). Living here keeps the tag vocabulary next to the code
+    /// that produces the statuses it names.
+    pub fn error_tag(&self) -> String {
+        if self.status_code == 0 {
+            timeout_tag(self).to_string()
+        } else {
+            format!("http-{}", self.status_code)
+        }
+    }
+
     /// The status the downstream client is told. 4xx passes through so the
     /// client sees CC's own verdict; everything else collapses to 502 — a 5xx
     /// forwarded verbatim would have the client retrying against us.

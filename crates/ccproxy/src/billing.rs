@@ -736,8 +736,22 @@ impl RequestLedger {
     ///
     /// The streaming path records a failure the moment it happens, then returns
     /// to the caller, which would otherwise record a success for the same turn.
-    pub fn is_settled(&self) -> bool {
+    fn is_settled(&self) -> bool {
         self.settled.load(Ordering::Relaxed)
+    }
+
+    /// Record a successful turn unless an outcome already beat it.
+    ///
+    /// The settlement rule this type owns: exactly one terminal row per request.
+    /// The streaming path reports a failure (or a client abort) through the
+    /// outcome sink the moment it happens; the caller afterwards cannot tell
+    /// whether that happened, so it calls this, and a turn that already ended
+    /// in failure keeps its failure row instead of gaining a contradictory
+    /// success row.
+    pub fn settle_ok(&self, usage: Option<&UsageData>) {
+        if !self.is_settled() {
+            self.end_attempt(AttemptStatus::Ok, usage, None);
+        }
     }
 
     /// The attempt number to stamp on the next row: 1-based, so it is at least 1
@@ -909,6 +923,7 @@ fn is_power_of_two(n: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream_body::StreamOutcomeSink;
 
     fn record(attempt: u64, status: AttemptStatus) -> AttemptRecord {
         AttemptRecord {
@@ -990,6 +1005,50 @@ mod tests {
             })
             .expect("query");
         mapped.filter_map(Result::ok).collect()
+    }
+
+    #[test]
+    fn settle_ok_records_a_success_when_nobody_else_settled() {
+        let scoped = ScopedLedger::install("settle-ok");
+        let ledger = RequestLedger::new("r", "m", Wire::Anthropic, true);
+        ledger.settle_ok(None);
+        flush();
+        let rows = rows(&scoped.dir);
+        assert_eq!(rows.len(), 1, "exactly one terminal row");
+        assert_eq!(rows[0].1, "ok", "the row is a success");
+    }
+
+    #[test]
+    fn settle_ok_never_overrides_an_outcome_already_recorded() {
+        // The settlement rule this pins: the streaming path reported a failure
+        // the moment it happened (via end_attempt, which settles); the caller
+        // cannot know that and calls settle_ok afterwards. The failure row
+        // must survive untouched.
+        let scoped = ScopedLedger::install("settle-contested");
+        let ledger = RequestLedger::new("r", "m", Wire::Anthropic, true);
+        ledger.started();
+        ledger.end_attempt(AttemptStatus::Error, None, Some("http-500"));
+        ledger.settle_ok(None);
+        flush();
+        let rows = rows(&scoped.dir);
+        assert_eq!(rows.len(), 1, "no second row appears");
+        assert_eq!(rows[0].1, "error", "the failure row stands");
+    }
+
+    #[test]
+    fn settle_ok_after_a_client_abort_keeps_the_abort_row() {
+        let scoped = ScopedLedger::install("settle-aborted");
+        let ledger = RequestLedger::new("r", "m", Wire::Anthropic, true);
+        ledger.started();
+        ledger.aborted("[client-gone] client disconnected");
+        ledger.settle_ok(None);
+        flush();
+        let rows = rows(&scoped.dir);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].1, "aborted",
+            "the abort is not relabelled a success"
+        );
     }
 
     #[test]
@@ -1191,7 +1250,7 @@ mod tests {
         let ledger = RequestLedger::new("r", "m", Wire::Openai, true);
         // `failed` is what the upstream layer calls when it decides to retry.
         ledger.started();
-        ledger.failed("http-503");
+        AttemptSink::failed(&ledger, "http-503");
         // Then the retry succeeds.
         ledger.started();
         ledger.end_attempt(AttemptStatus::Ok, None, None);
