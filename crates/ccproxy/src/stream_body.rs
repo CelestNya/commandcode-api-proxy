@@ -463,14 +463,13 @@ mod tests {
             let mut enc = encoder(dialect, &mut openai, &mut anthropic);
 
             assert!(!enc.has_emitted_content(), "{dialect:?} starts dirty");
-            assert!(enc.can_splice_retry(), "{dialect:?} blocks splice before anything");
+            assert!(
+                enc.can_splice_retry(),
+                "{dialect:?} blocks splice before anything"
+            );
 
-            let _ = enc
-                .emit_sse("start", &json!({"type": "message"}))
-                .unwrap();
-            let delta = enc
-                .emit_sse("text-delta", &json!({"text": "hi"}))
-                .unwrap();
+            let _ = enc.emit_sse("start", &json!({"type": "message"})).unwrap();
+            let delta = enc.emit_sse("text-delta", &json!({"text": "hi"})).unwrap();
             assert!(!delta.is_empty(), "{dialect:?} dropped a text delta");
             assert!(enc.has_emitted_content(), "{dialect:?} ignores content");
             assert!(
@@ -503,19 +502,29 @@ mod tests {
                 .unwrap();
             // Reasoning alone must not block recovery — this is the 2026-09-15
             // incident cell.
-            assert!(enc.can_splice_retry(), "{dialect:?} blocks splice on reasoning");
+            assert!(
+                enc.can_splice_retry(),
+                "{dialect:?} blocks splice on reasoning"
+            );
             enc.begin_continuation();
             // The replayed thinking is dropped; the replacement's first answer
             // text still flows, exactly once.
             let replay = enc
                 .emit_sse("reasoning-delta", &json!({"text": "replayed"}))
                 .unwrap();
-            assert!(replay.is_empty(), "{dialect:?} replayed thinking during a splice");
-            let delta = enc
-                .emit_sse("text-delta", &json!({"text": "hi"}))
-                .unwrap();
-            assert!(!delta.is_empty(), "{dialect:?} lost answer text after a splice");
-            assert!(!enc.can_splice_retry(), "{dialect:?} allows a second splice");
+            assert!(
+                replay.is_empty(),
+                "{dialect:?} replayed thinking during a splice"
+            );
+            let delta = enc.emit_sse("text-delta", &json!({"text": "hi"})).unwrap();
+            assert!(
+                !delta.is_empty(),
+                "{dialect:?} lost answer text after a splice"
+            );
+            assert!(
+                !enc.can_splice_retry(),
+                "{dialect:?} allows a second splice"
+            );
         }
     }
 }

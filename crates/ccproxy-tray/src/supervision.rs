@@ -59,7 +59,10 @@ mod tests {
     #[test]
     fn a_crash_schedules_a_restart_after_the_delay() {
         let mut s = Supervision::new();
-        assert!(!s.tick(t(0), true), "a crash schedules, it does not restart");
+        assert!(
+            !s.tick(t(0), true),
+            "a crash schedules, it does not restart"
+        );
         assert!(!s.tick(t(2), false), "deadline pending, not yet due");
         assert!(s.tick(t(3), false), "deadline passed: restart now");
         assert!(!s.tick(t(4), false), "restart consumed; no new deadline");

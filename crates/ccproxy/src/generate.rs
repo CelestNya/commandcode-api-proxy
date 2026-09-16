@@ -143,7 +143,6 @@ pub fn encoder_model(requested: &str, fallback: &str) -> String {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -141,7 +141,10 @@ mod tests {
     #[test]
     fn error_message_prefers_message_then_error_message() {
         assert_eq!(error_message(&json!({"message": "hi"})), "hi");
-        assert_eq!(error_message(&json!({"error": {"message": "deep"}})), "deep");
+        assert_eq!(
+            error_message(&json!({"error": {"message": "deep"}})),
+            "deep"
+        );
         assert_eq!(error_message(&json!({"other": 1})), "{\"other\":1}");
     }
 

@@ -96,7 +96,11 @@ fn stream_anthropic_stop_reason(reason: &str) -> String {
     let mut out = String::new();
     for record in &records {
         if record.event == "message_delta" {
-            if let Some(r) = record.data.pointer("/delta/stop_reason").and_then(Value::as_str) {
+            if let Some(r) = record
+                .data
+                .pointer("/delta/stop_reason")
+                .and_then(Value::as_str)
+            {
                 out = r.to_string();
             }
         }
@@ -112,12 +116,22 @@ fn openai_stream_and_non_stream_agree_on_canonical_tool_arguments() {
     let tool_call = json!({"toolCallId": "call_1", "toolName": "get_weather", "input": false});
     let stream = stream_openai_tool_arguments(&tool_call);
     let non_stream = non_stream_openai_tool_arguments(&tool_call);
-    assert_eq!(stream, non_stream, "stream={stream:?} non_stream={non_stream:?}");
+    assert_eq!(
+        stream, non_stream,
+        "stream={stream:?} non_stream={non_stream:?}"
+    );
 }
 
 #[test]
 fn openai_finish_reason_matches_between_stream_and_non_stream() {
-    for reason in ["stop", "length", "content_filtered", "tool-call", "error", "mystery"] {
+    for reason in [
+        "stop",
+        "length",
+        "content_filtered",
+        "tool-call",
+        "error",
+        "mystery",
+    ] {
         assert_eq!(
             stream_openai_finish_reason(reason),
             non_stream_openai_finish_reason(reason),

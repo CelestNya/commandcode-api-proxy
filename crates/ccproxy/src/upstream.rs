@@ -456,9 +456,7 @@ fn attempt_send(
     }
     let agent = agent.build();
 
-    let mut request = agent
-        .post(url)
-        .set("Content-Type", "application/json");
+    let mut request = agent.post(url).set("Content-Type", "application/json");
     // ureq's own default is `gzip`, which would hide the framing this client
     // must see; `build_headers` advertises all three explicitly.
     for (name, value) in build_headers(api_key, cc_version, thread_id, working_dir) {

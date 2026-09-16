@@ -452,8 +452,12 @@ impl DialectSurface for Openai {
         log_incoming_request(ctx, raw, requested);
     }
     fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value {
-        let mut body =
-            translate::openai_to_cc(raw, catalog, &state.tables, state.translate_env.no_tools_guard_off);
+        let mut body = translate::openai_to_cc(
+            raw,
+            catalog,
+            &state.tables,
+            state.translate_env.no_tools_guard_off,
+        );
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }

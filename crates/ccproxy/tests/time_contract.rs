@@ -26,7 +26,10 @@ fn now_iso8601_is_a_three_millis_zulu_timestamp() {
     assert!((1..=31).contains(&day), "timestamp={s:?}");
     let time = &s[11..23];
     assert_eq!(time.len(), 12, "timestamp={s:?}");
-    assert!(time.as_bytes().iter().all(|b| b.is_ascii_digit() || *b == b':' || *b == b'.'));
+    assert!(time
+        .as_bytes()
+        .iter()
+        .all(|b| b.is_ascii_digit() || *b == b':' || *b == b'.'));
 }
 
 /// `today_utc` must be the `YYYY-MM-DD` prefix of `now_iso8601`.
