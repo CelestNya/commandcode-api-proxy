@@ -14,24 +14,13 @@
 
 use crate::sse::StreamFailure;
 use crate::tool_arguments::tool_argument_suffix;
-use crate::translate::util::{extract_usage, truthy};
+use crate::translate::terminal::{
+    canonical_arguments_text, error_message, map_finish_reason, openai_usage,
+};
+use crate::translate::util::extract_usage;
 use crate::usage::UsageData;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-
-/// Maps CC's `finishReason` to OpenAI's `finish_reason`. Anything unknown
-/// becomes "stop": reporting an unrecognised reason as a failure would be worse
-/// than reporting a plain clean stop.
-fn map_finish_reason(reason: &str) -> &'static str {
-    match reason {
-        "stop" => "stop",
-        "length" => "length",
-        "content_filtered" => "content_filter",
-        "tool-call" | "tool-calls" | "tool_call" => "tool_calls",
-        "error" => "stop",
-        _ => "stop",
-    }
-}
 
 #[derive(Debug, Default, Clone)]
 struct ToolMeta {
@@ -312,7 +301,7 @@ impl OpenAIEncoder {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let args = arguments_text(data);
+                let args = canonical_arguments_text(data);
                 let index = self.resolve_tool_call_index(
                     Some(&tool_call_id)
                         .filter(|s| !s.is_empty())
@@ -393,29 +382,6 @@ impl OpenAIEncoder {
     }
 
     fn usage_chunk(&self, totals: &UsageData) -> Value {
-        let prompt = totals.prompt_tokens.unwrap_or(0);
-        let completion = totals.completion_tokens.unwrap_or(0);
-        let mut usage = Map::new();
-        usage.insert("prompt_tokens".into(), json!(prompt));
-        usage.insert("completion_tokens".into(), json!(completion));
-        usage.insert(
-            "total_tokens".into(),
-            json!(totals
-                .total_tokens
-                .unwrap_or(prompt.saturating_add(completion))),
-        );
-        if let Some(cached) = totals.cached_tokens {
-            usage.insert(
-                "prompt_tokens_details".into(),
-                json!({"cached_tokens": cached}),
-            );
-        }
-        if let Some(reasoning) = totals.reasoning_tokens {
-            usage.insert(
-                "completion_tokens_details".into(),
-                json!({"reasoning_tokens": reasoning}),
-            );
-        }
         let mut m = Map::new();
         m.insert("id".into(), Value::String(self.id.clone()));
         m.insert(
@@ -425,7 +391,7 @@ impl OpenAIEncoder {
         m.insert("created".into(), json!(self.created));
         m.insert("model".into(), Value::String(self.model.clone()));
         m.insert("choices".into(), json!([]));
-        m.insert("usage".into(), Value::Object(usage));
+        m.insert("usage".into(), openai_usage(totals));
         Value::Object(m)
     }
 
@@ -496,26 +462,4 @@ fn text_of(data: &Value) -> Option<String> {
     } else {
         Some(text.to_string())
     }
-}
-
-/// Canonical tool arguments as text: a string is used verbatim, any other value
-/// is serialised, and a missing value becomes "".
-fn arguments_text(data: &Value) -> String {
-    let raw = data.get("input").or_else(|| data.get("arguments"));
-    match raw {
-        Some(Value::String(s)) => s.clone(),
-        Some(v) if truthy(v) => serde_json::to_string(v).unwrap_or_default(),
-        _ => String::new(),
-    }
-}
-
-/// The human-readable message from an in-band error event.
-fn error_message(data: &Value) -> String {
-    if let Some(m) = data.get("message").and_then(Value::as_str) {
-        return m.to_string();
-    }
-    if let Some(m) = data.pointer("/error/message").and_then(Value::as_str) {
-        return m.to_string();
-    }
-    serde_json::to_string(data).unwrap_or_default()
 }

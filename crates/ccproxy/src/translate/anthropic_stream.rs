@@ -18,29 +18,13 @@
 
 use crate::sse::{AnthropicRecord, StreamFailure};
 use crate::tool_arguments::tool_argument_suffix;
+use crate::translate::terminal::{
+    canonical_arguments_text, error_message, map_stop_reason, THINKING_SIGNATURE,
+};
 use crate::translate::util::extract_usage;
 use crate::usage::UsageData;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-
-/// CC `finishReason` -> Anthropic `stop_reason`.
-fn map_stop_reason(reason: &str) -> &'static str {
-    match reason {
-        "stop" => "end_turn",
-        "length" => "max_tokens",
-        "tool-call" | "tool-calls" | "tool_call" => "tool_use",
-        "content_filtered" => "stop_sequence",
-        "pause_turn" => "pause_turn",
-        "refusal" => "refusal",
-        "model_context_window_exceeded" => "model_context_window_exceeded",
-        _ => "end_turn",
-    }
-}
-
-/// Required on every thinking block by the Anthropic contract. CC returns no
-/// signature of its own, and clients round-trip the value without verifying it,
-/// so a fixed placeholder is safe.
-const THINKING_SIGNATURE: &str = "_cc_proxy_placeholder";
 
 /// `message_start` reports output_tokens as 1, not 0: the field is the count
 /// "so far" and a 0 reads as a finished turn to some clients.
@@ -347,7 +331,7 @@ impl AnthropicEncoder {
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 let index = self.ensure_tool_block(&mut records, id, name);
-                let args = arguments_text(data);
+                let args = canonical_arguments_text(data);
                 let emitted = self
                     .tool_blocks
                     .get(id)
@@ -600,24 +584,4 @@ impl AnthropicEncoder {
             None => self.finish_records("end_turn"),
         }
     }
-}
-
-/// Canonical tool arguments as text; a missing value becomes "".
-fn arguments_text(data: &Value) -> String {
-    let raw = data.get("input").or_else(|| data.get("arguments"));
-    match raw {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Null) | None => String::new(),
-        Some(v) => serde_json::to_string(v).unwrap_or_default(),
-    }
-}
-
-fn error_message(data: &Value) -> String {
-    if let Some(m) = data.get("message").and_then(Value::as_str) {
-        return m.to_string();
-    }
-    if let Some(m) = data.pointer("/error/message").and_then(Value::as_str) {
-        return m.to_string();
-    }
-    serde_json::to_string(data).unwrap_or_default()
 }

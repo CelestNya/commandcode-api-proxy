@@ -4,35 +4,12 @@
 //! Both throw on an in-band error rather than folding the failure into content:
 //! a failed generation must not read as an assistant reply.
 
+use crate::translate::terminal::{
+    canonical_arguments_text, map_finish_reason, map_stop_reason, openai_usage, THINKING_SIGNATURE,
+};
 use crate::translate::util::extract_usage;
 use crate::usage::UsageData;
 use serde_json::{json, Map, Value};
-
-fn map_finish_reason(reason: &str) -> &'static str {
-    match reason {
-        "stop" => "stop",
-        "length" => "length",
-        "content_filtered" => "content_filter",
-        "tool-call" | "tool-calls" | "tool_call" => "tool_calls",
-        "error" => "stop",
-        _ => "stop",
-    }
-}
-
-fn map_stop_reason(reason: &str) -> &'static str {
-    match reason {
-        "stop" => "end_turn",
-        "length" => "max_tokens",
-        "tool-call" | "tool-calls" | "tool_call" => "tool_use",
-        "content_filtered" => "stop_sequence",
-        "pause_turn" => "pause_turn",
-        "refusal" => "refusal",
-        "model_context_window_exceeded" => "model_context_window_exceeded",
-        _ => "end_turn",
-    }
-}
-
-const THINKING_SIGNATURE: &str = "_cc_proxy_placeholder";
 
 /// A tool call assembled from deltas or replaced wholesale by the canonical
 /// event. Kept as a struct rather than a `Value` so accumulating into it cannot
@@ -118,7 +95,7 @@ impl NonStreamingCollector {
                     let entry = ToolCall {
                         id: id.to_string(),
                         name: name.to_string(),
-                        arguments: canonical_arguments(data),
+                        arguments: canonical_arguments_text(data),
                     };
                     match calls.iter_mut().find(|tc| tc.id == id) {
                         Some(existing) => *existing = entry,
@@ -288,42 +265,5 @@ impl NonStreamingCollector {
             body: response,
             usage: finish.and_then(|(_, u)| u),
         })
-    }
-}
-
-fn openai_usage(usage: &UsageData) -> Value {
-    let prompt = usage.prompt_tokens.unwrap_or(0);
-    let completion = usage.completion_tokens.unwrap_or(0);
-    let mut out = Map::new();
-    out.insert("prompt_tokens".into(), json!(prompt));
-    out.insert("completion_tokens".into(), json!(completion));
-    out.insert(
-        "total_tokens".into(),
-        json!(usage
-            .total_tokens
-            .unwrap_or(prompt.saturating_add(completion))),
-    );
-    if let Some(cached) = usage.cached_tokens {
-        out.insert(
-            "prompt_tokens_details".into(),
-            json!({"cached_tokens": cached}),
-        );
-    }
-    if let Some(reasoning) = usage.reasoning_tokens {
-        out.insert(
-            "completion_tokens_details".into(),
-            json!({"reasoning_tokens": reasoning}),
-        );
-    }
-    Value::Object(out)
-}
-
-/// Canonical tool arguments as text, used by the OpenAI builder.
-fn canonical_arguments(data: &Value) -> String {
-    let raw = data.get("input").or_else(|| data.get("arguments"));
-    match raw {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Null) | None => String::new(),
-        Some(v) => serde_json::to_string(v).unwrap_or_default(),
     }
 }

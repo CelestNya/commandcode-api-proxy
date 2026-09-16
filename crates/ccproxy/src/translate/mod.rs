@@ -11,6 +11,7 @@ pub mod models;
 pub mod nonstream;
 pub mod openai;
 pub mod openai_stream;
+pub mod terminal;
 pub mod util;
 
 use crate::models::Catalog;
