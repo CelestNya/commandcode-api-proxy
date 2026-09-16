@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const MODELS_JSON: &str = include_str!("../../../src/models.json");
+const MODELS_JSON: &str = include_str!("../models.json");
 const CATALOG_TTL: Duration = Duration::from_secs(60 * 60);
 const CATALOG_FAILURE_RETRY: Duration = Duration::from_secs(30);
 const MODELS_FETCH_TIMEOUT_MS: u64 = 5_000;
