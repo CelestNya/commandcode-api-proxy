@@ -42,6 +42,7 @@
     "conformance:check": "node conformance/record.mjs --check && node conformance/record-translate.mjs --check",
     "conformance:probe": "node conformance/client-probes/partial-context.mjs && node conformance/client-probes/retry-classification.mjs",
     "conformance:probe:upstream": "node conformance/client-probes/upstream-continuation.mjs",
+    "conformance:probe:headers": "node conformance/probe-slow-headers.mjs --exe target/release/ccproxy.exe",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {

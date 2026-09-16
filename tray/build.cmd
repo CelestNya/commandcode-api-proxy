@@ -45,6 +45,14 @@ if "%VER%"=="" (
   echo Could not determine version.
   exit /b 1
 )
+rem Guard: the version names the published folder, so a junk value must stop
+rem the build rather than produce `CCProxy-v<junk>`. A real version starts with
+rem x.y.z; a suffix like `-p2` is allowed after it.
+echo !VER!| findstr /r /c:"^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" >nul || (
+  echo ERROR: version "!VER!" is not x.y.z ^(from package.json or Tray.cs^).
+  echo Pass one explicitly: build.cmd 0.5.0
+  exit /b 1
+)
 
 "%CSC%" /nologo /target:winexe /out:"%OUTDIR%CCProxyTray.exe" ^
   /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll ^

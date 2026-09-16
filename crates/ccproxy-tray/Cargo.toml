@@ -1,0 +1,38 @@
+[package]
+name = "ccproxy-tray"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# Named to match the artifact the existing hot-swap folder and the handover
+# test look for, so the C# tray and this one are interchangeable during the
+# transition.
+[[bin]]
+name = "CCProxyTray"
+path = "src/main.rs"
+
+[dependencies]
+ccproxy = { path = "../ccproxy" }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# Raw bindings rather than the typed `windows` crate: the surface below is a
+# few dozen well-understood calls, the crate is already in the lock file via
+# rusqlite, and the typed crate's codegen for this many namespaces costs more
+# compilation time than it saves in hand-written wrappers. Every `unsafe` block
+# it makes possible is confined to `win.rs`, `tray.rs` and `owner.rs`, each
+# carrying an `#[expect(unsafe_code)]` that names the invariant it relies on.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

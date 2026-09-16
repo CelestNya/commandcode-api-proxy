@@ -1,0 +1,10 @@
+# Windows batch files must keep CRLF: cmd.exe mis-parses an LF-only .cmd,
+# executing fragments of lines as commands. That happened here — an edit
+# rewrote tray/build-rust.cmd with LF and the script silently ran the wrong
+# code path, publishing a junk `CCProxy-vthe` folder.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Rust sources are LF everywhere; mixed endings broke multi-line edits and
+# produce noisy diffs.
+*.rs text eol=lf

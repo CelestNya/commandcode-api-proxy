@@ -3,48 +3,39 @@
 > Personal fork of [thaolaptrinh/commandcode-api-proxy](https://github.com/thaolaptrinh/commandcode-api-proxy).
 > The auth subsystem (stored key, `auth` subcommand, `--setup-*` generators) has been
 > removed in favour of key passthrough; the structure below reflects this fork.
+>
+> The Rust rewrite (M0–M8) is complete and is the maintenance target. The Node
+> sources (`src/`, `tests/`, `package.json`) are kept for cross-validation only —
+> the conformance golden is recorded from them and checked against the Rust build.
 
 ## Prerequisites
 
-- Node.js >= 24
-- pnpm
-
-## Setup
-
-```bash
-git clone https://github.com/CelestNya/commandcode-api-proxy.git
-cd commandcode-api-proxy
-pnpm install
-```
+- Rust stable (MSVC toolchain on Windows)
+- Node.js >= 24 + pnpm — only for the conformance harness and the vendored Node tests
 
 ## Commands
 
 ```bash
-pnpm install       # Install dependencies
-pnpm dev           # Dev mode with hot reload (tsx)
-pnpm build         # Build to dist/
-pnpm test          # Run tests
-pnpm test:watch    # Run tests in watch mode
-pnpm test:coverage # Run tests with coverage
-pnpm lint          # Lint (oxlint via vite-plus)
-pnpm fmt           # Format (oxfmt via vite-plus)
+cargo build --release --locked   # Both binaries: ccproxy + CCProxyTray
+cargo test                       # Unit + golden + ledger tests (196)
+cargo clippy --all-targets --all-features --locked -- -D warnings   # The lint gate
+cargo fmt --check
+node conformance/record.mjs --check          # Golden behaviour (56 cases)
+node conformance/record-translate.mjs --check
+node conformance/verify-build.mjs --exe target/release/ccproxy.exe   # Verify any build
+tray\build-rust.cmd                          # Package + publish to the hot-swap folder
 ```
 
-Scripts are defined in `package.json`. The `make` shortcuts are also available if you have `make` installed.
+The legacy Node workflow (`pnpm install && pnpm build && pnpm test`) still works in
+this tree and is run when recording a new golden, but is not part of the Rust
+development loop.
 
-## Windows tray
+## Windows tray (Rust, `crates/ccproxy-tray`)
 
-The tray is a separate C# artifact, built by `tray\build.cmd`:
-
-```cmd
-pnpm build           :: dist/ must be fresh first - the packager refuses a stale dist
-pnpm release:tray    :: compiles CCProxyTray.exe and publishes to the Desktop
-```
-
-`build.cmd` assembles a portable package (`node.exe` + `dist/` + `package.json`),
-copies it into `%Desktop%\CCProxy-Release\CCProxy-v<version>\` and mirrors it to
-`CCProxy-current\`, keeping older version folders for rollback. The version comes
-from `package.json` - the single source of truth, also shown in the tray tooltip.
+The tray is a second Rust binary in the same workspace, not a separate artifact.
+`tray\build-rust.cmd` builds both binaries, verifies the packaged proxy
+(`verify-build.mjs --exe`), and publishes to `%Desktop%\CCProxy-Release\CCProxy-v<version>-rust\`.
+Pass `--promote` to switch `CCProxy-current` (a decision, not a side effect of building).
 
 Test a build against an isolated namespace so a running production instance is
 untouched:
@@ -56,44 +47,56 @@ CCProxyTray.exe --selfcheck
 ```
 
 `--selfcheck` writes results to `selfcheck.log` (a `winexe` has no console) and
-refuses to take over when a tray is already running.
+refuses to take over when a tray is already running. `chaos/handover-test.py`
+exercises the two-phase handover on an isolated port; it is the M6 acceptance.
 
 ## Project structure
 
 ```
-src/
-├── proxy.ts              # Entry point: load config, start server, signal handling
-├── config.ts             # Config loader (env + CLI, validation and clamping)
-├── logger.ts             # Level-filtered console logger
-├── models.json           # Model list, aliases, context windows, reasoning efforts
-├── version.ts            # Proxy version lookup
-├── server.ts             # HTTP server, routing, request/response handling
-├── stream.ts             # NDJSON parsing, SSE formatting, error tagging
-├── upstream.ts           # CC /alpha/generate client (retries, idle timeout)
-├── usage-stats.ts        # Per-request usage accounting + JSONL persistence
-└── translate/
-    ├── types.ts            # Shared types (OpenAI, CC, UsageData)
-    ├── models.ts           # Model resolution, aliasing, reasoning effort
-    ├── catalog.ts          # Dynamic model catalog (provider API + static merge)
-    ├── util.ts             # CC helpers (usage extraction, tool pruning, safeguard)
-    ├── validation.ts       # Request validation (OpenAI + Anthropic)
-    ├── tool-arguments.ts   # Tool-argument string handling
-    ├── openai.ts           # OpenAI <-> CC translation
-    ├── anthropic-types.ts  # Anthropic API types
-    ├── anthropic-models.ts # claude-* -> CC model mapping
-    └── anthropic.ts        # Anthropic <-> CC translation
-tests/                      # Vitest suites (unit + e2e + reliability)
-tray/                       # C# tray manager (Tray.cs) and its build.cmd
-chaos/                      # Handover and soak scripts (manual, Python/Node)
+crates/
+├── ccproxy/               # The proxy binary — #![forbid(unsafe_code)]
+│   └── src/
+│       ├── main.rs          # Entry: config, server startup, signal handling
+│       ├── config.rs        # Config loader (env + CLI, validation and clamping)
+│       ├── log.rs           # Level-filtered logger
+│       ├── server.rs        # HTTP server, routing, CORS, body limits, lifecycle logs
+│       ├── stream_body.rs   # Downstream SSE loop, splice retry, terminal records
+│       ├── upstream.rs      # CC /alpha/generate client (retries, idle timeout)
+│       ├── ndjson.rs        # CC NDJSON line parsing
+│       ├── sse.rs           # SSE framing, StreamFailure classification
+│       ├── billing.rs       # Per-attempt SQLite ledger (M7) + writer thread
+│       ├── cli_version.rs   # Startup CLI-version lookup (with retry)
+│       ├── models.rs        # Model resolution, aliasing, reasoning effort
+│       ├── catalog.rs       # Dynamic model catalog (provider API + static merge)
+│       ├── validation.rs    # Request validation (OpenAI + Anthropic)
+│       ├── tool_arguments.rs
+│       ├── usage.rs         # /health cache stats
+│       └── translate/       # openai.rs, anthropic_stream.rs, openai_stream.rs,
+│                            #   models.rs, catalog.rs, validation.rs, util.rs
+└── ccproxy-tray/          # The tray binary — #![deny(unsafe_code)], FFI sites expect()
+    └── src/
+        ├── main.rs          # Role determination + handover loop
+        ├── win.rs           # The only unsafe surface: job objects, mutex/events,
+                              #   GetExtendedTcpTable, Shell_NotifyIcon, registry
+        ├── owner.rs         # Handover verdict state machine (pure)
+        ├── portguard.rs     # Port ownership policy (free/ours/foreign)
+        ├── process.rs       # Child supervision, log rotation, egress env
+        ├── tray.rs          # Menu, icon, UI state
+        └── health.rs        # /health probe for the handover gate
+src/models.json            # Single source of truth, include_str!'d by the Rust crate
+conformance/               # Golden fixtures + record/verify harness (Node-driven)
+tests/, src/, package.json # Vendored Node build — cross-validation and golden recording
+tray/                      # build-rust.cmd (Rust packaging), build.cmd (legacy Node)
+chaos/                     # Handover and soak scripts (manual, Python/Node)
 ```
 
 ## Tech stack
 
-- **Runtime:** Node.js (zero runtime dependencies — built-ins only)
-- **Build:** TypeScript + tsc-alias
-- **Test:** Vitest
-- **Lint:** Oxlint (via vite-plus)
-- **Format:** Oxfmt (via vite-plus)
+- **Language:** Rust (edition 2021), blocking thread-per-connection — no async runtime (see §4)
+- **HTTP:** `tiny_http` (server) + `ureq` (client)
+- **Storage:** `rusqlite` (bundled SQLite, WAL)
+- **JSON:** `serde_json`
+- **Test:** plain `#[test]` + the golden conformance harness
 
 # Rust rewrite — engineering rules
 
@@ -105,21 +108,20 @@ the community's better Rust skills converge on — no skill file is vendored.
 
 ## 1. Crate layout and unsafe
 
-Three crates, not one. This is what makes `forbid(unsafe_code)` possible.
+Two crates, split by where `unsafe` is allowed to live. This is what makes
+`forbid(unsafe_code)` possible for everything that is not Win32 FFI.
 
 | Crate | Contents | Unsafe policy |
 | ----- | -------- | ------------- |
-| `ccproxy-core` | Translation, NDJSON/SSE encoding, model catalog, config | `#![forbid(unsafe_code)]` |
-| `ccproxy-win32` | Job Objects, mutex/event handover, `GetExtendedTcpTable`, tray | `#![deny(unsafe_code)]` |
-| `ccproxy` (bin) | Wiring, HTTP server, CLI | `#![forbid(unsafe_code)]` |
+| `ccproxy` (bin) | Translation, NDJSON/SSE encoding, model catalog, config, HTTP server, billing ledger | `#![forbid(unsafe_code)]` |
+| `ccproxy-tray` (bin) | Job Objects, mutex/event handover, `GetExtendedTcpTable`, tray UI, registry | `#![deny(unsafe_code)]` — all `unsafe` confined to `win.rs` |
 
-- Put `#![forbid(unsafe_code)]` at the crate root of `-core` and the binary.
-  `forbid` cannot be lowered by a nested `#[allow]` — attempting it is itself a
+- `forbid` cannot be lowered by a nested `#[allow]` — attempting it is itself a
   compile error, which is the point.
-- Use `deny`, not `forbid`, inside `ccproxy-win32`, so each FFI site can carry
+- Use `deny`, not `forbid`, inside `ccproxy-tray`, so each FFI site can carry
   `#[expect(unsafe_code)]` plus a comment naming the invariant it upholds.
 - Do not use `unsafe` to work around the borrow checker. If a data structure
-  needs it, use the right crate (`parking_lot`, `arc-swap`, `crossbeam`).
+  needs it, find the safe abstraction first.
 
 ## 2. Lints — the gate
 
@@ -155,8 +157,9 @@ off by default:
   where the bound is locally provable, with a comment saying why.
 - Prefer `#[expect(lint)]` over `#[allow(lint)]`: `expect` warns when the lint
   stops firing, so stale suppressions cannot rot silently.
-- Route all output through `tracing`. Do not add `print_stdout` to the deny list
-  and then fight it — just never print.
+- Route all output through `log.rs` (the level-filtered logger). Never print
+  from request-handling code — the two-line request lifecycle log is a contract,
+  and stray stdout would corrupt it.
 
 ## 3. Errors
 
@@ -226,8 +229,8 @@ Rules that follow:
 
 ## 5. HTTP and streaming
 
-Stack, all blocking (measured: 2.2 MB binary with the whole stack linked in,
-against 88 MB for the bundled Node runtime):
+Stack, all blocking (the finished proxy binary is 3.2 MB with the whole stack
+linked in, against 88 MB for the bundled Node runtime):
 
 | Layer | Choice | Why |
 | ----- | ------ | --- |
@@ -265,26 +268,25 @@ against 88 MB for the bundled Node runtime):
 ## 6. Testing
 
 - **Plain `#[test]` everywhere** — there is no async runtime to bridge, so no
-  `#[tokio::test]` is needed. **`insta`** for the translation layer —
-  request/response shapes are exactly snapshot-shaped, and `cargo insta review`
-  forces an explicit accept.
-- **`proptest`** over `quickcheck` for the invariants the Node conformance test
-  covers with a seeded PRNG: a stream split at arbitrary byte offsets must parse
-  identically, and every emitted Anthropic record must satisfy the block
-  lifecycle (no delta before `content_block_start`, no record after
-  `message_stop`).
-- **The conformance harness is the primary acceptance test**, and it needs no
-  port: load `conformance/golden/*.json` and assert against it, or replay the
-  scenarios through `conformance/mock-upstream.mjs` (plain Node, no Rust-side
-  equivalent required). For an upstream mock inside `cargo test`, `httpmock`
-  works with blocking clients; `wiremock` is async-oriented and a poor fit here.
-- **`cargo-nextest`** for the run (`doctests` are not supported — run
-  `cargo test --doc` separately). `--no-tests` exits non-zero by default.
-- **`cargo-deny`** for advisories, licences, bans and sources; it is a superset
-  of `cargo-audit` on advisories. Run it in CI.
+  `#[tokio::test]` is needed. Snapshot/property tooling (`insta`, `proptest`) and
+  extra runners (`nextest`, `cargo-deny`) were considered and deliberately
+  dropped: `cargo test` plus the golden conformance covers everything they
+  would, at none of their setup cost.
 - **The conformance harness is the primary acceptance test.** Load
   `conformance/golden/behaviour.json` and `translate.json` and assert against
-  them; see `conformance/README.md`.
+  them; `node conformance/record.mjs --check` drives a built binary end-to-end
+  against the same fixtures. See `conformance/README.md`.
+- **Stream invariants that golden cannot see** are pinned by hand-rolled tests
+  (`crates/ccproxy/tests/stream_body.rs`): byte-offset stream splits, block
+  lifecycle (no delta before `content_block_start`, no record after
+  `message_stop`), and the splice-retry transcripts.
+- **The billing ledger is tested at both levels:** writer unit tests
+  (numbering, NULL-vs-zero, backpressure drop, flush) and end-to-end fault
+  injection driving real turns through the server with the ledger removed or
+  broken (`crates/ccproxy/tests/billing_ledger.rs`).
+- **The regression gate for every commit:** `cargo fmt --check` +
+  `cargo clippy --all-targets -D warnings` + `cargo test`; behaviour commits
+  additionally run `record.mjs --check`.
 
 ## 7. Naming and API shape
 
@@ -304,11 +306,19 @@ Per the Rust API Guidelines, applied to an application:
 
 ## 8. Windows, tray, and binary size
 
-- `windows` (typed) for the tray crate; `windows-sys` (raw, unsafe) when the
-  typed surface is missing. Pin the version exactly — it moves fast.
+- **Decision made: raw `windows-sys`, no typed `windows` crate.** The tray's FFI
+  surface is about a dozen well-understood calls, all confined to
+  `ccproxy-tray/src/win.rs`; the typed crate would have generated far more
+  compile time than it saved. `windows-sys` was already in the lock file via
+  `rusqlite`. Pin the version — it moves fast.
 - Features are opt-in per API namespace. `CreateJobObjectW` needs
   `Win32_Security` in addition to `Win32_System_JobObjects`; this is discovered
   at compile time and is easy to miss.
+- **The tray is raw Shell_NotifyIcon plus a hidden message window** — no
+  `tray-icon`/`tao`/`winit`. The menu, icon (GDI-drawn dots) and the handover
+  state machine together are smaller than any windowing dependency would have
+  been. Win32 mutexes are thread-affine, so the mutex has a dedicated ownership
+  thread; releasing it from another thread fails silently.
 - **Job Object for child lifetime:** `CreateJobObjectW` →
   `SetInformationJobObject(JobObjectExtendedLimitInformation)` with
   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` → `AssignProcessToJobObject` → hold the
@@ -343,10 +353,10 @@ Per the Rust API Guidelines, applied to an application:
   ```
 
   Measured on this machine: a hello-world binary is 1.17 MB default and 245 KB
-  with this profile; with `tiny_http` + `ureq` + `rusqlite` (bundled) linked in,
-  **2.2 MB** — against 88 MB for the bundled Node runtime the rewrite replaces.
-  `panic = "abort"` does not apply to test/bench profiles — Cargo forces unwind
-  there. It also removes backtraces, which matters for a tray app whose only
-  diagnostic channel is a log file; weigh that if field crashes become hard to
-  diagnose.
+  with this profile; the finished binaries are **3.2 MB** (`ccproxy.exe`) and
+  **1.4 MB** (`CCProxyTray.exe`) — against 88 MB for the bundled Node runtime
+  the rewrite replaces. `panic = "abort"` does not apply to test/bench profiles
+  — Cargo forces unwind there. It also removes backtraces, which matters for a
+  tray app whose only diagnostic channel is a log file; weigh that if field
+  crashes become hard to diagnose.
 

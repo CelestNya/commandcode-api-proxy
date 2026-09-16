@@ -11,8 +11,11 @@
 
 - **API key 纯透传** —— 代理不存储、不管理 key。客户端每次请求带自己的 `Authorization`，
   代理原样转发给上游。没有 `auth login`、没有 `auth.json`、没有首启提示。
-- **Windows 托盘 + 热更新** —— 绿色单目录、内嵌 node、双击即用，新版可自动接管旧版。
-- **零运行时依赖** —— 只用 node 内建模块。
+- **Windows 托盘 + 热更新** —— 双击即用，新版可自动接管旧版，交接期服务永不真空。
+- **Rust 重写版** —— 两个原生二进制（代理 + 托盘，合计约 3 MB），不再内嵌 88 MB 的
+  node 运行时；行为由 golden 夹具与 Node 版逐字节对齐（见 `conformance/README.md`）。
+- **用量台账持久化** —— 每次上游尝试一行，落 `%LOCALAPPDATA%\cc-proxy\billing.db`
+  （SQLite，WAL），保留 90 天；中断的尝试记 NULL 用量，绝不记 0。
 
 > 原版面向 npm 公开发布（含 key 托管与 `--setup-*` 引导）。本项目只服务本机，
 > 那些功能已被移除，README 不再记录。
@@ -33,12 +36,12 @@ This proxy talks `/alpha/generate` upstream and standard OpenAI/Anthropic downst
 ```bash
 git clone https://github.com/CelestNya/commandcode-api-proxy.git
 cd commandcode-api-proxy
-pnpm install
-pnpm build && pnpm start
+cargo build --release --locked
+target/release/ccproxy.exe
 ```
 
-需要 Node.js >= 24。Windows 上推荐直接双击托盘包（见 [Windows tray & hot-swap](#windows-tray--hot-swap)），
-无需自行安装 Node。
+构建需要 Rust stable（MSVC 工具链）。Windows 上推荐直接双击托盘包
+（见 [Windows tray & hot-swap](#windows-tray--hot-swap)），无需自行构建。
 
 ## Authentication
 
@@ -82,78 +85,7 @@ Equivalent env vars (lower priority than CLI flags):
 | `CC_MAX_BODY_BYTES`      | Max request body size (default `10485760` / 10 MiB, capped at 50 MiB). Raise for large vision/PDF payloads.             |
 | `CC_NO_TOOLS_GUARD`      | Set to `off` to disable the injected "tools are disabled" instruction for tool-less chat requests.                       |
 | `CC_PROXY`               | Tray only: `off` forces a direct connection, `<url>` overrides the auto-detected system proxy.                          |
-| `LOG_LEVEL`              | Log level (`debug`, `info`, `warn`, `error`)                                                                            |
-| `CORS_ORIGIN`            | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
-
-> **Security:** the proxy forwards the client's Command Code key upstream, so it is
-> designed for **localhost** use (`HOST=127.0.0.1`). Do not bind it to `0.0.0.0` on an
-> untrusted network without restricting `CORS_ORIGIN` and putting your own auth in front.
-
-## Why?
-
-Command Code exposes two API surfaces:
-
-| Surface                         | Protocol                      | Plan required                   |
-| ------------------------------- | ----------------------------- | ------------------------------- |
-| `/provider/v1/chat/completions` | OpenAI-compatible             | **Provider** tier (paid add-on) |
-| `/alpha/generate`               | Custom (Vercel AI SDK stream) | Your standard subscription      |
-
-This proxy talks `/alpha/generate` upstream and standard OpenAI downstream — so your existing plan works from any tool.
-
-## Run the proxy
-
-```bash
-git clone https://github.com/CelestNya/commandcode-api-proxy.git
-cd commandcode-api-proxy
-pnpm install
-pnpm build && pnpm start
-```
-
-需要 Node.js >= 24。Windows 上推荐直接双击托盘包（见 [Windows tray & hot-swap](#windows-tray--hot-swap)），
-无需自行安装 Node。
-
-## Authentication
-
-**纯透传**：请求头里带什么 key，就原样转发给上游。代理自身不读取、不保存、不校验 key。
-
-```bash
-# OpenAI 格式
-curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Authorization: Bearer <你的 CC key>" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hi"}]}'
-
-# Anthropic 格式
-curl http://127.0.0.1:8787/v1/messages \
-  -H "x-api-key: <你的 CC key>" \
-  -H "anthropic-version: 2023-06-01" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"claude-sonnet-4-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
-```
-
-不带 key 的请求直接得到 `401`，不会向上游发出。`Authorization: Bearer <key>` 与
-`x-api-key: <key>` 两种写法都接受。
-
-## CLI options
-
-| Option   | Description  | Default     |
-| -------- | ------------ | ----------- |
-| `--host` | Bind address | `127.0.0.1` |
-| `--port` | Port         | `8787`      |
-
-Equivalent env vars (lower priority than CLI flags):
-
-| Env var                  | Description                                                                                                             |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `HOST`                   | Bind address                                                                                                            |
-| `PORT`                   | Port                                                                                                                    |
-| `CC_API_BASE`            | Upstream API base URL                                                                                                   |
-| `CC_CLI_VERSION`         | CLI version sent upstream                                                                                               |
-| `CC_UPSTREAM_TIMEOUT_MS` | Max ms for upstream to return response headers + first byte (default `600000` / 10 min). Bump for slow reasoning models |
-| `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams           |
-| `CC_MAX_BODY_BYTES`      | Max request body size (default `10485760` / 10 MiB, capped at 50 MiB). Raise for large vision/PDF payloads.             |
-| `CC_NO_TOOLS_GUARD`      | Set to `off` to disable the injected "tools are disabled" instruction for tool-less chat requests.                       |
-| `CC_PROXY`               | Tray only: `off` forces a direct connection, `<url>` overrides the auto-detected system proxy.                          |
+| `CC_TRAY_NS`             | Tray only: namespace for a second, isolated instance (mutex/events/logs/data dir). Production stays empty.              |
 | `LOG_LEVEL`              | Log level (`debug`, `info`, `warn`, `error`)                                                                            |
 | `CORS_ORIGIN`            | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
 
@@ -366,18 +298,21 @@ incumbent only exits on commit, and is never force-killed.
 
 **Hot-swap folder**
 
-`tray/build.cmd` builds the tray, assembles a portable package (embedded `node.exe` +
-`dist/` + `package.json`), and publishes to your Desktop:
+`tray/build-rust.cmd` builds both binaries in release mode, runs the conformance
+verifier against the packaged proxy (10/10 or the publish is refused), and publishes
+to your Desktop:
 
 ```
-<Desktop>\CCProxy-Release\CCProxy-v<version>\   this build, ready to drop in
-<Desktop>\CCProxy-Release\CCProxy-current\      copy of the newest build
+<Desktop>\CCProxy-Release\CCProxy-v<version>-rust\   this build, ready to drop in
+<Desktop>\CCProxy-Release\CCProxy-current\           the active build
 ```
 
-The version comes from `package.json` — the single source of truth, also shown in the
-tray tooltip and the menu. Previous version folders are kept, so rolling back is just
-deleting `CCProxy-current`, renaming the older `CCProxy-v<version>` folder to
-`CCProxy-current`, and launching the tray.
+The package is two binaries (`ccproxy.exe` + `CCProxyTray.exe`) and a generated
+`package.json` version file — no node runtime, no `dist/`. Passing `--promote`
+switches `CCProxy-current` to the new build (the old pointer is moved aside first, so
+an interrupted copy leaves `CCProxy-current-previous` recoverable); without it the
+running instance is untouched. Older version folders are kept, so rolling back is
+just renaming the older folder to `CCProxy-current` and launching the tray.
 
 **Verifying a build without touching a running instance**
 

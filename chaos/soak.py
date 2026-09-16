@@ -27,13 +27,22 @@ ENV = dict(os.environ,
 
 proxy_proc = None
 
+# Same override handover-test.py uses: point the soak at a packaged Rust build
+# instead of the working-tree Node one. Without it this drives dist/proxy.js,
+# which is the cross-validation path rather than the shipping artifact.
+EXE = os.environ.get("CC_TEST_EXE") or os.path.join(CC_DIR, "target", "release", "ccproxy.exe")
+
 
 def start_proxy():
     global proxy_proc
-    proxy_proc = subprocess.Popen(
-        ["node", os.path.join(CC_DIR, "dist", "proxy.js")],
-        cwd=CC_DIR, env=ENV,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(EXE):
+        proxy_proc = subprocess.Popen([EXE], cwd=os.path.dirname(EXE), env=ENV,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        proxy_proc = subprocess.Popen(
+            ["node", os.path.join(CC_DIR, "dist", "proxy.js")],
+            cwd=CC_DIR, env=ENV,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def health(timeout=3):

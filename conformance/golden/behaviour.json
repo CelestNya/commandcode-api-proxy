@@ -10,22 +10,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -59,6 +58,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -67,7 +72,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -157,22 +161,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -205,6 +208,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -213,7 +222,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -307,22 +315,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -356,6 +363,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -364,7 +377,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -472,22 +484,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -520,6 +531,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -528,7 +545,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -643,22 +659,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -692,6 +707,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -700,7 +721,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -808,22 +828,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -856,6 +875,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -864,7 +889,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1008,22 +1032,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -1057,6 +1080,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -1065,7 +1094,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1215,22 +1243,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -1263,6 +1290,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -1271,7 +1304,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1406,22 +1438,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -1455,6 +1486,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -1463,7 +1500,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1545,22 +1581,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -1593,6 +1628,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -1601,7 +1642,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1696,22 +1736,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -1745,6 +1784,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -1753,7 +1798,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -1863,22 +1907,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -1911,6 +1954,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -1919,7 +1968,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2045,22 +2093,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2094,6 +2141,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -2102,7 +2155,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2156,22 +2208,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2204,6 +2255,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -2212,7 +2269,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2270,22 +2326,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2319,6 +2374,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -2327,7 +2388,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2399,22 +2459,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2447,6 +2506,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -2455,7 +2520,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2548,22 +2612,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2600,22 +2663,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2649,6 +2711,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 2,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -2657,7 +2725,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2723,22 +2790,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2774,22 +2840,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2822,6 +2887,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 2,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -2830,7 +2901,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -2884,22 +2954,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -2933,6 +3002,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -2941,7 +3016,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3007,22 +3081,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3055,6 +3128,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3063,7 +3142,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3152,22 +3230,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3201,6 +3278,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3209,7 +3292,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3281,22 +3363,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3329,6 +3410,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3337,7 +3424,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3430,22 +3516,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3479,6 +3564,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3487,7 +3578,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3559,22 +3649,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3607,6 +3696,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3615,7 +3710,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3708,22 +3802,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3757,6 +3850,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3765,7 +3864,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3801,22 +3899,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3849,6 +3946,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3857,7 +3960,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -3915,22 +4017,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -3964,6 +4065,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -3972,7 +4079,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4008,22 +4114,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4056,6 +4161,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4064,7 +4175,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4122,22 +4232,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4171,6 +4280,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4179,7 +4294,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4245,22 +4359,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4293,6 +4406,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4301,7 +4420,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4390,22 +4508,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4442,22 +4559,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4491,6 +4607,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 2,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4499,7 +4621,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4565,22 +4686,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4616,22 +4736,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4664,6 +4783,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 2,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4672,7 +4797,6 @@
           "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           "content-type": "text/event-stream",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "sse",
@@ -4719,29 +4843,79 @@
       }
     },
     {
-      "name": "nonstream/openai/clean-text",
+      "name": "stream/openai/error-after-reasoning-recovered",
       "pathname": "/v1/chat/completions",
       "upstreamRequests": [
         {
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
+          },
+          "body": {
+            "config": {
+              "currentBranch": "",
+              "date": "<date>",
+              "environment": "linux-x64, Node.js v24.16.0",
+              "gitStatus": "",
+              "isGitRepo": false,
+              "mainBranch": "",
+              "recentCommits": [],
+              "structure": [],
+              "workingDir": "<cwd>"
+            },
+            "memory": "",
+            "params": {
+              "max_tokens": 64,
+              "messages": [
+                {
+                  "content": "hello\n\n[System Note: Tool execution is disabled in this environment. Do not output any tool calls (such as Build, Search, ReadFile, grep, etc.). You must answer directly in plain text.]",
+                  "role": "user"
+                }
+              ],
+              "model": "deepseek/deepseek-v4-flash",
+              "stream": true,
+              "system": "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text."
+            },
+            "permissionMode": "standard",
+            "skills": "",
+            "taste": "",
+            "threadId": "<uuid>"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/alpha/generate",
+          "headers": {
+            "accept": "application/json, */*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-US,en;q=0.9",
+            "authorization": "Bearer conformance-fixture-key",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
+            "traceparent": "00-<trace-id>-<span-id>-01",
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4775,6 +4949,755 @@
           }
         }
       ],
+      "session": {
+        "attempts": 2,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
+      "downstream": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-headers": "Content-Type, Authorization, x-api-key",
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-origin": "*",
+          "cache-control": "no-cache",
+          "content-type": "text/event-stream",
+          "vary": "Origin"
+        },
+        "bodyKind": "sse",
+        "records": [
+          {
+            "event": "data",
+            "data": {
+              "choices": [
+                {
+                  "delta": {
+                    "role": "assistant"
+                  },
+                  "finish_reason": null,
+                  "index": 0
+                }
+              ],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk"
+            }
+          },
+          {
+            "event": "data",
+            "data": {
+              "choices": [
+                {
+                  "delta": {
+                    "reasoning_content": "Let me think about this. "
+                  },
+                  "finish_reason": null,
+                  "index": 0
+                }
+              ],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk"
+            }
+          },
+          {
+            "event": "data",
+            "data": {
+              "choices": [
+                {
+                  "delta": {
+                    "content": "Here is the answer."
+                  },
+                  "finish_reason": null,
+                  "index": 0
+                }
+              ],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk"
+            }
+          },
+          {
+            "event": "data",
+            "data": {
+              "choices": [
+                {
+                  "delta": {},
+                  "finish_reason": "stop",
+                  "index": 0
+                }
+              ],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk"
+            }
+          },
+          {
+            "event": "data",
+            "data": {
+              "choices": [],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk",
+              "usage": {
+                "completion_tokens": 56,
+                "prompt_tokens": 1234,
+                "total_tokens": 1290
+              }
+            }
+          },
+          {
+            "event": "data",
+            "data": "<DONE>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "stream/anthropic/error-after-reasoning-recovered",
+      "pathname": "/v1/messages",
+      "upstreamRequests": [
+        {
+          "method": "POST",
+          "path": "/alpha/generate",
+          "headers": {
+            "accept": "application/json, */*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-US,en;q=0.9",
+            "authorization": "Bearer conformance-fixture-key",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
+            "traceparent": "00-<trace-id>-<span-id>-01",
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
+          },
+          "body": {
+            "config": {
+              "currentBranch": "",
+              "date": "<date>",
+              "environment": "linux-x64, Node.js v24.16.0",
+              "gitStatus": "",
+              "isGitRepo": false,
+              "mainBranch": "",
+              "recentCommits": [],
+              "structure": [],
+              "workingDir": "<cwd>"
+            },
+            "memory": "",
+            "params": {
+              "max_tokens": 64,
+              "messages": [
+                {
+                  "content": "hello",
+                  "role": "user"
+                }
+              ],
+              "model": "deepseek/deepseek-v4-flash",
+              "stream": true
+            },
+            "permissionMode": "standard",
+            "skills": "",
+            "taste": "",
+            "threadId": "<uuid>"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/alpha/generate",
+          "headers": {
+            "accept": "application/json, */*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-US,en;q=0.9",
+            "authorization": "Bearer conformance-fixture-key",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
+            "traceparent": "00-<trace-id>-<span-id>-01",
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
+          },
+          "body": {
+            "config": {
+              "currentBranch": "",
+              "date": "<date>",
+              "environment": "linux-x64, Node.js v24.16.0",
+              "gitStatus": "",
+              "isGitRepo": false,
+              "mainBranch": "",
+              "recentCommits": [],
+              "structure": [],
+              "workingDir": "<cwd>"
+            },
+            "memory": "",
+            "params": {
+              "max_tokens": 64,
+              "messages": [
+                {
+                  "content": "hello",
+                  "role": "user"
+                }
+              ],
+              "model": "deepseek/deepseek-v4-flash",
+              "stream": true
+            },
+            "permissionMode": "standard",
+            "skills": "",
+            "taste": "",
+            "threadId": "<uuid>"
+          }
+        }
+      ],
+      "session": {
+        "attempts": 2,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
+      "downstream": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-headers": "Content-Type, Authorization, x-api-key",
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-origin": "*",
+          "cache-control": "no-cache",
+          "content-type": "text/event-stream",
+          "vary": "Origin"
+        },
+        "bodyKind": "sse",
+        "records": [
+          {
+            "event": "message_start",
+            "data": {
+              "message": {
+                "content": [],
+                "id": "msg_<uuid>",
+                "model": "deepseek-v4-flash",
+                "role": "assistant",
+                "stop_reason": null,
+                "stop_sequence": null,
+                "type": "message",
+                "usage": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 1,
+                  "service_tier": "standard"
+                }
+              },
+              "type": "message_start"
+            }
+          },
+          {
+            "event": "content_block_start",
+            "data": {
+              "content_block": {
+                "thinking": "",
+                "type": "thinking"
+              },
+              "index": 0,
+              "type": "content_block_start"
+            }
+          },
+          {
+            "event": "ping",
+            "data": {
+              "type": "ping"
+            }
+          },
+          {
+            "event": "content_block_delta",
+            "data": {
+              "delta": {
+                "thinking": "Let me think about this. ",
+                "type": "thinking_delta"
+              },
+              "index": 0,
+              "type": "content_block_delta"
+            }
+          },
+          {
+            "event": "content_block_delta",
+            "data": {
+              "delta": {
+                "signature": "_cc_proxy_placeholder",
+                "type": "signature_delta"
+              },
+              "index": 0,
+              "type": "content_block_delta"
+            }
+          },
+          {
+            "event": "content_block_stop",
+            "data": {
+              "index": 0,
+              "type": "content_block_stop"
+            }
+          },
+          {
+            "event": "content_block_start",
+            "data": {
+              "content_block": {
+                "text": "",
+                "type": "text"
+              },
+              "index": 1,
+              "type": "content_block_start"
+            }
+          },
+          {
+            "event": "content_block_delta",
+            "data": {
+              "delta": {
+                "text": "Here is the answer.",
+                "type": "text_delta"
+              },
+              "index": 1,
+              "type": "content_block_delta"
+            }
+          },
+          {
+            "event": "content_block_stop",
+            "data": {
+              "index": 1,
+              "type": "content_block_stop"
+            }
+          },
+          {
+            "event": "message_delta",
+            "data": {
+              "delta": {
+                "stop_reason": "end_turn",
+                "stop_sequence": null
+              },
+              "type": "message_delta",
+              "usage": {
+                "input_tokens": 1234,
+                "output_tokens": 56
+              }
+            }
+          },
+          {
+            "event": "message_stop",
+            "data": {
+              "type": "message_stop"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "stream/openai/error-after-text-no-retry",
+      "pathname": "/v1/chat/completions",
+      "upstreamRequests": [
+        {
+          "method": "POST",
+          "path": "/alpha/generate",
+          "headers": {
+            "accept": "application/json, */*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-US,en;q=0.9",
+            "authorization": "Bearer conformance-fixture-key",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
+            "traceparent": "00-<trace-id>-<span-id>-01",
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
+          },
+          "body": {
+            "config": {
+              "currentBranch": "",
+              "date": "<date>",
+              "environment": "linux-x64, Node.js v24.16.0",
+              "gitStatus": "",
+              "isGitRepo": false,
+              "mainBranch": "",
+              "recentCommits": [],
+              "structure": [],
+              "workingDir": "<cwd>"
+            },
+            "memory": "",
+            "params": {
+              "max_tokens": 64,
+              "messages": [
+                {
+                  "content": "hello\n\n[System Note: Tool execution is disabled in this environment. Do not output any tool calls (such as Build, Search, ReadFile, grep, etc.). You must answer directly in plain text.]",
+                  "role": "user"
+                }
+              ],
+              "model": "deepseek/deepseek-v4-flash",
+              "stream": true,
+              "system": "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text."
+            },
+            "permissionMode": "standard",
+            "skills": "",
+            "taste": "",
+            "threadId": "<uuid>"
+          }
+        }
+      ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
+      "downstream": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-headers": "Content-Type, Authorization, x-api-key",
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-origin": "*",
+          "cache-control": "no-cache",
+          "content-type": "text/event-stream",
+          "vary": "Origin"
+        },
+        "bodyKind": "sse",
+        "records": [
+          {
+            "event": "data",
+            "data": {
+              "choices": [
+                {
+                  "delta": {
+                    "role": "assistant"
+                  },
+                  "finish_reason": null,
+                  "index": 0
+                }
+              ],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk"
+            }
+          },
+          {
+            "event": "data",
+            "data": {
+              "choices": [
+                {
+                  "delta": {
+                    "reasoning_content": "Thinking first. "
+                  },
+                  "finish_reason": null,
+                  "index": 0
+                }
+              ],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk"
+            }
+          },
+          {
+            "event": "data",
+            "data": {
+              "choices": [
+                {
+                  "delta": {
+                    "content": "Half an answer"
+                  },
+                  "finish_reason": null,
+                  "index": 0
+                }
+              ],
+              "created": "<epoch>",
+              "id": "<uuid>",
+              "model": "deepseek-v4-flash",
+              "object": "chat.completion.chunk"
+            }
+          },
+          {
+            "event": "data",
+            "data": {
+              "error": {
+                "code": "network_error",
+                "message": "upstream exploded mid-turn",
+                "type": "upstream_error"
+              }
+            }
+          },
+          {
+            "event": "data",
+            "data": "<DONE>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "stream/anthropic/error-after-text-no-retry",
+      "pathname": "/v1/messages",
+      "upstreamRequests": [
+        {
+          "method": "POST",
+          "path": "/alpha/generate",
+          "headers": {
+            "accept": "application/json, */*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-US,en;q=0.9",
+            "authorization": "Bearer conformance-fixture-key",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
+            "traceparent": "00-<trace-id>-<span-id>-01",
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
+          },
+          "body": {
+            "config": {
+              "currentBranch": "",
+              "date": "<date>",
+              "environment": "linux-x64, Node.js v24.16.0",
+              "gitStatus": "",
+              "isGitRepo": false,
+              "mainBranch": "",
+              "recentCommits": [],
+              "structure": [],
+              "workingDir": "<cwd>"
+            },
+            "memory": "",
+            "params": {
+              "max_tokens": 64,
+              "messages": [
+                {
+                  "content": "hello",
+                  "role": "user"
+                }
+              ],
+              "model": "deepseek/deepseek-v4-flash",
+              "stream": true
+            },
+            "permissionMode": "standard",
+            "skills": "",
+            "taste": "",
+            "threadId": "<uuid>"
+          }
+        }
+      ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
+      "downstream": {
+        "status": 200,
+        "headers": {
+          "access-control-allow-headers": "Content-Type, Authorization, x-api-key",
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-origin": "*",
+          "cache-control": "no-cache",
+          "content-type": "text/event-stream",
+          "vary": "Origin"
+        },
+        "bodyKind": "sse",
+        "records": [
+          {
+            "event": "message_start",
+            "data": {
+              "message": {
+                "content": [],
+                "id": "msg_<uuid>",
+                "model": "deepseek-v4-flash",
+                "role": "assistant",
+                "stop_reason": null,
+                "stop_sequence": null,
+                "type": "message",
+                "usage": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 1,
+                  "service_tier": "standard"
+                }
+              },
+              "type": "message_start"
+            }
+          },
+          {
+            "event": "content_block_start",
+            "data": {
+              "content_block": {
+                "thinking": "",
+                "type": "thinking"
+              },
+              "index": 0,
+              "type": "content_block_start"
+            }
+          },
+          {
+            "event": "ping",
+            "data": {
+              "type": "ping"
+            }
+          },
+          {
+            "event": "content_block_delta",
+            "data": {
+              "delta": {
+                "thinking": "Thinking first. ",
+                "type": "thinking_delta"
+              },
+              "index": 0,
+              "type": "content_block_delta"
+            }
+          },
+          {
+            "event": "content_block_delta",
+            "data": {
+              "delta": {
+                "signature": "_cc_proxy_placeholder",
+                "type": "signature_delta"
+              },
+              "index": 0,
+              "type": "content_block_delta"
+            }
+          },
+          {
+            "event": "content_block_stop",
+            "data": {
+              "index": 0,
+              "type": "content_block_stop"
+            }
+          },
+          {
+            "event": "content_block_start",
+            "data": {
+              "content_block": {
+                "text": "",
+                "type": "text"
+              },
+              "index": 1,
+              "type": "content_block_start"
+            }
+          },
+          {
+            "event": "content_block_delta",
+            "data": {
+              "delta": {
+                "text": "Half an answer",
+                "type": "text_delta"
+              },
+              "index": 1,
+              "type": "content_block_delta"
+            }
+          },
+          {
+            "event": "content_block_stop",
+            "data": {
+              "index": 1,
+              "type": "content_block_stop"
+            }
+          },
+          {
+            "event": "error",
+            "data": {
+              "error": {
+                "message": "[upstream-error] upstream exploded mid-turn",
+                "type": "overloaded_error"
+              },
+              "type": "error"
+            }
+          },
+          {
+            "event": "message_stop",
+            "data": {
+              "type": "message_stop"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "nonstream/openai/clean-text",
+      "pathname": "/v1/chat/completions",
+      "upstreamRequests": [
+        {
+          "method": "POST",
+          "path": "/alpha/generate",
+          "headers": {
+            "accept": "application/json, */*",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "en-US,en;q=0.9",
+            "authorization": "Bearer conformance-fixture-key",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
+            "traceparent": "00-<trace-id>-<span-id>-01",
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
+          },
+          "body": {
+            "config": {
+              "currentBranch": "",
+              "date": "<date>",
+              "environment": "linux-x64, Node.js v24.16.0",
+              "gitStatus": "",
+              "isGitRepo": false,
+              "mainBranch": "",
+              "recentCommits": [],
+              "structure": [],
+              "workingDir": "<cwd>"
+            },
+            "memory": "",
+            "params": {
+              "max_tokens": 64,
+              "messages": [
+                {
+                  "content": "hello\n\n[System Note: Tool execution is disabled in this environment. Do not output any tool calls (such as Build, Search, ReadFile, grep, etc.). You must answer directly in plain text.]",
+                  "role": "user"
+                }
+              ],
+              "model": "deepseek/deepseek-v4-flash",
+              "stream": true,
+              "system": "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text."
+            },
+            "permissionMode": "standard",
+            "skills": "",
+            "taste": "",
+            "threadId": "<uuid>"
+          }
+        }
+      ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4782,7 +5705,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -4820,22 +5742,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4868,6 +5789,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4875,7 +5802,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -4909,22 +5835,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -4958,6 +5883,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -4965,7 +5896,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -4996,22 +5926,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5044,6 +5973,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -5051,7 +5986,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5090,22 +6024,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5139,6 +6072,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -5146,7 +6085,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5185,22 +6123,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5233,6 +6170,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 200,
         "headers": {
@@ -5240,7 +6183,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5278,22 +6220,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5327,6 +6268,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 502,
         "headers": {
@@ -5334,7 +6281,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5354,22 +6300,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5402,6 +6347,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 502,
         "headers": {
@@ -5409,7 +6360,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5430,22 +6380,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5479,6 +6428,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 401,
         "headers": {
@@ -5486,7 +6441,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5506,22 +6460,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5554,6 +6507,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 401,
         "headers": {
@@ -5561,7 +6520,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5582,22 +6540,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5631,6 +6588,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 403,
         "headers": {
@@ -5638,7 +6601,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5658,22 +6620,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5706,6 +6667,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 403,
         "headers": {
@@ -5713,7 +6680,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5734,22 +6700,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5786,22 +6751,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5838,22 +6802,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5887,6 +6850,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 3,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 429,
         "headers": {
@@ -5894,7 +6863,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -5914,22 +6882,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -5965,22 +6932,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6016,22 +6982,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6064,6 +7029,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 3,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 429,
         "headers": {
@@ -6071,7 +7042,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6092,22 +7062,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6144,22 +7113,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6196,22 +7164,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6245,6 +7212,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 3,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 502,
         "headers": {
@@ -6252,7 +7225,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6272,22 +7244,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6323,22 +7294,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6374,22 +7344,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6422,6 +7391,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 3,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 502,
         "headers": {
@@ -6429,7 +7404,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6450,22 +7424,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6502,22 +7475,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6554,22 +7526,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6603,6 +7574,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 3,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 502,
         "headers": {
@@ -6610,7 +7587,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6630,22 +7606,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6681,22 +7656,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6732,22 +7706,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6780,6 +7753,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 3,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 502,
         "headers": {
@@ -6787,7 +7766,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6808,22 +7786,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6857,6 +7834,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 400,
         "headers": {
@@ -6864,7 +7847,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6884,22 +7866,21 @@
           "method": "POST",
           "path": "/alpha/generate",
           "headers": {
-            "host": "127.0.0.1:19888",
-            "content-type": "application/json",
             "accept": "application/json, */*",
             "accept-encoding": "gzip, deflate, br",
             "accept-language": "en-US,en;q=0.9",
-            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
             "authorization": "Bearer conformance-fixture-key",
-            "x-cli-environment": "production",
-            "x-command-code-version": "<version>",
-            "x-session-id": "<uuid>",
-            "x-co-flag": "false",
-            "x-taste-learning": "false",
-            "x-project-slug": "cc-proxy",
+            "content-length": "<len>",
+            "content-type": "application/json",
+            "host": "127.0.0.1:19888",
             "traceparent": "00-<trace-id>-<span-id>-01",
-            "sec-fetch-mode": "cors",
-            "content-length": "<len>"
+            "user-agent": "commandcode-cli/<ver> Node.js/<ver>",
+            "x-cli-environment": "production",
+            "x-co-flag": "false",
+            "x-command-code-version": "<version>",
+            "x-project-slug": "<slug>",
+            "x-session-id": "<uuid>",
+            "x-taste-learning": "false"
           },
           "body": {
             "config": {
@@ -6932,6 +7913,12 @@
           }
         }
       ],
+      "session": {
+        "attempts": 1,
+        "threadIdStable": true,
+        "headerStable": true,
+        "bodyMatchesHeader": true
+      },
       "downstream": {
         "status": 400,
         "headers": {
@@ -6939,7 +7926,6 @@
           "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-origin": "*",
           "content-type": "application/json",
-          "transfer-encoding": "chunked",
           "vary": "Origin"
         },
         "bodyKind": "json",
@@ -6963,17 +7949,16 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
       "body": {
         "cache": {
-          "cacheRate": 64,
-          "cachedTokens": 256,
-          "completionTokens": 20,
-          "promptTokens": 400,
-          "requests": 4
+          "cacheRate": "<count>",
+          "cachedTokens": "<count>",
+          "completionTokens": "<count>",
+          "promptTokens": "<count>",
+          "requests": "<count>"
         },
         "status": "ok",
         "version": "<version>"
@@ -6988,7 +7973,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7271,7 +8255,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7688,7 +8671,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7717,7 +8699,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7734,7 +8715,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7754,7 +8734,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7776,7 +8755,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7795,7 +8773,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7814,7 +8791,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7833,7 +8809,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7852,7 +8827,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7871,7 +8845,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7890,7 +8863,6 @@
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-origin": "*",
         "content-type": "application/json",
-        "transfer-encoding": "chunked",
         "vary": "Origin"
       },
       "bodyKind": "json",
@@ -7905,32 +8877,32 @@
   "modelResolution": [
     {
       "requested": "deepseek-v4-pro",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-pro",
       "threadIdStable": true
     },
     {
       "requested": "deepseek-v4",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-pro",
       "threadIdStable": true
     },
     {
       "requested": "deepseek-flash",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-flash",
       "threadIdStable": true
     },
     {
       "requested": "glm-5.3",
-      "sentUpstream": null,
+      "sentUpstream": "zai-org/GLM-5.3",
       "threadIdStable": true
     },
     {
       "requested": "unknown-model-xyz",
-      "sentUpstream": null,
+      "sentUpstream": "unknown-model-xyz",
       "threadIdStable": true
     },
     {
       "requested": "deepseek/deepseek-v4-pro",
-      "sentUpstream": null,
+      "sentUpstream": "deepseek/deepseek-v4-pro",
       "threadIdStable": true
     }
   ]

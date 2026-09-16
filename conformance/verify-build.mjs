@@ -11,12 +11,13 @@
 //
 // Usage:
 //   node conformance/verify-build.mjs                 (verify dist/ on random ports)
-//   node conformance/verify-build.mjs --exe <path>    (verify a packaged folder's dist)
+//   node conformance/verify-build.mjs --exe <path>    (verify a packaged folder's dist,
+//                                                      or a standalone binary)
 //
 // Exit code 0 = all checks passed, 1 = at least one failed.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -61,30 +62,60 @@ async function waitFor(url, timeoutMs = 20000) {
 }
 
 /**
- * Resolve which dist/ to verify. A packaged build ships its own dist next to
- * the tray exe, so `--exe` points at that folder.
+ * Resolve what to verify.
+ *
+ * Two shapes, because the Node build and the Rust rewrite package differently.
+ * A Node package ships a `dist/` next to the tray exe, so `--exe` names that
+ * folder (or the tray exe inside it) and node.exe is the thing to run. The
+ * Rust build is one self-contained binary: `--exe` names the executable, and
+ * there is nothing else to find.
  */
-function resolveDist() {
+function resolveTarget() {
   const exe = flag("exe", null);
   if (exe) {
-    const dir = path.dirname(path.resolve(exe));
-    const dist = path.join(dir, "dist");
-    if (!existsSync(path.join(dist, "proxy.js"))) {
-      throw new Error(`no dist/proxy.js next to ${exe} (looked in ${dist})`);
+    const resolved = path.resolve(exe);
+    const stat = statSync(resolved, { throwIfNoEntry: false });
+    if (!stat) throw new Error(`no such file or directory: ${resolved}`);
+    // A file inside a Node package (the tray exe) still means the Node layout,
+    // so check for an adjacent dist/ before deciding it is a bare binary.
+    const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
+    if (existsSync(path.join(dir, "dist", "proxy.js"))) {
+      return nodeTarget(path.join(dir, "dist"), dir);
     }
-    return { dist, label: dir };
+    if (stat.isFile()) {
+      // No dist/ beside it: a standalone binary, run it directly.
+      return { kind: "binary", command: resolved, args: [], label: resolved };
+    }
+    throw new Error(`no dist/proxy.js in ${resolved}`);
   }
   const dist = path.join(ROOT, "dist");
   if (!existsSync(path.join(dist, "proxy.js"))) {
     throw new Error(`no dist/proxy.js — run \`pnpm build\` first`);
   }
-  return { dist, label: "dist/ (working tree)" };
+  return nodeTarget(dist, "dist/ (working tree)");
 }
 
-/** Read the version string the build reports, for the record. */
-function versionOf(dist) {
+function nodeTarget(dist, label) {
+  if (!existsSync(path.join(dist, "proxy.js"))) {
+    throw new Error(`no dist/proxy.js in ${dist}`);
+  }
+  return {
+    kind: "node",
+    command: process.execPath,
+    args: [path.join(dist, "proxy.js")],
+    dist,
+    label,
+  };
+}
+
+/**
+ * The version to report. Only the Node package can be read from disk; for a
+ * binary the truth is whatever `/health` says, which the run checks anyway.
+ */
+function versionOf(target) {
+  if (target.kind === "binary") return "(see /health below)";
   try {
-    return JSON.parse(readFileSync(path.join(dist, "..", "package.json"), "utf8")).version;
+    return JSON.parse(readFileSync(path.join(target.dist, "..", "package.json"), "utf8")).version;
   } catch {
     return "unknown";
   }
@@ -152,13 +183,14 @@ async function captureMidStreamFailure(proxyPort, mockPort, pathname) {
 }
 
 async function main() {
-  const { dist, label } = resolveDist();
+  const target = resolveTarget();
   const mockPort = await freePort();
   const proxyPort = await freePort();
   const tmp = mkdtempSync(path.join(os.tmpdir(), "ccverify-"));
 
-  console.log(`verifying: ${label}`);
-  console.log(`  proxy.js version : ${versionOf(dist)}`);
+  console.log(`verifying: ${target.label}`);
+  console.log(`  kind             : ${target.kind}`);
+  console.log(`  version          : ${versionOf(target)}`);
   console.log(`  proxy port       : ${proxyPort} (ephemeral)`);
   console.log(`  mock port        : ${mockPort} (ephemeral)`);
   console.log(`  production 8787  : NOT TOUCHED`);
@@ -170,7 +202,7 @@ async function main() {
   mock.stderr.on("data", (d) => process.stderr.write(`[mock] ${d}`));
 
   // A private log dir keeps this run out of any real instance's logs.
-  const proxy = spawn(process.execPath, [path.join(dist, "proxy.js")], {
+  const proxy = spawn(target.command, target.args, {
     env: {
       ...process.env,
       HOST: "127.0.0.1",
@@ -180,6 +212,9 @@ async function main() {
       CC_IDLE_TIMEOUT_MS: "3000",
       CC_UPSTREAM_TIMEOUT_MS: "3000",
       CC_TRAY_NS: "verify-build",
+      // A pinned CLI version skips the startup lookup, so verification never
+      // depends on npm being reachable.
+      CC_CLI_VERSION: "0.0.0-verify",
       TEMP: tmp,
     },
     stdio: ["ignore", "ignore", "pipe"],
