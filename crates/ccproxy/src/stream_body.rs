@@ -19,6 +19,7 @@ use crate::sse::{format_sse, format_sse_done, StreamFailure};
 use crate::translate::{AnthropicEncoder, Collected, NonStreamingCollector, OpenAIEncoder};
 use crate::upstream::UpstreamStream;
 use crate::usage::UsageData;
+use serde_json::Value;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +28,89 @@ use std::sync::{Arc, Mutex};
 pub enum Dialect {
     Openai,
     Anthropic,
+}
+
+/// The dialect-specific half of an `SseBody`, resolved once instead of at every
+/// call site. The two encoders implement the same lifecycle (splice gates,
+/// emit, terminal, usage) and differ only in the wire shape they produce, so
+/// the dispatch lives here: adding a third dialect touches this enum and the
+/// two `match` arms, not eight call sites.
+enum Encoder<'a> {
+    Openai(&'a mut OpenAIEncoder),
+    Anthropic(&'a mut AnthropicEncoder),
+}
+
+impl Encoder<'_> {
+    /// Whether anything worth keeping has reached the client yet.
+    fn has_emitted_content(&self) -> bool {
+        match self {
+            Self::Openai(e) => e.has_emitted_content(),
+            Self::Anthropic(e) => e.has_emitted_content(),
+        }
+    }
+
+    /// Whether a failed attempt can be recovered by splicing a replacement
+    /// stream onto the response already in flight.
+    fn can_splice_retry(&self) -> bool {
+        match self {
+            Self::Openai(e) => e.can_splice_retry(),
+            Self::Anthropic(e) => e.can_splice_retry(),
+        }
+    }
+
+    /// Enter splice mode: the replacement's replayed opening is dropped.
+    fn begin_continuation(&mut self) {
+        match self {
+            Self::Openai(e) => e.begin_continuation(),
+            Self::Anthropic(e) => e.begin_continuation(),
+        }
+    }
+
+    /// Encode one CC event into its SSE bytes for this dialect.
+    fn emit_sse(&mut self, kind: &str, data: &Value) -> Result<Vec<u8>, StreamFailure> {
+        let mut out = Vec::new();
+        match self {
+            Self::Openai(e) => {
+                for chunk in e.emit(kind, data)? {
+                    out.extend_from_slice(format_sse(&chunk).as_bytes());
+                }
+            }
+            Self::Anthropic(e) => {
+                for record in e.emit(kind, data)? {
+                    out.extend_from_slice(record.to_sse().as_bytes());
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The terminal records for this dialect, SSE-formatted. The OpenAI
+    /// terminal protocol ends with the bare `[DONE]` sentinel.
+    fn terminal_sse(&mut self, failure: Option<&StreamFailure>) -> Vec<u8> {
+        let mut out = Vec::new();
+        match self {
+            Self::Openai(e) => {
+                for chunk in e.terminal(failure) {
+                    out.extend_from_slice(format_sse(&chunk).as_bytes());
+                }
+                out.extend_from_slice(format_sse_done().as_bytes());
+            }
+            Self::Anthropic(e) => {
+                for record in e.terminal(failure) {
+                    out.extend_from_slice(record.to_sse().as_bytes());
+                }
+            }
+        }
+        out
+    }
+
+    /// The usage the encoder has observed so far, if any.
+    fn last_usage(&self) -> Option<UsageData> {
+        match self {
+            Self::Openai(e) => e.last_usage.clone(),
+            Self::Anthropic(e) => e.last_usage.clone(),
+        }
+    }
 }
 
 /// A slot the body fills with the usage it observed, so the caller can record
@@ -130,13 +214,19 @@ impl SseBody {
         &self.anthropic
     }
 
+    /// The dialect half of this body, resolved once per call instead of at
+    /// every use site.
+    fn encoder(&mut self) -> Encoder<'_> {
+        match self.dialect {
+            Dialect::Openai => Encoder::Openai(&mut self.openai),
+            Dialect::Anthropic => Encoder::Anthropic(&mut self.anthropic),
+        }
+    }
+
     /// Whether anything worth keeping has reached the client yet. Decides
     /// whether a failed attempt may be re-sent invisibly.
-    pub fn has_emitted_content(&self) -> bool {
-        match self.dialect {
-            Dialect::Openai => self.openai.has_emitted_content(),
-            Dialect::Anthropic => self.anthropic.has_emitted_content(),
-        }
+    pub fn has_emitted_content(&mut self) -> bool {
+        self.encoder().has_emitted_content()
     }
 
     /// Whether a failed attempt can be recovered by splicing a replacement
@@ -146,33 +236,17 @@ impl SseBody {
     /// does not block recovery, because the replacement's replayed reasoning is
     /// dropped. Answer text does block it, because the user would read the same
     /// paragraph twice.
-    fn can_splice_retry(&self) -> bool {
-        match self.dialect {
-            Dialect::Openai => self.openai.can_splice_retry(),
-            Dialect::Anthropic => self.anthropic.can_splice_retry(),
-        }
+    fn can_splice_retry(&mut self) -> bool {
+        self.encoder().can_splice_retry()
     }
 
     fn begin_continuation(&mut self) {
-        match self.dialect {
-            Dialect::Openai => self.openai.begin_continuation(),
-            Dialect::Anthropic => self.anthropic.begin_continuation(),
-        }
+        self.encoder().begin_continuation();
     }
 
     fn encode(&mut self, event: crate::ndjson::CCEvent) -> Result<(), StreamFailure> {
-        match self.dialect {
-            Dialect::Openai => {
-                for chunk in self.openai.emit(&event.kind, &event.data)? {
-                    self.out.extend_from_slice(format_sse(&chunk).as_bytes());
-                }
-            }
-            Dialect::Anthropic => {
-                for record in self.anthropic.emit(&event.kind, &event.data)? {
-                    self.out.extend_from_slice(record.to_sse().as_bytes());
-                }
-            }
-        }
+        let bytes = self.encoder().emit_sse(&event.kind, &event.data)?;
+        self.out.extend_from_slice(&bytes);
         Ok(())
     }
 
@@ -186,8 +260,8 @@ impl SseBody {
         // Report a failure that ends the turn for good. A failure that is about
         // to be spliced is reported by `try_replacement` instead, so this only
         // sees the attempt the client is actually told about.
+        let observed = self.last_usage();
         if let (Some(sink), Some(f)) = (self.outcome.as_ref(), failure.as_ref()) {
-            let observed = self.last_usage();
             match f {
                 // The client left, so this attempt was cut short on purpose:
                 // recording it as an upstream error would blame CC for our own
@@ -196,21 +270,10 @@ impl SseBody {
                 _ => sink.failed(f.tag(), observed.as_ref()),
             }
         }
-        match (self.dialect, failure) {
-            (Dialect::Openai, failure) => {
-                // The encoder owns the terminal protocol: an error envelope is
-                // terminal, a finish chunk after it would claim a normal stop.
-                for chunk in self.openai.terminal(failure.as_ref()) {
-                    self.out.extend_from_slice(format_sse(&chunk).as_bytes());
-                }
-                self.out.extend_from_slice(format_sse_done().as_bytes());
-            }
-            (Dialect::Anthropic, failure) => {
-                for record in self.anthropic.terminal(failure.as_ref()) {
-                    self.out.extend_from_slice(record.to_sse().as_bytes());
-                }
-            }
-        }
+        // The encoder owns the terminal protocol: an error envelope is
+        // terminal, a finish chunk after it would claim a normal stop.
+        let bytes = self.encoder().terminal_sse(failure.as_ref());
+        self.out.extend_from_slice(&bytes);
     }
 
     /// Advance until there are bytes to hand downstream, or the stream is over.
@@ -249,11 +312,8 @@ impl SseBody {
     }
 
     /// The usage the encoders have observed so far, if any.
-    fn last_usage(&self) -> Option<UsageData> {
-        match self.dialect {
-            Dialect::Openai => self.openai.last_usage.clone(),
-            Dialect::Anthropic => self.anthropic.last_usage.clone(),
-        }
+    fn last_usage(&mut self) -> Option<UsageData> {
+        self.encoder().last_usage()
     }
 
     /// Re-send upstream once, splicing the replacement onto the same response.
@@ -313,10 +373,7 @@ impl SseBody {
     /// Hand the observed usage to the caller. Published at terminal time, which
     /// is when the `finish` event (the only carrier of usage) has been seen.
     fn publish_usage(&mut self) {
-        let observed = match self.dialect {
-            Dialect::Openai => self.openai.last_usage.clone(),
-            Dialect::Anthropic => self.anthropic.last_usage.clone(),
-        };
+        let observed = self.last_usage();
         if let Ok(mut slot) = self.usage.lock() {
             *slot = observed;
         }
@@ -372,10 +429,93 @@ pub fn collect_non_streaming(
         // Never stop early: the whole stream is needed to build the response.
         Ok(())
     })?;
-    let built = match dialect {
-        Dialect::Openai => collector.openai_response(model, id),
-        Dialect::Anthropic => collector.anthropic_response(model, id),
-    };
+    let built = collector.response(dialect, model, id);
     // An in-band error must not read as an assistant reply.
     built.map_err(|_| StreamFailure::Other("CC upstream generation failed".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Build the dispatch handle exactly the way `SseBody` does.
+    fn encoder<'a>(
+        dialect: Dialect,
+        openai: &'a mut OpenAIEncoder,
+        anthropic: &'a mut AnthropicEncoder,
+    ) -> Encoder<'a> {
+        match dialect {
+            Dialect::Openai => Encoder::Openai(openai),
+            Dialect::Anthropic => Encoder::Anthropic(anthropic),
+        }
+    }
+
+    /// The dialect dispatch is one handle, not a match at every call site: each
+    /// lifecycle step must be reachable through the same enum for both
+    /// dialects, and the splice gates must behave identically (they are the
+    /// recovery path's only safety).
+    #[test]
+    fn the_dispatch_handle_serves_the_lifecycle_for_both_dialects() {
+        for dialect in [Dialect::Openai, Dialect::Anthropic] {
+            let mut openai = OpenAIEncoder::new("deepseek-v4-flash");
+            let mut anthropic = AnthropicEncoder::new("deepseek-v4-flash");
+            let mut enc = encoder(dialect, &mut openai, &mut anthropic);
+
+            assert!(!enc.has_emitted_content(), "{dialect:?} starts dirty");
+            assert!(enc.can_splice_retry(), "{dialect:?} blocks splice before anything");
+
+            let _ = enc
+                .emit_sse("start", &json!({"type": "message"}))
+                .unwrap();
+            let delta = enc
+                .emit_sse("text-delta", &json!({"text": "hi"}))
+                .unwrap();
+            assert!(!delta.is_empty(), "{dialect:?} dropped a text delta");
+            assert!(enc.has_emitted_content(), "{dialect:?} ignores content");
+            assert!(
+                !enc.can_splice_retry(),
+                "{dialect:?} still allows splice after answer text"
+            );
+
+            let terminal = enc.terminal_sse(None);
+            assert!(!terminal.is_empty(), "{dialect:?} terminal is empty");
+            assert!(
+                String::from_utf8_lossy(&terminal).contains("data: "),
+                "{dialect:?} terminal is not SSE"
+            );
+        }
+    }
+
+    /// The splice path (the golden `error-after-reasoning-recovered` shape): a
+    /// failure after reasoning but before answer text may re-send invisibly,
+    /// and `begin_continuation` must keep the replacement's replayed thinking
+    /// out of the client's hands.
+    #[test]
+    fn the_dispatch_handle_supports_the_reasoning_splice() {
+        for dialect in [Dialect::Openai, Dialect::Anthropic] {
+            let mut openai = OpenAIEncoder::new("deepseek-v4-flash");
+            let mut anthropic = AnthropicEncoder::new("deepseek-v4-flash");
+            let mut enc = encoder(dialect, &mut openai, &mut anthropic);
+
+            let _ = enc
+                .emit_sse("reasoning-delta", &json!({"text": "think"}))
+                .unwrap();
+            // Reasoning alone must not block recovery — this is the 2026-09-15
+            // incident cell.
+            assert!(enc.can_splice_retry(), "{dialect:?} blocks splice on reasoning");
+            enc.begin_continuation();
+            // The replayed thinking is dropped; the replacement's first answer
+            // text still flows, exactly once.
+            let replay = enc
+                .emit_sse("reasoning-delta", &json!({"text": "replayed"}))
+                .unwrap();
+            assert!(replay.is_empty(), "{dialect:?} replayed thinking during a splice");
+            let delta = enc
+                .emit_sse("text-delta", &json!({"text": "hi"}))
+                .unwrap();
+            assert!(!delta.is_empty(), "{dialect:?} lost answer text after a splice");
+            assert!(!enc.can_splice_retry(), "{dialect:?} allows a second splice");
+        }
+    }
 }

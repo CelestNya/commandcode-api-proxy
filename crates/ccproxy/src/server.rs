@@ -16,7 +16,7 @@ use crate::translate;
 use crate::upstream::UpstreamError;
 use crate::usage::UsageTotals;
 use crate::validation;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Method, Request, Response, StatusCode};

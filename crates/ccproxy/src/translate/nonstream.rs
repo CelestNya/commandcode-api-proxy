@@ -4,6 +4,7 @@
 //! Both throw on an in-band error rather than folding the failure into content:
 //! a failed generation must not read as an assistant reply.
 
+use crate::stream_body::Dialect;
 use crate::translate::terminal::{
     canonical_arguments_text, map_finish_reason, map_stop_reason, openai_usage, THINKING_SIGNATURE,
 };
@@ -48,6 +49,20 @@ impl NonStreamingCollector {
 
     pub fn from_events(events: Vec<(String, Value)>) -> Self {
         Self { events }
+    }
+
+    /// Collapse the collected events into the response `dialect` expects. `Err`
+    /// means the generation failed; the caller maps that to a 502 envelope.
+    pub fn response(
+        &self,
+        dialect: Dialect,
+        model: &str,
+        id: &str,
+    ) -> Result<Collected, GenerationFailed> {
+        match dialect {
+            Dialect::Openai => self.openai_response(model, id),
+            Dialect::Anthropic => self.anthropic_response(model, id),
+        }
     }
 
     /// OpenAI `chat.completion`. `Err` means the generation failed.
