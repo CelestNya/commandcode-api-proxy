@@ -26,8 +26,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
+use crate::time::{iso8601_secs, now_epoch_secs, now_iso8601};
 use crate::upstream::AttemptSink;
 use crate::usage::UsageData;
 
@@ -310,7 +311,7 @@ pub fn open_database(dir: &Path) -> Option<Connection> {
 /// Delete rows older than [`RETENTION_DAYS`]. Best effort.
 fn prune_old_rows(conn: &Connection) {
     let cutoff =
-        iso8601_from(now_epoch_secs().saturating_sub(RETENTION_DAYS.saturating_mul(86400)));
+        iso8601_secs(now_epoch_secs().saturating_sub(RETENTION_DAYS.saturating_mul(86400)));
     match conn.execute("delete from billing where ts < ?1", [&cutoff]) {
         Ok(0) => {}
         Ok(n) => crate::log::debug(&format!("[billing] pruned {n} row(s) past retention")),
@@ -363,7 +364,7 @@ pub fn daily_stats(dir: &Path) -> Option<DailyStats> {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )
     .ok()?;
-    let cutoff = iso8601_from(now_epoch_secs().saturating_sub(86_400));
+    let cutoff = iso8601_secs(now_epoch_secs().saturating_sub(86_400));
     conn.query_row(
         "select count(*),
                 coalesce(sum(promptTokens), 0),
@@ -801,7 +802,7 @@ impl RequestLedger {
     ) {
         let elapsed = self.started_at.elapsed();
         record_attempt(AttemptRecord {
-            ts: iso8601_now(),
+            ts: now_iso8601(),
             req_id: self.req_id.clone(),
             model: self.model.clone(),
             wire: self.wire,
@@ -864,58 +865,6 @@ fn millis(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
-// ── timestamps ────────────────────────────────────────────
-
-fn now_epoch_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// The current UTC time as `2026-09-15T12:34:56.789Z`, the format the Node
-/// build's `new Date().toISOString()` produces.
-fn iso8601_now() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let millis = u64::from(now.subsec_millis());
-    format!("{}.{millis:03}Z", iso8601_from(now.as_secs()))
-}
-
-/// Seconds since the epoch as `2026-09-15T12:34:56`.
-///
-/// The civil-date arithmetic below is the standard `days_from_civil` inverse
-/// (Howard Hinnant's algorithm). Every intermediate is bounded by the epoch
-/// second count, so the plain integer arithmetic cannot overflow.
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "bounded civil-date arithmetic; see the doc comment"
-)]
-fn iso8601_from(epoch_secs: u64) -> String {
-    let days = epoch_secs / 86_400;
-    let secs_of_day = epoch_secs % 86_400;
-    let (hour, minute, second) = (
-        secs_of_day / 3600,
-        (secs_of_day % 3600) / 60,
-        secs_of_day % 60,
-    );
-
-    // Shift the epoch to 0000-03-01 so leap days land at the end of the cycle.
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z % 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { y + 1 } else { y };
-
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}")
-}
-
 fn is_power_of_two(n: u64) -> bool {
     n != 0 && n & n.saturating_sub(1) == 0
 }
@@ -927,7 +876,7 @@ mod tests {
 
     fn record(attempt: u64, status: AttemptStatus) -> AttemptRecord {
         AttemptRecord {
-            ts: iso8601_now(),
+            ts: now_iso8601(),
             req_id: "req-1".into(),
             model: "m".into(),
             wire: Wire::Openai,
@@ -1203,16 +1152,16 @@ mod tests {
     #[test]
     fn the_timestamp_is_iso8601_utc() {
         // 2026-09-15T00:00:00Z, the day this was written.
-        assert_eq!(iso8601_from(1_789_430_400), "2026-09-15T00:00:00");
+        assert_eq!(iso8601_secs(1_789_430_400), "2026-09-15T00:00:00");
         // The epoch itself.
-        assert_eq!(iso8601_from(0), "1970-01-01T00:00:00");
+        assert_eq!(iso8601_secs(0), "1970-01-01T00:00:00");
         // A leap day, which is where naive date arithmetic breaks.
-        assert_eq!(iso8601_from(1_709_164_800), "2024-02-29T00:00:00");
+        assert_eq!(iso8601_secs(1_709_164_800), "2024-02-29T00:00:00");
     }
 
     #[test]
     fn the_timestamp_format_matches_the_node_build() {
-        let ts = iso8601_now();
+        let ts = now_iso8601();
         assert!(ts.ends_with('Z'), "{ts} must be UTC");
         assert_eq!(ts.len(), 24, "{ts} must carry millisecond precision");
         assert_eq!(ts.as_bytes().get(10), Some(&b'T'));
@@ -1556,7 +1505,7 @@ mod tests {
     fn daily_stats_ignore_rows_older_than_a_day() {
         let (ledger, dir) = temp_ledger("stats-old");
         let mut old = with_usage(record(1, AttemptStatus::Ok), 100, 100, 1);
-        old.ts = iso8601_from(now_epoch_secs().saturating_sub(2 * 86_400));
+        old.ts = iso8601_secs(now_epoch_secs().saturating_sub(2 * 86_400));
         ledger.record(old);
         ledger.record(with_usage(record(2, AttemptStatus::Ok), 10, 5, 1));
         ledger.flush();
