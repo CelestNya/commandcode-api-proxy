@@ -323,8 +323,8 @@ fn prune_old_rows(conn: &Connection) {
 ///
 /// `rows` counts *attempts*, which is what the ledger stores — a request that
 /// was retried contributes more than one. Tokens summed from NULL are skipped
-/// rather than read as zero, so an interrupted attempt does not drag the cache
-/// rate down by pretending it consumed nothing.
+/// rather than read as zero, so an attempt that never reported usage neither
+/// adds tokens nor enters the cache-rate denominator.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DailyStats {
     pub rows: u64,
@@ -365,23 +365,46 @@ pub fn daily_stats(dir: &Path) -> Option<DailyStats> {
     )
     .ok()?;
     let cutoff = iso8601_secs(now_epoch_secs().saturating_sub(86_400));
-    conn.query_row(
-        "select count(*),
+    // One query for the totals and one for the rate: the rate must be computed
+    // only over rows that reported usage — a failed attempt has no tokens and
+    // belongs in neither numerator nor denominator, while `rows` still counts it.
+    let stats = conn
+        .query_row(
+            "select count(*),
                 coalesce(sum(promptTokens), 0),
                 coalesce(sum(cachedTokens), 0),
                 coalesce(sum(completionTokens), 0)
            from billing where ts >= ?1",
-        [&cutoff],
-        |row| {
-            Ok(DailyStats {
-                rows: row.get::<_, i64>(0)?.max(0) as u64,
-                prompt_tokens: row.get::<_, i64>(1)?.max(0) as u64,
-                cached_tokens: row.get::<_, i64>(2)?.max(0) as u64,
-                completion_tokens: row.get::<_, i64>(3)?.max(0) as u64,
-            })
-        },
-    )
-    .ok()
+            [&cutoff],
+            |row| {
+                Ok(DailyStats {
+                    rows: row.get::<_, i64>(0)?.max(0) as u64,
+                    prompt_tokens: row.get::<_, i64>(1)?.max(0) as u64,
+                    cached_tokens: row.get::<_, i64>(2)?.max(0) as u64,
+                    completion_tokens: row.get::<_, i64>(3)?.max(0) as u64,
+                })
+            },
+        )
+        .ok()?;
+    let rate = conn
+        .query_row(
+            "select coalesce(sum(cachedTokens), 0), coalesce(sum(promptTokens), 0)
+               from billing where ts >= ?1 and promptTokens is not null",
+            [&cutoff],
+            |row| {
+                Ok(DailyStats {
+                    rows: 0,
+                    prompt_tokens: row.get::<_, i64>(1)?.max(0) as u64,
+                    cached_tokens: row.get::<_, i64>(0)?.max(0) as u64,
+                    completion_tokens: 0,
+                })
+            },
+        )
+        .ok()?;
+    Some(DailyStats {
+        cached_tokens: rate.cached_tokens,
+        ..stats
+    })
 }
 
 // ── legacy import ─────────────────────────────────────────
