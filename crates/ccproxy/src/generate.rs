@@ -128,13 +128,10 @@ pub fn send_with_model_discovery(
 ///
 /// Deliberately skips model discovery: the first attempt already resolved the
 /// name, and this path exists to recover from a transport failure, not from a
-/// rejection. `build_body` pins the threadId, so this stays on one CC session.
-pub fn resend(
-    store: &CatalogStore,
-    opts: &UpstreamOptions,
-    build_body: &dyn Fn(&Catalog) -> Value,
-) -> Result<UpstreamStream, UpstreamError> {
-    send_once(opts, build_body(&store.current()))
+/// rejection. The body is supplied by the caller — recovery re-sends the very
+/// request that failed, threadId pinned, so this stays on one CC session.
+pub fn resend(opts: &UpstreamOptions, body: Value) -> Result<UpstreamStream, UpstreamError> {
+    send_once(opts, body)
 }
 
 /// A generation-streaming failure as it reaches the client.

@@ -737,25 +737,21 @@ fn serve_sse(
     build_body: &dyn Fn(&Catalog) -> Value,
     ledger: Arc<billing::RequestLedger>,
 ) {
-    // The recovery re-send repeats the request that just failed. It rebuilds
-    // from the current catalog (which model discovery may have refreshed) but
-    // reuses the pinned threadId, so a recovery stays on one CC session.
+    // The recovery re-send repeats the request that just failed. The body is
+    // built once here — threadId pinned, translation against the catalog as it
+    // stands now — because recovery re-sends the very request that failed, not
+    // a fresh translation of it. Model discovery is deliberately skipped for
+    // the same reason; see generate::resend.
     let retry_state = Arc::clone(state);
     let retry_key = api_key.to_string();
     let retry_body = build_body(&retry_state.catalog.current());
     // The replacement is another attempt of the same client request, so it
-    // reports to the same ledger.
+    // reports to the same ledger. Same construction site as the first send:
+    // one place to add an option, and both paths get it.
     let retry_ledger = Arc::clone(&ledger);
     let reconnect = Box::new(move || {
-        let opts = generate::UpstreamOptions {
-            api_base: &retry_state.config.cc_api_base,
-            api_key: &retry_key,
-            cc_version: &retry_state.config.cc_version,
-            timeout_ms: retry_state.config.upstream_timeout_ms,
-            idle_timeout_ms: retry_state.config.idle_timeout_ms,
-            attempts: Some(Arc::clone(&retry_ledger) as Arc<dyn AttemptSink>),
-        };
-        generate::resend(&retry_state.catalog, &opts, &|_catalog| retry_body.clone())
+        let opts = upstream_options(&retry_state, &retry_key, Arc::clone(&retry_ledger));
+        generate::resend(&opts, retry_body.clone())
             .map_err(|e| crate::sse::StreamFailure::Other(e.message))
     });
 
