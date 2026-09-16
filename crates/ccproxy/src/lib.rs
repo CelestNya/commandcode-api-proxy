@@ -1,5 +1,5 @@
 //! cc-proxy — Rust rewrite of the Node proxy.
-//! Behaviour contract: conformance/golden/*.json. Plan: RUST-REWRITE-PLAN.md.
+//! Behaviour contract: conformance/golden/*.json. Plan: docs/RUST-REWRITE-PLAN.md.
 #![forbid(unsafe_code)]
 #![deny(
     clippy::unwrap_used,
