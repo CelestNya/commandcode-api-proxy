@@ -116,6 +116,16 @@ impl ProxyProcess {
             .env("NO_PROXY", settings::build_no_proxy())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The proxy is a console program; a GUI parent launching it without
+        // this flag makes Windows allocate a console window for it. That was a
+        // black window flashing on every start — and the reason the packaged
+        // tray looked broken when it was only doing its job.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         if let Some(url) = settings::resolve_proxy_url() {
             cmd.env("HTTPS_PROXY", &url).env("HTTP_PROXY", &url);
             self.log.append(&format!("[tray] 出站代理: {url}"));

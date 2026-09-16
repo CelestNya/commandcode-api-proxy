@@ -29,20 +29,25 @@ for %%A in (%*) do (
   if /i "%%A"=="--promote" (set PROMOTE=1) else (set VER=%%A)
 )
 if "%VER%"=="" (
-  set "ROOTFS=!ROOT:\=/!"
-  for /f "delims=" %%V in ('node -p "require('!ROOTFS!/Cargo.toml').version" 2^>nul') do set "VER=%%V"
-)
-if "%VER%"=="" (
-  rem Cargo.toml has no JSON parser available; read version = "x.y.z" directly.
+  rem Cargo.toml is TOML, so a JSON parser cannot read it: `node -p` throws,
+  rem stderr is suppressed, and stdout comes back empty. The version is read
+  rem off the `version = "x.y.z"` line instead, and validated before use -
+  rem a junk value here names folders, and a stray `CCProxy-v<junk>` on the
+  rem Desktop is how an unparseable version announces itself.
+  set "LINE="
   for /f "tokens=3" %%V in ('findstr /b /c:"version = " "!ROOT!\Cargo.toml" 2^>nul') do (
-    set "LINE=%%V"
-    goto :got_version
+    if not defined LINE set "LINE=%%V"
   )
-)
-:got_version
-if defined LINE (
   set "LINE=!LINE:"=!"
-  set VER=!LINE!
+  set "VER=!LINE!"
+  rem Guard: the version names the published folder, so a junk value must stop
+  rem the build rather than produce `CCProxy-v<junk>` on the Desktop. A real
+  rem version starts with x.y.z; a suffix like `-rc1` is allowed after it.
+  echo !VER!| findstr /r /c:"^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" >nul || (
+    echo ERROR: could not read a version from Cargo.toml ^(got "!VER!"^).
+    echo Pass one explicitly: build-rust.cmd 0.5.0
+    exit /b 1
+  )
 )
 if "%VER%"=="" (
   echo Could not determine version.
@@ -74,12 +79,17 @@ if not exist "%TRAY%" (
 )
 
 rem ---- staging package ----
-rem Two binaries and one version file: no node runtime, no dist/, no node_modules.
+rem The tray is the entry point and stays in the root; the proxy it launches
+rem lives in service\. Both binaries used to sit side by side, and the first
+rem person to open the package double-clicked the proxy — a console program
+rem with no UI — and read the result as a broken release. The layout now says
+rem which one to run.
 set PKG=%ROOT%\release\CCProxyRust
 if exist "%PKG%" rmdir /s /q "%PKG%"
 mkdir "%PKG%" 2>nul
+mkdir "%PKG%\service" 2>nul
 
-copy /y "%PROXY%" "%PKG%" >nul || goto :pack_fail
+copy /y "%PROXY%" "%PKG%\service" >nul || goto :pack_fail
 copy /y "%TRAY%" "%PKG%" >nul || goto :pack_fail
 rem The tray and the proxy both read the version from this file (tray tooltip,
 rem /health is compiled in). Written rather than copied so the package carries
@@ -89,7 +99,7 @@ rem Never ship runtime state produced by local testing.
 if exist "%PKG%\selfcheck.log" del /q "%PKG%\selfcheck.log"
 if exist "%PKG%\logs" rmdir /s /q "%PKG%\logs"
 
-for %%F in ("%PKG%\ccproxy.exe") do echo ccproxy.exe: %%~zF bytes
+for %%F in ("%PKG%\service\ccproxy.exe") do echo service\ccproxy.exe: %%~zF bytes
 for %%F in ("%PKG%\CCProxyTray.exe") do echo CCProxyTray.exe: %%~zF bytes
 
 rem ---- size gate: the entire point of the rewrite ----
@@ -97,7 +107,7 @@ rem 10 MB is the spec's ceiling; the Node package it replaces was ~89 MB. The
 rem check exists because a future dependency could quietly pull in half of
 rem Windows and nobody would notice until the artifact was published.
 set /a MAX_BYTES=10485760
-for %%F in ("%PKG%\ccproxy.exe") do set /a PROXY_BYTES=%%~zF
+for %%F in ("%PKG%\service\ccproxy.exe") do set /a PROXY_BYTES=%%~zF
 if %PROXY_BYTES% GTR %MAX_BYTES% (
   echo ERROR: ccproxy.exe is %PROXY_BYTES% bytes, over the 10 MB budget.
   exit /b 1
@@ -109,7 +119,7 @@ rem binary and drives it directly. An unverified artifact must not reach the
 rem Desktop.
 if defined CC_SKIP_VERIFY goto :verify_skipped
 echo Verifying packaged build...
-node "%ROOT%\conformance\verify-build.mjs" --exe "%PKG%\ccproxy.exe"
+node "%ROOT%\conformance\verify-build.mjs" --exe "%PKG%\service\ccproxy.exe"
 if errorlevel 1 goto :verify_fail
 goto :verify_done
 

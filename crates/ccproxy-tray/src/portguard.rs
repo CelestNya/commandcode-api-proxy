@@ -39,7 +39,14 @@ pub fn decide(owner_pid: Option<u32>, owner_is_ours: bool) -> Decision {
     }
 }
 
-/// Whether `pid` is this tray, its child, or another tray.
+/// Whether `pid` is ours to end: this tray, its child, or a leftover from a
+/// previous run of this same install directory.
+///
+/// The decision is made on the executable's full path, not its image name.
+/// A bare name cannot separate our proxy from an unrelated process, and the
+/// case that matters is concrete: a `ccproxy.exe` left holding the port — by a
+/// killed tray, or by someone double-clicking the proxy directly — must be
+/// recognised as ours, or the guard refuses to start against our own leftover.
 #[must_use]
 pub fn is_ours(pid: u32, child_pid: Option<u32>, exe_dir: &Path) -> bool {
     if Some(pid) == child_pid {
@@ -48,13 +55,43 @@ pub fn is_ours(pid: u32, child_pid: Option<u32>, exe_dir: &Path) -> bool {
     if pid == std::process::id() {
         return true;
     }
+    let Some(path) = crate::win::process::image_path(pid) else {
+        return false;
+    };
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
     // Another tray from a previous version, in this same install directory.
-    // Matching the directory rather than the bare name avoids killing an
-    // unrelated `CCProxyTray` someone else happens to be running.
-    crate::settings::process_paths_of("CCProxyTray.exe")
-        .iter()
-        .any(|(candidate, _)| *candidate == pid)
-        && exe_dir.exists()
+    if name == "ccproxytray.exe" {
+        return same_install(&path, exe_dir);
+    }
+    // Our own proxy binary, under either the packaged layout (`service\`) or a
+    // bare cargo build beside the tray.
+    if name == "ccproxy.exe" {
+        return same_install(&path, exe_dir);
+    }
+    // The Node build this one replaces: `node.exe dist\proxy.js`, whose working
+    // directory is the install root. Matching `proxy.js` on the command line
+    // keeps an unrelated node process out of it; see `command_line_has`.
+    if name == "node.exe" {
+        return crate::settings::command_line_has(pid, "dist\\proxy.js")
+            || crate::settings::command_line_has(pid, "dist/proxy.js");
+    }
+    false
+}
+
+/// Whether `exe` sits in `dir`, in `dir\service`, or anywhere beneath it — the
+/// three shapes this package has taken.
+fn same_install(exe: &Path, dir: &Path) -> bool {
+    let Ok(exe) = exe.canonicalize() else {
+        return false;
+    };
+    let Ok(dir) = dir.canonicalize() else {
+        return false;
+    };
+    exe.starts_with(&dir)
 }
 
 /// Enforce the guard on `port`, ending a stale own-process if needed.
@@ -156,5 +193,31 @@ mod tests {
         // PID 4 is the Windows system process; it is never ours.
         let dir = PathBuf::from(".");
         assert!(!is_ours(4, None, &dir));
+    }
+
+    #[test]
+    fn the_install_directory_is_recognised_in_every_layout() {
+        // The shapes this package has taken: the proxy beside the tray (a bare
+        // cargo build), and the proxy under service\ (the shipped layout).
+        // Real files, because the check canonicalises both sides.
+        let root = std::env::temp_dir().join(format!(
+            "ccproxy-install-{}",
+            std::process::id().wrapping_mul(31)
+        ));
+        let service = root.join("service");
+        std::fs::create_dir_all(&service).expect("temp install dir");
+        let beside = root.join("ccproxy.exe");
+        let nested = service.join("ccproxy.exe");
+        let other = std::env::temp_dir().join("ccproxy-elsewhere.exe");
+        for f in [&beside, &nested, &other] {
+            std::fs::write(f, b"").expect("touch");
+        }
+
+        assert!(same_install(&beside, &root));
+        assert!(same_install(&nested, &root));
+        assert!(!same_install(&other, &root));
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&other);
     }
 }

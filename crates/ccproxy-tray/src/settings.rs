@@ -179,47 +179,41 @@ fn reg_query_string(subkey: &str, value: &str) -> Option<String> {
     crate::win::registry::read_string(subkey, value)
 }
 
-/// The proxy executable that sits beside this one.
+/// The proxy executable the tray launches.
 ///
-/// The shipped package is one folder holding the tray and the proxy binary, so
-/// the name is the only thing being searched for.
+/// `service/` is searched first: the shipped package keeps the proxy out of the
+/// root so the one executable a person should double-click is unambiguous — the
+/// first run of this package had both side by side, and picking the wrong one
+/// looked exactly like a broken release. The root is still searched, because a
+/// bare `cargo build` lays both binaries beside each other.
 #[must_use]
 pub fn proxy_binary(exe_dir: &Path) -> Option<PathBuf> {
-    for name in ["ccproxy.exe", "CCProxy.exe"] {
-        let candidate = exe_dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
+    for dir in [exe_dir.join("service"), exe_dir.to_path_buf()] {
+        for name in ["ccproxy.exe", "CCProxy.exe"] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None
 }
 
-/// Whether the named process is running, as `(pid, path)` pairs.
+/// Whether `pid`'s command line contains `needle` (case-insensitive).
+///
+/// Used to tell our Node proxy (`node dist\proxy.js`) from any other node on
+/// the machine — the one thing the image name alone cannot answer.
 #[must_use]
-pub fn process_paths_of(name: &str) -> Vec<(u32, PathBuf)> {
-    // tasklist is a child process per poll, which is why the port guard uses
-    // the TCP table instead; this is only for the "is it really ours" check.
-    let Ok(out) = Command::new("tasklist")
-        .args(["/FI", &format!("IMAGENAME eq {name}"), "/FO", "CSV", "/NH"])
+pub fn command_line_has(pid: u32, needle: &str) -> bool {
+    let script = format!("(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine");
+    let Ok(out) = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .output()
     else {
-        return Vec::new();
+        return false;
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut found = Vec::new();
-    for line in text.lines() {
-        let fields: Vec<&str> = line.split("\",\"").collect();
-        if fields.len() < 2 {
-            continue;
-        }
-        let Some(pid_text) = fields.get(1).map(|f| f.trim_matches('"')) else {
-            continue;
-        };
-        if let Ok(pid) = pid_text.parse::<u32>() {
-            found.push((pid, PathBuf::new()));
-        }
-    }
-    found
+    let line = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
+    line.contains(&needle.to_ascii_lowercase())
 }
 
 /// `HKCU\...\Run` value name. One per namespace would be tidier, but a test

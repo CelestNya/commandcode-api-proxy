@@ -57,7 +57,9 @@ fn main() {
     let server = match tiny_http::Server::http(&addr) {
         Ok(s) => s,
         Err(e) => {
-            ccproxy::log::error(&format!("Failed to bind {addr}: {e}"));
+            let detail = format!("Failed to bind {addr}: {e}");
+            ccproxy::log::error(&detail);
+            report_startup_failure(&detail, config.port);
             std::process::exit(2);
         }
     };
@@ -68,6 +70,31 @@ fn main() {
     ));
 
     ccproxy::server::serve(server, state);
+}
+
+/// Write a startup failure to a file beside the executable.
+///
+/// This binary is a console program: started from a shell it has somewhere to
+/// print, but started by double-clicking — which is what happens to the wrong
+/// executable in the package — the console closes with the process and the
+/// message is gone. The first user of the packaged build hit exactly that and
+/// read it as "no log, no error, broken release", so the failure is also left
+/// on disk where it can be found afterwards.
+fn report_startup_failure(detail: &str, port: u16) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    let note = format!(
+        "{detail}\n\n\
+         This is the proxy service, not the program to start. Run CCProxyTray.exe,\n\
+         which launches this binary and supervises it.\n\
+         If port {port} is busy, another proxy (or a leftover from an earlier run)\n\
+         already holds it.\n"
+    );
+    let _ = std::fs::write(dir.join("ccproxy-startup-error.txt"), note);
 }
 
 /// Import the pre-M7 `usage.jsonl` history into the ledger, then exit.

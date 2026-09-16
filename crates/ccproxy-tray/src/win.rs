@@ -133,6 +133,49 @@ pub mod job {
     }
 }
 
+pub mod process {
+    //! Identifying a process by its executable path.
+    //!
+    //! `tasklist` reports only the image name, which cannot tell our `node.exe`
+    //! from any other one on the machine — the port guard needs the full path to
+    //! decide whether something is ours to end.
+
+    use windows_sys::Win32::Foundation::{CloseHandle, MAX_PATH};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    /// The executable behind `pid`, or `None` when it cannot be queried (a
+    /// process that exited, or one we lack rights to).
+    #[must_use]
+    pub fn image_path(pid: u32) -> Option<std::path::PathBuf> {
+        // SAFETY: the handle is checked for null and closed on every path; the
+        // buffer is owned here and its capacity is passed to the API, which
+        // writes at most that many UTF-16 units.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return None;
+            }
+            let mut buf = [0u16; MAX_PATH as usize];
+            let mut len = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(
+                handle,
+                PROCESS_NAME_WIN32,
+                buf.as_mut_ptr(),
+                &raw mut len,
+            );
+            CloseHandle(handle);
+            if ok == 0 {
+                return None;
+            }
+            let path = String::from_utf16_lossy(buf.get(..len as usize)?);
+            Some(std::path::PathBuf::from(path))
+        }
+    }
+}
+
 pub mod tcp {
     //! Port ownership via `GetExtendedTcpTable`.
     //!
