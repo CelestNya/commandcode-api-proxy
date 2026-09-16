@@ -4,3 +4,7 @@
 # code path, publishing a junk `CCProxy-vthe` folder.
 *.cmd text eol=crlf
 *.bat text eol=crlf
+
+# Rust sources are LF everywhere; mixed endings broke multi-line edits and
+# produce noisy diffs.
+*.rs text eol=lf
