@@ -35,10 +35,11 @@ mod owner;
 mod portguard;
 mod process;
 mod settings;
+mod supervision;
 mod tray;
 mod win;
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -148,25 +149,23 @@ fn main() {
         },
         settings::autostart_enabled,
     );
-    // Restarting a crash is deliberately delayed by 3s: an immediately-exiting
-    // child would otherwise spin the loop, and the pause gives whatever killed
-    // it (a port still closing, a transient config error) time to clear.
-    //
-    // The deadline is shared with the action callback so a manual Start cancels
-    // a pending automatic restart rather than racing it.
-    let restart_at: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
+    // The automatic-restart policy is a small state machine (`supervision`),
+    // so the crash/restart timing rules are testable in isolation from the
+    // message loop. The loop only observes the crash and performs the I/O the
+    // machine asks for.
+    let supervision = Rc::new(RefCell::new(supervision::Supervision::new()));
     let actions_proxy = Arc::clone(&proxy);
     let actions_log = Arc::clone(&log);
     let actions_root = root.clone();
-    let actions_restart = Rc::clone(&restart_at);
+    let actions_supervision = Rc::clone(&supervision);
     let tick_proxy = Arc::clone(&proxy);
     let tick_log = Arc::clone(&log);
-    let tick_restart = Rc::clone(&restart_at);
+    let tick_supervision = Rc::clone(&supervision);
     win::window::run_ui(
         &ui,
         move |action| {
             // A manual command supersedes any pending automatic restart.
-            actions_restart.set(None);
+            actions_supervision.borrow_mut().cancel();
             dispatch(
                 action,
                 &actions_proxy,
@@ -176,20 +175,15 @@ fn main() {
             );
         },
         move || {
-            if tick_restart.get().is_some_and(|at| Instant::now() >= at) {
-                tick_restart.set(None);
-                tick_log.append("[tray] 代理意外退出，正在重启");
-                if let Ok(mut p) = tick_proxy.lock() {
-                    let _ = p.start(tick_job.as_deref());
-                }
-                return;
-            }
             let crashed = tick_proxy
                 .lock()
                 .map(|mut p| p.take_unexpected_exit())
                 .unwrap_or(false);
-            if crashed {
-                tick_restart.set(Instant::now().checked_add(Duration::from_secs(3)));
+            if tick_supervision.borrow_mut().tick(Instant::now(), crashed) {
+                tick_log.append("[tray] 代理意外退出，正在重启");
+                if let Ok(mut p) = tick_proxy.lock() {
+                    let _ = p.start(tick_job.as_deref());
+                }
             }
         },
         {
