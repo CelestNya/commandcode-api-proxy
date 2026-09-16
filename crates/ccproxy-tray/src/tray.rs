@@ -460,6 +460,19 @@ fn make_dot_icon(r: u8, g: u8, b: u8) -> Hicon {
         DeleteObject(brush);
         DeleteObject(pen);
 
+        // GDI draws opaque colour but leaves the alpha bytes at 0, and the mask
+        // bitmap was never filled — the shell then renders the untouched pixels
+        // as an opaque black square. Promote every drawn pixel to alpha 255 and
+        // leave the rest at 0 so the background stays truly transparent.
+        const PIXEL_COUNT: usize = (SIZE * SIZE) as usize;
+        let pixels = bits.cast::<u32>();
+        for i in 0..PIXEL_COUNT {
+            let p = pixels.add(i);
+            if (*p & 0x00FF_FFFF) != 0 {
+                *p |= 0xFF00_0000;
+            }
+        }
+
         let icon_info = ICONINFO {
             fIcon: 1,
             xHotspot: 0,
