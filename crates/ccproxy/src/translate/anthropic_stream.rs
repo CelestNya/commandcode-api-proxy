@@ -10,9 +10,9 @@
 //!   block. Emitting it as a top-level event makes strict clients, which parse
 //!   each record against a union keyed on `type`, abort the whole stream.
 //!
-//! `finish_records` and `error_records` differ by exactly one record on
-//! purpose: `finish_records` sends `message_delta(stop_reason="end_turn")`,
-//! which clients treat as "the model finished normally", and `error_records`
+//! The two terminal paths differ by exactly one record on purpose:
+//! `terminal(None)` sends `message_delta(stop_reason="end_turn")`, which
+//! clients treat as "the model finished normally", and `terminal(Some(f))`
 //! deliberately does NOT. Appending the former after a failure turns a broken
 //! turn into a successful one — the failure mode this project exists to avoid.
 
@@ -533,7 +533,7 @@ impl AnthropicEncoder {
 
     /// Closing records for a stream that ended without a `finish` event, so the
     /// client sees a well-formed end-of-stream rather than a truncation.
-    pub fn finish_records(&mut self, stop_reason: &str) -> Vec<AnthropicRecord> {
+    fn finish_records(&mut self, stop_reason: &str) -> Vec<AnthropicRecord> {
         let mut records = Vec::new();
         if !self.started {
             records.push(self.make_message_start(0));
@@ -561,11 +561,7 @@ impl AnthropicEncoder {
     /// successful turn (measured in conformance/client-probes: finishReason
     /// became "stop"). `error` followed directly by `message_stop` leaves the
     /// client's finishReason non-stop.
-    pub fn error_records(
-        &mut self,
-        failure: &StreamFailure,
-        close_blocks: bool,
-    ) -> Vec<AnthropicRecord> {
+    fn error_records(&mut self, failure: &StreamFailure) -> Vec<AnthropicRecord> {
         self.saw_finish = true;
         let mut records = Vec::new();
         // message_start must be the first record, so an unstarted stream gets
@@ -576,10 +572,8 @@ impl AnthropicEncoder {
         }
         // An open block that never closes makes the client think the stream was
         // cut off mid-block.
-        if close_blocks {
-            self.close_current_block(&mut records);
-            self.close_tool_blocks(&mut records);
-        }
+        self.close_current_block(&mut records);
+        self.close_tool_blocks(&mut records);
         records.push(AnthropicRecord::new(
             "error",
             json!({
@@ -588,6 +582,23 @@ impl AnthropicEncoder {
         ));
         records.push(AnthropicRecord::new("message_stop", json!({})));
         records
+    }
+
+    /// The closing records for a stream that reached its end — cleanly with
+    /// `failure == None`, or with the failure the client is being told about.
+    ///
+    /// The protocol this owns: an `error` record is terminal. No
+    /// `message_delta` may follow it, and a finished stream must not be
+    /// terminated twice — both would fabricate a success the upstream never
+    /// delivered. See `error_records` for why the delta is omitted.
+    pub fn terminal(&mut self, failure: Option<&StreamFailure>) -> Vec<AnthropicRecord> {
+        if self.finished() {
+            return Vec::new();
+        }
+        match failure {
+            Some(f) => self.error_records(f),
+            None => self.finish_records("end_turn"),
+        }
     }
 }
 

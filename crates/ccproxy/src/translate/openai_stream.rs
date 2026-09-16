@@ -437,7 +437,7 @@ impl OpenAIEncoder {
     ///
     /// `code: "network_error"` is the retry classifier's signal; `type` stays
     /// `upstream_error` for humans.
-    pub fn error_envelope(&self, message: &str) -> Value {
+    fn error_envelope(&self, message: &str) -> Value {
         json!({
             "error": {
                 "message": message,
@@ -449,7 +449,7 @@ impl OpenAIEncoder {
 
     /// Closing chunk for a stream that ended without a `finish` event, so the
     /// client does not see a truncated response.
-    pub fn finish_chunks(&self, reason: &str) -> Vec<Value> {
+    fn finish_chunks(&self, reason: &str) -> Vec<Value> {
         vec![self.envelope(json!([
             {"index": 0, "delta": {}, "finish_reason": reason}
         ]))]
@@ -457,9 +457,33 @@ impl OpenAIEncoder {
 
     /// Error record for a stream-level failure caught by the pump. Tags the
     /// message with its real origin so the cause stays visible.
-    pub fn stream_error_chunks(&self, failure: &StreamFailure) -> Vec<Value> {
+    fn stream_error_chunks(&self, failure: &StreamFailure) -> Vec<Value> {
         crate::log::error(&format!("[CC upstream error] {}", failure.message()));
         vec![self.error_envelope(&failure.message())]
+    }
+
+    /// The closing chunks for a stream that reached its end — cleanly with
+    /// `failure == None`, or with the failure the client is being told about.
+    ///
+    /// The protocol this owns: an error envelope is terminal. A finish chunk
+    /// after it would claim a normal stop, which is what makes a client record
+    /// a failed turn as successful, so a failed stream gets the envelope and
+    /// nothing else. The `[DONE]` sentinel is the SSE framing layer's job and
+    /// is deliberately not added here.
+    pub fn terminal(&mut self, failure: Option<&StreamFailure>) -> Vec<Value> {
+        match failure {
+            Some(f) => {
+                self.saw_finish = true;
+                self.stream_error_chunks(f)
+            }
+            None => {
+                if self.finished() {
+                    Vec::new()
+                } else {
+                    self.finish_chunks("stop")
+                }
+            }
+        }
     }
 }
 

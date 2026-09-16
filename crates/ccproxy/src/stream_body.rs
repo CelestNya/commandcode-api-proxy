@@ -197,38 +197,17 @@ impl SseBody {
             }
         }
         match (self.dialect, failure) {
-            (Dialect::Openai, Some(f)) => {
-                // The error envelope and nothing else: a finish chunk after it
-                // would claim a normal stop, which is what makes a client
-                // record a failed turn as successful.
-                for chunk in self.openai.stream_error_chunks(&f) {
+            (Dialect::Openai, failure) => {
+                // The encoder owns the terminal protocol: an error envelope is
+                // terminal, a finish chunk after it would claim a normal stop.
+                for chunk in self.openai.terminal(failure.as_ref()) {
                     self.out.extend_from_slice(format_sse(&chunk).as_bytes());
                 }
                 self.out.extend_from_slice(format_sse_done().as_bytes());
             }
-            (Dialect::Openai, None) => {
-                if !self.openai.finished() {
-                    for chunk in self.openai.finish_chunks("stop") {
-                        self.out.extend_from_slice(format_sse(&chunk).as_bytes());
-                    }
-                }
-                self.out.extend_from_slice(format_sse_done().as_bytes());
-            }
-            (Dialect::Anthropic, Some(f)) => {
-                // `error_records` emits error + message_stop without a trailing
-                // message_delta, which would overwrite the failure with
-                // stop_reason "end_turn".
-                if !self.anthropic.finished() {
-                    for record in self.anthropic.error_records(&f, true) {
-                        self.out.extend_from_slice(record.to_sse().as_bytes());
-                    }
-                }
-            }
-            (Dialect::Anthropic, None) => {
-                if !self.anthropic.finished() {
-                    for record in self.anthropic.finish_records("end_turn") {
-                        self.out.extend_from_slice(record.to_sse().as_bytes());
-                    }
+            (Dialect::Anthropic, failure) => {
+                for record in self.anthropic.terminal(failure.as_ref()) {
+                    self.out.extend_from_slice(record.to_sse().as_bytes());
                 }
             }
         }

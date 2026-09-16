@@ -184,7 +184,7 @@ fn run_openai(scenario_name: &str, ending: Ending) -> Vec<Value> {
             Some(failure) => {
                 if retried || !encoder.can_splice_retry() {
                     // Report the failure and stop.
-                    out.extend(encoder.stream_error_chunks(&failure));
+                    out.extend(encoder.terminal(Some(&failure)));
                     out.push(Value::String("<DONE>".into()));
                     return out;
                 }
@@ -198,9 +198,7 @@ fn run_openai(scenario_name: &str, ending: Ending) -> Vec<Value> {
 
     match ending {
         Ending::Eof => {
-            if !encoder.finished() {
-                out.extend(encoder.finish_chunks("stop"));
-            }
+            out.extend(encoder.terminal(None));
             out.push(Value::String("<DONE>".into()));
         }
         Ending::Failure(failure) => {
@@ -215,7 +213,7 @@ fn run_openai(scenario_name: &str, ending: Ending) -> Vec<Value> {
                     }
                 }
             }
-            out.extend(encoder.stream_error_chunks(&failure));
+            out.extend(encoder.terminal(Some(&failure)));
             out.push(Value::String("<DONE>".into()));
         }
     }
@@ -255,7 +253,7 @@ fn run_anthropic(scenario_name: &str, ending: Ending) -> Vec<AnthropicRecord> {
             None => break,
             Some(failure) => {
                 if retried || !encoder.can_splice_retry() {
-                    out.extend(encoder.error_records(&failure, true));
+                    out.extend(encoder.terminal(Some(&failure)));
                     return out;
                 }
                 retried = true;
@@ -269,16 +267,11 @@ fn run_anthropic(scenario_name: &str, ending: Ending) -> Vec<AnthropicRecord> {
     }
 
     match ending {
-        // A stream that already finished must not get a second terminal pair.
         Ending::Eof => {
-            if !encoder.finished() {
-                out.extend(encoder.finish_records("end_turn"));
-            }
+            out.extend(encoder.terminal(None));
         }
         Ending::Failure(failure) => {
-            if !encoder.finished() {
-                out.extend(encoder.error_records(&failure, true));
-            }
+            out.extend(encoder.terminal(Some(&failure)));
         }
     }
     out

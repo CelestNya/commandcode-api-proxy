@@ -336,10 +336,8 @@ fn the_openai_encoder_reports_the_same_records_the_body_writes() {
             expected.push_str(&ccproxy::sse::format_sse(&chunk));
         }
     }
-    if !encoder.finished() {
-        for chunk in encoder.finish_chunks("stop") {
-            expected.push_str(&ccproxy::sse::format_sse(&chunk));
-        }
+    for chunk in encoder.terminal(None) {
+        expected.push_str(&ccproxy::sse::format_sse(&chunk));
     }
     expected.push_str(&ccproxy::sse::format_sse_done());
     // The ids are generated per encoder, so compare the record structure only.

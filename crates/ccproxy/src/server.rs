@@ -13,7 +13,7 @@ use crate::log;
 use crate::models::Catalog;
 use crate::stream_body::{self, Dialect, SseBody};
 use crate::translate;
-use crate::upstream::{AttemptSink, UpstreamError};
+use crate::upstream::UpstreamError;
 use crate::usage::UsageTotals;
 use crate::validation;
 use serde_json::{json, Map, Value};
