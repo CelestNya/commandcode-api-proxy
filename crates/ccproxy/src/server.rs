@@ -392,120 +392,133 @@ fn handle_models(state: &SharedState, req: Request, ctx: &RequestId) {
     respond_json(req, 200, body, state, ctx);
 }
 
-/// OpenAI `/v1/chat/completions`: validate, translate, generate.
-fn handle_chat(state: &SharedState, mut req: Request, ctx: &RequestId) {
-    let raw = match parse_body(&mut req, state.config.max_body_bytes) {
-        Ok(v) => v,
-        Err(e) => return respond_openai_error(req, e.status, &e.message, state, ctx),
-    };
-    if let Err(validation::ValidationError(msg)) = validation::validate_openai_chat_request(&raw) {
-        return respond_openai_error(req, 400, &msg, state, ctx);
+/// The dialect-specific surface of the two generation endpoints: everything
+/// the shared pipeline does differently for OpenAI vs Anthropic. Keeping the
+/// divergence inventory here instead of in two parallel handlers means a new
+/// dialect (or a new pipeline step) lands in one impl and the pipeline once.
+trait DialectSurface {
+    fn dialect() -> Dialect;
+    fn wire() -> billing::Wire;
+    /// The model name when the client sends none.
+    fn model_fallback() -> &'static str;
+    /// Mint the non-streaming response id.
+    fn nonstream_id() -> String;
+    /// Validate the client body for this dialect.
+    fn validate(raw: &Value) -> std::result::Result<(), validation::ValidationError>;
+    /// Log the incoming request line.
+    fn log_incoming(ctx: &RequestId, raw: &Value, requested: &str);
+    /// Translate a client body into the CC body, threadId pinned.
+    fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value;
+    /// The `type` a body-parse failure maps to (OpenAI's envelope ignores it).
+    fn body_error_type(status: u16) -> &'static str;
+    /// The `type` a validation failure maps to.
+    fn validation_error_type() -> &'static str;
+    /// The envelope a missing API key is answered with.
+    fn respond_missing_key(req: Request, state: &SharedState, ctx: &RequestId);
+    /// The envelope a rejected request is answered with.
+    fn respond_error(
+        req: Request,
+        status: u16,
+        error_type: &str,
+        message: &str,
+        state: &SharedState,
+        ctx: &RequestId,
+    );
+}
+
+/// The OpenAI generation surface.
+struct Openai;
+
+/// The Anthropic generation surface.
+struct Anthropic;
+
+impl DialectSurface for Openai {
+    fn dialect() -> Dialect {
+        Dialect::Openai
     }
-    let Some(api_key) = extract_api_key(&req) else {
-        return respond_openai_error(req, 401, "Unauthorized", state, ctx);
-    };
-
-    let requested = raw
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("default");
-    let is_stream = raw.get("stream").and_then(Value::as_bool) == Some(true);
-    // The encoder reports the name the client asked for, not the resolved id.
-    let encoder_model = generate::encoder_model(requested, "default");
-
-    log_incoming(ctx, &raw, requested);
-
-    // One threadId per client request, shared by every upstream attempt so CC
-    // bills one session per intent.
-    let thread_id = uuid::Uuid::new_v4().to_string();
-    let build_body = |catalog: &Catalog| {
-        let mut body = translate::openai_to_cc(
-            &raw,
-            catalog,
-            &state.tables,
-            state.translate_env.no_tools_guard_off,
-        );
+    fn wire() -> billing::Wire {
+        billing::Wire::Openai
+    }
+    fn model_fallback() -> &'static str {
+        "default"
+    }
+    fn nonstream_id() -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+    fn validate(raw: &Value) -> std::result::Result<(), validation::ValidationError> {
+        validation::validate_openai_chat_request(raw)
+    }
+    fn log_incoming(ctx: &RequestId, raw: &Value, requested: &str) {
+        log_incoming_request(ctx, raw, requested);
+    }
+    fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value {
+        let mut body =
+            translate::openai_to_cc(raw, catalog, &state.tables, state.translate_env.no_tools_guard_off);
         if let Some(obj) = body.as_object_mut() {
-            obj.insert("threadId".into(), Value::String(thread_id.clone()));
+            obj.insert("threadId".into(), Value::String(thread_id.into()));
         }
         body
-    };
-
-    // One ledger per client request, counting one row per upstream attempt.
-    let ledger = Arc::new(billing::RequestLedger::new(
-        &ctx.id,
-        &encoder_model,
-        billing::Wire::Openai,
-        is_stream,
-    ));
-    let opts = upstream_options(state, &api_key, ledger.clone());
-    let stream = match generate::send_with_model_discovery(
-        &state.catalog,
-        &state.tables,
-        &opts,
-        requested,
-        &build_body,
+    }
+    fn body_error_type(_status: u16) -> &'static str {
+        ""
+    }
+    fn validation_error_type() -> &'static str {
+        ""
+    }
+    fn respond_missing_key(req: Request, state: &SharedState, ctx: &RequestId) {
+        respond_openai_error(req, 401, "Unauthorized", state, ctx);
+    }
+    fn respond_error(
+        req: Request,
+        status: u16,
+        _error_type: &str,
+        message: &str,
+        state: &SharedState,
+        ctx: &RequestId,
     ) {
-        Ok(s) => s,
-        Err(err) => {
-            record_attempt_failure(&ledger, &err);
-            return respond_upstream_error(req, &err, Dialect::Openai, state, ctx);
-        }
-    };
-
-    if is_stream {
-        serve_sse(
-            state,
-            req,
-            ctx,
-            stream,
-            Dialect::Openai,
-            &encoder_model,
-            &api_key,
-            &build_body,
-            ledger,
-        );
-    } else {
-        let id = uuid::Uuid::new_v4().to_string();
-        let mut stream = stream;
-        match stream_body::collect_non_streaming(&mut stream, Dialect::Openai, &encoder_model, &id)
-        {
-            Ok(collected) => {
-                ledger.settle_ok(collected.usage.as_ref());
-                record_usage(state, &collected.usage);
-                respond_json(req, 200, collected.body, state, ctx);
-            }
-            Err(f) => {
-                ledger.end_attempt(billing::AttemptStatus::Error, None, Some(f.tag()));
-                let err = UpstreamError {
-                    message: f.detail(),
-                    status_code: 0,
-                    retryable: false,
-                };
-                respond_upstream_error(req, &err, Dialect::Openai, state, ctx);
-            }
-        }
+        respond_openai_error(req, status, message, state, ctx);
     }
 }
 
-/// Anthropic `/v1/messages`: validate, translate, generate.
-fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
-    let raw = match parse_body(&mut req, state.config.max_body_bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            let kind = if e.status == 413 {
-                "api_error"
-            } else {
-                "invalid_request_error"
-            };
-            return respond_anthropic_error(req, e.status, kind, &e.message, state, ctx);
-        }
-    };
-    if let Err(validation::ValidationError(msg)) = validation::validate_anthropic_request(&raw) {
-        return respond_anthropic_error(req, 400, "invalid_request_error", &msg, state, ctx);
+impl DialectSurface for Anthropic {
+    fn dialect() -> Dialect {
+        Dialect::Anthropic
     }
-    let Some(api_key) = extract_api_key(&req) else {
-        return respond_anthropic_error(
+    fn wire() -> billing::Wire {
+        billing::Wire::Anthropic
+    }
+    fn model_fallback() -> &'static str {
+        ""
+    }
+    fn nonstream_id() -> String {
+        format!("msg_{}", uuid::Uuid::new_v4())
+    }
+    fn validate(raw: &Value) -> std::result::Result<(), validation::ValidationError> {
+        validation::validate_anthropic_request(raw)
+    }
+    fn log_incoming(ctx: &RequestId, _raw: &Value, requested: &str) {
+        log::info(&format!("[{}] [Anthropic] Model: {requested}", ctx.id));
+    }
+    fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value {
+        let mut body =
+            translate::anthropic_to_cc_with_env(raw, catalog, &state.tables, &state.translate_env);
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("threadId".into(), Value::String(thread_id.into()));
+        }
+        body
+    }
+    fn body_error_type(status: u16) -> &'static str {
+        if status == 413 {
+            "api_error"
+        } else {
+            "invalid_request_error"
+        }
+    }
+    fn validation_error_type() -> &'static str {
+        "invalid_request_error"
+    }
+    fn respond_missing_key(req: Request, state: &SharedState, ctx: &RequestId) {
+        respond_anthropic_error(
             req,
             401,
             "authentication_error",
@@ -513,29 +526,64 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
             state,
             ctx,
         );
-    };
+    }
+    fn respond_error(
+        req: Request,
+        status: u16,
+        error_type: &str,
+        message: &str,
+        state: &SharedState,
+        ctx: &RequestId,
+    ) {
+        respond_anthropic_error(req, status, error_type, message, state, ctx);
+    }
+}
 
-    let requested = raw.get("model").and_then(Value::as_str).unwrap_or("");
-    let is_stream = raw.get("stream").and_then(Value::as_bool) == Some(true);
-    let encoder_model = generate::encoder_model(requested, "");
-
-    log::info(&format!("[{}] [Anthropic] Model: {requested}", ctx.id));
-
-    let thread_id = uuid::Uuid::new_v4().to_string();
-    let build_body = |catalog: &Catalog| {
-        let mut body =
-            translate::anthropic_to_cc_with_env(&raw, catalog, &state.tables, &state.translate_env);
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("threadId".into(), Value::String(thread_id.clone()));
+/// One generation pipeline shared by both dialects: validate, translate,
+/// discover the model, then stream or collapse. The dialect differences are
+/// resolved by the surface, so a change to the pipeline lands here once
+/// instead of in two parallel handlers.
+fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, ctx: &RequestId) {
+    let raw = match parse_body(&mut req, state.config.max_body_bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            return D::respond_error(
+                req,
+                e.status,
+                D::body_error_type(e.status),
+                &e.message,
+                state,
+                ctx,
+            );
         }
-        body
     };
+    if let Err(validation::ValidationError(msg)) = D::validate(&raw) {
+        return D::respond_error(req, 400, D::validation_error_type(), &msg, state, ctx);
+    }
+    let Some(api_key) = extract_api_key(&req) else {
+        return D::respond_missing_key(req, state, ctx);
+    };
+
+    let requested = raw
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| D::model_fallback());
+    let is_stream = raw.get("stream").and_then(Value::as_bool) == Some(true);
+    // The encoder reports the name the client asked for, not the resolved id.
+    let encoder_model = generate::encoder_model(requested, D::model_fallback());
+
+    D::log_incoming(ctx, &raw, requested);
+
+    // One threadId per client request, shared by every upstream attempt so CC
+    // bills one session per intent.
+    let thread_id = uuid::Uuid::new_v4().to_string();
+    let build_body = |catalog: &Catalog| D::build_body(&raw, catalog, state, &thread_id);
 
     // One ledger per client request, counting one row per upstream attempt.
     let ledger = Arc::new(billing::RequestLedger::new(
         &ctx.id,
         &encoder_model,
-        billing::Wire::Anthropic,
+        D::wire(),
         is_stream,
     ));
     let opts = upstream_options(state, &api_key, ledger.clone());
@@ -549,33 +597,28 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
         Ok(s) => s,
         Err(err) => {
             record_attempt_failure(&ledger, &err);
-            return respond_upstream_error(req, &err, Dialect::Anthropic, state, ctx);
+            return respond_upstream_error(req, &err, D::dialect(), state, ctx);
         }
     };
 
     if is_stream {
-        serve_sse(
+        serve_sse(SseRequest {
             state,
             req,
             ctx,
             stream,
-            Dialect::Anthropic,
-            &encoder_model,
-            &api_key,
-            &build_body,
+            dialect: D::dialect(),
+            model: &encoder_model,
+            api_key: &api_key,
+            build_body: &build_body,
             ledger,
-        );
+        });
     } else {
-        // The message id is minted before the body is built: it is part of the
+        // The response id is minted before the body is built: it is part of the
         // response the client reads and must be stable across the collapse.
-        let id = format!("msg_{}", uuid::Uuid::new_v4());
+        let id = D::nonstream_id();
         let mut stream = stream;
-        match stream_body::collect_non_streaming(
-            &mut stream,
-            Dialect::Anthropic,
-            &encoder_model,
-            &id,
-        ) {
+        match stream_body::collect_non_streaming(&mut stream, D::dialect(), &encoder_model, &id) {
             Ok(collected) => {
                 ledger.settle_ok(collected.usage.as_ref());
                 record_usage(state, &collected.usage);
@@ -588,10 +631,20 @@ fn handle_messages(state: &SharedState, mut req: Request, ctx: &RequestId) {
                     status_code: 0,
                     retryable: false,
                 };
-                respond_upstream_error(req, &err, Dialect::Anthropic, state, ctx);
+                respond_upstream_error(req, &err, D::dialect(), state, ctx);
             }
         }
     }
+}
+
+/// OpenAI `/v1/chat/completions`: validate, translate, generate.
+fn handle_chat(state: &SharedState, req: Request, ctx: &RequestId) {
+    handle_generation::<Openai>(state, req, ctx);
+}
+
+/// Anthropic `/v1/messages`: validate, translate, generate.
+fn handle_messages(state: &SharedState, req: Request, ctx: &RequestId) {
+    handle_generation::<Anthropic>(state, req, ctx);
 }
 
 fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
@@ -644,7 +697,7 @@ fn record_attempt_failure(ledger: &billing::RequestLedger, err: &UpstreamError) 
 /// The per-request tool summary the Node handler logs. Two facts only — the
 /// model and whether tools were offered — because that is what makes a
 /// "the model ignored my tool" report diagnosable from the log alone.
-fn log_incoming(ctx: &RequestId, raw: &Value, requested: &str) {
+fn log_incoming_request(ctx: &RequestId, raw: &Value, requested: &str) {
     let tools = raw.get("tools").and_then(Value::as_array);
     log::info(&format!(
         "[{}] [Incoming Request] Model: {requested}",
@@ -713,24 +766,38 @@ fn pct(cached: u64, prompt: u64) -> f64 {
     ((cached as f64 / prompt as f64) * 1000.0).round() / 10.0
 }
 
+/// Everything one SSE response needs, bundled so the call site and the body
+/// share one context rather than the same group of parameters at every step.
+struct SseRequest<'a> {
+    state: &'a SharedState,
+    req: Request,
+    ctx: &'a RequestId,
+    stream: crate::upstream::UpstreamStream,
+    dialect: Dialect,
+    model: &'a str,
+    api_key: &'a str,
+    build_body: &'a dyn Fn(&Catalog) -> Value,
+    ledger: Arc<billing::RequestLedger>,
+}
+
 /// Stream the encoded records downstream as SSE.
 ///
 /// The response is handed to tiny_http as a `Read`, so the body is pulled as
 /// the socket accepts bytes and a slow client throttles the upstream instead of
 /// being buffered. Nothing here can change the 200 once it is written, which is
 /// why failures after this point are reported in-band by `SseBody`.
-#[allow(clippy::too_many_arguments)]
-fn serve_sse(
-    state: &SharedState,
-    req: Request,
-    ctx: &RequestId,
-    stream: crate::upstream::UpstreamStream,
-    dialect: Dialect,
-    model: &str,
-    api_key: &str,
-    build_body: &dyn Fn(&Catalog) -> Value,
-    ledger: Arc<billing::RequestLedger>,
-) {
+fn serve_sse(sse: SseRequest<'_>) {
+    let SseRequest {
+        state,
+        req,
+        ctx,
+        stream,
+        dialect,
+        model,
+        api_key,
+        build_body,
+        ledger,
+    } = sse;
     // The recovery re-send repeats the request that just failed. The body is
     // built once here — threadId pinned, translation against the catalog as it
     // stands now — because recovery re-sends the very request that failed, not
@@ -858,5 +925,40 @@ pub fn serve(server: tiny_http::Server, state: SharedState) {
         if spawned.is_err() {
             in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The dialect surface is the complete inventory of what the two generation
+    /// endpoints do differently. A third dialect must implement all of it, and
+    /// this pins the divergence points explicitly so it cannot silently skip
+    /// one — the Anthropic-only model log line, the `msg_` id prefix, the
+    /// status-mapped body-error type and the model fallback are all asserted.
+    #[test]
+    fn the_dialect_surface_is_the_complete_divergence_inventory() {
+        assert_eq!(Openai::dialect(), Dialect::Openai);
+        assert_eq!(Anthropic::dialect(), Dialect::Anthropic);
+        assert_eq!(Openai::wire(), billing::Wire::Openai);
+        assert_eq!(Anthropic::wire(), billing::Wire::Anthropic);
+        assert_eq!(Openai::model_fallback(), "default");
+        assert_eq!(Anthropic::model_fallback(), "");
+        assert!(
+            Anthropic::nonstream_id().starts_with("msg_"),
+            "Anthropic ids carry the msg_ prefix"
+        );
+        assert!(
+            !Openai::nonstream_id().starts_with("msg_"),
+            "OpenAI ids are bare uuids"
+        );
+        // Only Anthropic distinguishes a 413 body error from other parse
+        // failures; OpenAI's envelope fixes its own type either way.
+        assert_eq!(Anthropic::body_error_type(413), "api_error");
+        assert_eq!(Anthropic::body_error_type(400), "invalid_request_error");
+        assert_eq!(Openai::body_error_type(413), "");
+        assert_eq!(Openai::validation_error_type(), "");
+        assert_eq!(Anthropic::validation_error_type(), "invalid_request_error");
     }
 }
