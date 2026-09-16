@@ -113,7 +113,34 @@ agent 也一样）。
 
 ---
 
-## 5. golden 里被归一化的运行时工件（不是偏离，是"允许差异"清单）
+## 5. M7 验收里的「写线程 panic」不可达（spec 措辞与实现不符）
+
+spec §6.5 / M7 验收写的是：「**统计写入失败不影响转发**：写线程 panic / 磁盘满 /
+通道满时，请求仍正常完成」。
+
+**磁盘满、通道满已实测**：
+- 磁盘满（目录不可写 → `Ledger::open` 返回 `None`）：`billing_ledger.rs`
+  的 `a_turn_still_completes_when_no_ledger_can_be_opened` 与
+  `an_opened_but_useless_ledger_does_not_block_a_turn`，两个方言各走一轮真实
+  请求，均 200 且流跑到终止符。
+- 通道满：`a_backed_up_queue_drops_records_instead_of_blocking_the_caller`
+  （`try_send` 丢行计数，调用方耗时 < 5s）。
+
+**「写线程 panic」这一项无法按字面成立**，原因是两个设计的叠加：
+1. release profile 是 `panic = "abort"` —— 写线程一旦 panic，整个进程退出，
+   「请求仍正常完成」在原理上不可能。
+2. 更根本的是：`write_loop` 及其调用链（`commit` / `insert_batch` /
+   `prune_old_rows` / `iso8601_from`）**没有任何可达的 panic 点**——所有
+   `rusqlite` 错误都被捕获并降级为日志，整数转换一律用 `unwrap_or`。
+   「写线程 panic」不是一条能触发的路径，而是一段被设计掉的路径。
+
+**处置**：按「应当」一栏的意图验收（写入故障不拖垮转发），而不是按字面注入一个
+不可达的 panic。若日后真的要测 panic 隔离，需要先把 profile 改成 `unwind`，
+但那会牺牲 spec 第 999 行已权衡过的体积与诊断取舍，不在 M7 范围内。
+
+---
+
+## 6. golden 里被归一化的运行时工件（不是偏离，是"允许差异"清单）
 
 以下差异**存在但不构成行为回退**，golden 已按 spec §1 归一化，
 详见 `conformance/record.mjs::normaliseHeaders` 的注释：

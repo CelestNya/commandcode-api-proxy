@@ -145,7 +145,26 @@ M0–M5 约 7–11 个工作日；M6–M8 追加 3–4 天。
 | M3 | ✅ | `5c2057b` | NDJSON/SSE/两 encoder；32 流用例 + 6 非流用例绿 |
 | M4 | ✅ | `36aa360` `fa0ff0c` 等 | behaviour 67/67 绿（`--exe` 直测二进制）；真上游冒烟见下 |
 | M5 | ✅ | `9e752c2` | 真 key 会话级验收 13/13；RSS/体积已测；tag `v0.5.0-rc` |
-| M6–M8 | ⬜ | | 后续 |
+| M6 | ✅ | | 托盘 crate（`ccproxy-tray`，9 文件）；交接验收 `chaos/handover-test.py` 对 Rust 托盘 PASS（含二次交接回归） |
+| M7 | ✅ | `2ed0d39` `630e728` | SQLite 台账：WAL、有界 channel、专线写线程、批量提交、legacy 导入、`daily_stats` |
+| M8 | ✅ | | `tray/build-rust.cmd` 打包：两个二进制 + 版本文件，体积门 < 10MB（实测 3.07MB），打包后 `verify-build.mjs` 10/10 |
+
+### M6–M8 验收记录（2026-09-16）
+
+| 里程碑 | 验收标准 | 实测 |
+| --- | --- | --- |
+| M6 | `chaos/handover-test.py`（隔离 NS/8899） | **PASS**：两次连续交接均正确（旧实例退出、新实例服务、实例数=1），生产托盘未受影响 |
+| M7 | 写故障注入下转发仍完成 | 磁盘满 / 台账不可用 / 通道满三项已测；**「写线程 panic」不可达**，见 `ADEVIATIONS.md` §5 |
+| M8 | exe < 10MB | ccproxy.exe **3.07MB**（门限 10MB）；打包后 10/10 校验通过 |
+
+**M7 端到端补测**（本轮新增）：`billing_ledger.rs` 增加
+`a_turn_still_completes_when_no_ledger_can_be_opened` 与
+`an_opened_but_useless_ledger_does_not_block_a_turn`，两个方言各走一轮真实请求。
+另外真机验证了托盘只读 `daily_stats` 能读到代理正在写的 WAL 库
+（真上游请求后 `stats.rows=1`）。
+
+**M6 测试竞态修复**：`settings.rs` 两个测试并发读写 `CC_TRAY_NS`，约 1/3 概率
+失败（`ns_name` 读到空命名空间）。加 `ENV_LOCK` 串行化后连续 6 次稳定通过。
 
 ### M4 发现并修掉的夹具缺陷（都是「夹具在验证空气」）
 

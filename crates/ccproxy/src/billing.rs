@@ -318,6 +318,71 @@ fn prune_old_rows(conn: &Connection) {
     }
 }
 
+/// Token totals over the last 24 hours, for the tray's menu.
+///
+/// `rows` counts *attempts*, which is what the ledger stores — a request that
+/// was retried contributes more than one. Tokens summed from NULL are skipped
+/// rather than read as zero, so an interrupted attempt does not drag the cache
+/// rate down by pretending it consumed nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DailyStats {
+    pub rows: u64,
+    pub prompt_tokens: u64,
+    pub cached_tokens: u64,
+    pub completion_tokens: u64,
+}
+
+impl DailyStats {
+    /// Cached share of the prompt, as a percentage, or `None` when no row
+    /// reported prompt tokens at all.
+    #[must_use]
+    pub fn cache_rate_percent(self) -> Option<f64> {
+        if self.prompt_tokens == 0 {
+            return None;
+        }
+        let cached = self.cached_tokens as f64;
+        let prompt = self.prompt_tokens as f64;
+        Some((cached / prompt * 1000.0).round() / 10.0)
+    }
+}
+
+/// Aggregate the last 24 hours for the tray. `None` when the database is
+/// missing or unreadable — the tray shows "no data" rather than failing.
+///
+/// Opened read-only: the proxy is the only writer (see DEVELOPMENT.md §4), and
+/// a reader that creates the schema would be writing. This also keeps a
+/// stats query from racing the writer thread at startup.
+#[must_use]
+pub fn daily_stats(dir: &Path) -> Option<DailyStats> {
+    let path = dir.join("billing.db");
+    if !path.exists() {
+        return None;
+    }
+    let conn = Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .ok()?;
+    let cutoff = iso8601_from(now_epoch_secs().saturating_sub(86_400));
+    conn.query_row(
+        "select count(*),
+                coalesce(sum(promptTokens), 0),
+                coalesce(sum(cachedTokens), 0),
+                coalesce(sum(completionTokens), 0)
+           from billing where ts >= ?1",
+        [&cutoff],
+        |row| {
+            Ok(DailyStats {
+                rows: row.get::<_, i64>(0)?.max(0) as u64,
+                prompt_tokens: row.get::<_, i64>(1)?.max(0) as u64,
+                cached_tokens: row.get::<_, i64>(2)?.max(0) as u64,
+                completion_tokens: row.get::<_, i64>(3)?.max(0) as u64,
+            })
+        },
+    )
+    .ok()
+}
+
 // ── legacy import ─────────────────────────────────────────
 
 /// One row of the Node build's `logs/usage.jsonl`.
@@ -1372,5 +1437,82 @@ mod tests {
         assert_eq!(ttfb, None, "and no TTFB: NULL, not a guess");
         assert_eq!(reasoning, None, "and no reasoning split");
         assert_eq!(req_id.as_deref(), Some(""), "and no request id to invent");
+    }
+
+    // ── daily stats (tray menu) ───────────────────────────
+
+    fn with_usage(
+        mut r: AttemptRecord,
+        prompt: u64,
+        cached: u64,
+        completion: u64,
+    ) -> AttemptRecord {
+        r.prompt_tokens = Some(prompt);
+        r.cached_tokens = Some(cached);
+        r.completion_tokens = Some(completion);
+        r
+    }
+
+    #[test]
+    fn daily_stats_sum_the_last_day() {
+        let (ledger, dir) = temp_ledger("stats");
+        ledger.record(with_usage(record(1, AttemptStatus::Ok), 100, 40, 10));
+        ledger.record(with_usage(record(2, AttemptStatus::Ok), 300, 60, 20));
+        ledger.flush();
+
+        let stats = daily_stats(&dir).expect("stats must be readable");
+        assert_eq!(stats.rows, 2);
+        assert_eq!(stats.prompt_tokens, 400);
+        assert_eq!(stats.cached_tokens, 100);
+        assert_eq!(stats.completion_tokens, 30);
+        assert_eq!(stats.cache_rate_percent(), Some(25.0));
+    }
+
+    #[test]
+    fn daily_stats_skip_unknown_usage_instead_of_reading_it_as_zero() {
+        // An interrupted attempt has NULL tokens. Counting it as a row whose
+        // prompt was 0 is fine; counting its tokens as 0 is not, because the
+        // cache rate would then be computed over a prompt that was never seen.
+        let (ledger, dir) = temp_ledger("stats-unknown");
+        ledger.record(record(1, AttemptStatus::Interrupted));
+        ledger.record(with_usage(record(2, AttemptStatus::Ok), 200, 50, 5));
+        ledger.flush();
+
+        let stats = daily_stats(&dir).expect("stats");
+        assert_eq!(stats.rows, 2, "the interrupted attempt is still a row");
+        assert_eq!(stats.prompt_tokens, 200, "but contributes no tokens");
+        assert_eq!(stats.cache_rate_percent(), Some(25.0));
+    }
+
+    #[test]
+    fn daily_stats_report_no_rate_when_nothing_was_recorded() {
+        let (ledger, dir) = temp_ledger("stats-empty");
+        ledger.flush();
+        let stats = daily_stats(&dir).expect("stats");
+        assert_eq!(stats.rows, 0);
+        assert_eq!(stats.cache_rate_percent(), None, "0/0 is unknown, not 0%");
+    }
+
+    #[test]
+    fn daily_stats_ignore_rows_older_than_a_day() {
+        let (ledger, dir) = temp_ledger("stats-old");
+        let mut old = with_usage(record(1, AttemptStatus::Ok), 100, 100, 1);
+        old.ts = iso8601_from(now_epoch_secs().saturating_sub(2 * 86_400));
+        ledger.record(old);
+        ledger.record(with_usage(record(2, AttemptStatus::Ok), 10, 5, 1));
+        ledger.flush();
+
+        let stats = daily_stats(&dir).expect("stats");
+        assert_eq!(stats.rows, 1, "the 2-day-old row is outside the window");
+        assert_eq!(stats.prompt_tokens, 10);
+    }
+
+    #[test]
+    fn daily_stats_on_a_missing_database_are_none() {
+        let dir =
+            std::env::temp_dir().join(format!("ccproxy-billing-none-{}", uuid::Uuid::new_v4()));
+        // Not an error: the tray shows "no data" rather than failing to open
+        // its menu.
+        assert_eq!(daily_stats(&dir), None);
     }
 }

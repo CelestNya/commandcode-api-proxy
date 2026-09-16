@@ -441,3 +441,98 @@ fn a_failed_generation_records_the_failure_tag() {
         "a failed dispatch has no usage; NULL, not 0"
     );
 }
+
+// ── M7 acceptance: the ledger is never on the request's critical path ──
+//
+// The milestone's acceptance is stated as "forwarding still completes under
+// writer fault injection". The unit tests prove the writer degrades in
+// isolation; these two drive a real turn through the server with the ledger
+// taken away, which is the only way to show the wiring honours that.
+
+#[test]
+fn a_turn_still_completes_when_no_ledger_can_be_opened() {
+    let _guard = lock();
+    // No `use_ledger_for_tests`, and `disable_for_tests` stops `global()` from
+    // lazily opening the machine's real database as a side effect.
+    ccproxy::billing::disable_for_tests();
+    let mock = MockUpstream::start(vec![Reply::Usage {
+        prompt: 10,
+        cached: 0,
+        completion: 3,
+    }]);
+    let port = start_proxy_without_ledger(mock.port);
+
+    let (status, body) = request(
+        port,
+        "/v1/chat/completions",
+        &json!({"model": "m", "stream": true, "messages": [{"role": "user", "content": "hi"}]}),
+        true,
+    );
+    ccproxy::billing::enable_for_tests();
+
+    assert_eq!(
+        status, 200,
+        "accounting is not allowed to fail the request: {body}"
+    );
+    assert!(
+        body.contains("[DONE]"),
+        "the stream must still run to its terminator: {body}"
+    );
+}
+
+#[test]
+fn an_opened_but_useless_ledger_does_not_block_a_turn() {
+    let _guard = lock();
+    // A directory where the database file goes: `Ledger::open` returns None,
+    // which is what the server sees on a machine whose data directory is not
+    // writable (a full disk reports the same way).
+    let dir = fresh_dir("noledger");
+    std::fs::create_dir_all(dir.join("billing.db")).expect("a directory where the file goes");
+    assert!(
+        ccproxy::billing::Ledger::open(&dir).is_none(),
+        "the fixture must actually deny the ledger"
+    );
+
+    let mock = MockUpstream::start(vec![Reply::Usage {
+        prompt: 20,
+        cached: 5,
+        completion: 4,
+    }]);
+    let port = start_proxy_without_ledger(mock.port);
+
+    let (status, body) = request(
+        port,
+        "/v1/messages",
+        &json!({"model": "m", "stream": true, "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hi"}]}),
+        true,
+    );
+    assert_eq!(status, 200, "the anthropic path must survive too: {body}");
+    assert!(
+        body.contains("message_stop"),
+        "and still reach its terminator: {body}"
+    );
+}
+
+/// Start the proxy from an explicit config, installing no ledger at all.
+///
+/// Unlike `start_proxy`, which installs one: keeping the ledger away is the
+/// point of the tests above, so the previous test's override is cleared and
+/// `global()` must not be consulted either.
+fn start_proxy_without_ledger(mock: u16) -> u16 {
+    ccproxy::billing::clear_ledger_override_for_tests();
+    let config = ccproxy::config::Config {
+        host: "127.0.0.1".into(),
+        port: 0,
+        cc_api_base: format!("http://127.0.0.1:{mock}"),
+        cc_version: "1.0.0".into(),
+        log_level: "error".into(),
+        cors_origin: "*".into(),
+        upstream_timeout_ms: 5000,
+        idle_timeout_ms: 5000,
+        max_body_bytes: 50 * 1024 * 1024,
+    };
+    let state = ccproxy::server::new_state(config);
+    let (port, _handle) = ccproxy::server::serve_on_ephemeral_port(state).expect("listen");
+    port
+}
