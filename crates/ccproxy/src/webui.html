@@ -154,8 +154,25 @@
 
   .table-wrap {
     background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 14px;
-    overflow: auto; max-height: calc(100vh - 330px); box-shadow: var(--shadow);
+    box-shadow: var(--shadow);
   }
+  .pager {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 10px 14px; border-top: 1px solid var(--outline-variant);
+    font-size: 12.5px; color: var(--muted);
+  }
+  .pager .pg-btn, .pager select {
+    background: var(--surface-variant); color: var(--text);
+    border: 1px solid var(--outline-variant); border-radius: 8px;
+    padding: 6px 12px; font-size: 12.5px; font-family: inherit; min-height: 34px;
+    cursor: pointer;
+  }
+  .pager .pg-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--text); }
+  .pager .pg-btn:disabled { opacity: .45; cursor: default; }
+  .pager .pg-btn.active { background: var(--primary-container); color: var(--on-primary-container); border-color: transparent; }
+  .pager .pg-ellipsis { padding: 0 4px; color: var(--muted); }
+  .pager .pg-count { margin-right: auto; }
+  .pager .pg-size { display: inline-flex; align-items: center; gap: 6px; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
   th, td { padding: 9px 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   th {
@@ -195,6 +212,7 @@
     .content { padding: 14px; }
     .filterbar label { width: 100%; }
     .filterbar select, .filterbar button { min-height: 44px; }
+    .pager .pg-btn, .pager select { min-height: 44px; min-width: 44px; }
   }
 </style>
 </head>
@@ -314,13 +332,14 @@
             <tbody id="attempts-body"></tbody>
           </table>
           <div class="empty" id="attempts-empty" style="display:none">没有符合条件的记录</div>
+          <div class="pager" id="pager"></div>
         </div>
       </section>
     </main>
   </div>
 </div><script>
 "use strict";
-var state = { stats: null, attempts: [], days: 14, filters: { model: "", stream: "", status: "" } };
+var state = { stats: null, attempts: [], days: 14, page: 1, pageSize: 50, filters: { model: "", stream: "", status: "" } };
 var PALETTE = ["#8AB4F8", "#81C995", "#FDD663", "#F28B82", "#C58AF9", "#7FD1FF", "#F2B8B5", "#A8DAB5", "#FFD8A8", "#B3C7F9"];
 
 function el(id) { return document.getElementById(id); }
@@ -538,16 +557,76 @@ function renderMiniCards(s) {
 }
 
 /* ── details ── */
-function renderAttempts(list) {
+function pageList(cur, total) {
+  var out = [];
+  if (total <= 7) {
+    for (var i = 1; i <= total; i++) out.push(i);
+    return out;
+  }
+  out.push(1);
+  var start = Math.max(2, cur - 1), end = Math.min(total - 1, cur + 1);
+  if (start > 2) out.push("…");
+  for (var j = start; j <= end; j++) out.push(j);
+  if (end < total - 1) out.push("…");
+  out.push(total);
+  return out;
+}
+
+function renderPager(totalPages, shown) {
+  var pager = el("pager");
+  if (totalPages <= 1 && !shown) { pager.innerHTML = ""; return; }
+  var h = '<span class="pg-count">共 ' + shown + ' 条</span>';
+  h += '<button class="pg-btn" id="pg-prev">上一页</button>';
+  pageList(state.page, totalPages).forEach(function (p) {
+    if (p === "…") { h += '<span class="pg-ellipsis">…</span>'; return; }
+    h += '<button class="pg-btn' + (p === state.page ? " active" : "") + '" data-page="' + p + '">' + p + "</button>";
+  });
+  h += '<button class="pg-btn" id="pg-next">下一页</button>';
+  h += '<span class="pg-size">每页展示 <select id="pg-size">' +
+       [50, 100, 200, 500].map(function (n) {
+         return '<option value="' + n + '"' + (n === state.pageSize ? " selected" : "") + ">" + n + "</option>";
+       }).join("") + " 条</select></span>";
+  pager.innerHTML = h;
+  el("pg-prev").disabled = state.page <= 1;
+  el("pg-next").disabled = state.page >= totalPages;
+  el("pg-prev").addEventListener("click", function () { setPage(state.page - 1); });
+  el("pg-next").addEventListener("click", function () { setPage(state.page + 1); });
+  pager.querySelectorAll(".pg-btn[data-page]").forEach(function (b) {
+    b.addEventListener("click", function () { setPage(Number(b.getAttribute("data-page"))); });
+  });
+  el("pg-size").addEventListener("change", function () {
+    state.pageSize = Number(el("pg-size").value);
+    state.page = 1;
+    renderAttempts(state.attempts);
+  });
+}
+
+function setPage(n) {
+  var rows = filterAttempts(state.attempts);
+  var total = Math.max(1, Math.ceil(rows.length / state.pageSize));
+  if (n < 1 || n > total) return;
+  state.page = n;
+  renderAttempts(state.attempts);
+}
+
+function filterAttempts(list) {
   var f = state.filters;
-  var rows = list.filter(function (a) {
+  return list.filter(function (a) {
     if (f.model && a.model !== f.model) return false;
     if (f.stream !== "" && String(a.stream) !== f.stream) return false;
     if (f.status && a.status !== f.status) return false;
     return true;
   });
+}
+
+function renderAttempts(list) {
+  var rows = filterAttempts(list);
+  var totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+  if (state.page > totalPages) state.page = totalPages;
+  var start = (state.page - 1) * state.pageSize;
+  var pageRows = rows.slice(start, start + state.pageSize);
   var body = el("attempts-body");
-  body.innerHTML = rows.map(function (a, i) {
+  body.innerHTML = pageRows.map(function (a, i) {
     var p = a.promptTokens, c = a.cachedTokens, o = a.completionTokens;
     var denom = (p || 0) + (c || 0);
     var hit = denom > 0 ? ((c || 0) / denom * 100) : null;
@@ -576,6 +655,7 @@ function renderAttempts(list) {
       '</tr>';
   }).join("");
   el("attempts-empty").style.display = rows.length ? "none" : "block";
+  renderPager(totalPages, rows.length);
   var models = {};
   list.forEach(function (a) { models[a.model] = true; });
   var sel = el("f-model");
@@ -636,12 +716,14 @@ document.addEventListener("DOMContentLoaded", function () {
   ["f-model", "f-stream", "f-status"].forEach(function (id) {
     el(id).addEventListener("change", function () {
       state.filters[id.replace("f-", "")] = el(id).value;
+      state.page = 1;
       renderAttempts(state.attempts);
     });
   });
   el("btn-reset").addEventListener("click", function () {
     state.filters = { model: "", stream: "", status: "" };
     el("f-model").value = ""; el("f-stream").value = ""; el("f-status").value = "";
+    state.page = 1;
     renderAttempts(state.attempts);
   });
   el("btn-refresh").addEventListener("click", function () { fetchAttempts(); fetchStats(); });
