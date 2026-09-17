@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [rust-rewrite]
+    branches: [main]
   pull_request:
-    branches: [rust-rewrite]
+    branches: [main]
 
 jobs:
   quality:

@@ -1,17 +1,23 @@
 name: Release
 
-# Personal fork: this never publishes to npm. Releases here are GitHub-only —
-# the artifacts are the two Rust binaries built on a Windows runner (the tray
-# is Windows-only) and attached to the tag.
+# Build, test and publish a release. Triggered when a `v*` tag is pushed
+# (the normal release flow) or manually from the Actions tab
+# (workflow_dispatch) when a release is needed without a new tag.
 #
-# The hot-swap package (release\CCProxyRust layout with the version-stamped
-# package.json) is produced locally by build-rust.cmd; the CI release exists
-# so a tagged build always has reproducible binaries attached.
+# GitHub decides "latest" by publish time, NOT by version ordering — v0.5.0
+# once won latest merely by being published a second later than v0.5.2.
+# make_latest: true pins every release produced here as latest, so the
+# newest publish is always what the download button points at.
+#
+# The hot-swap package layout is produced locally by build-rust.cmd; this
+# workflow exists so a tagged build always has reproducible binaries
+# attached and marked latest.
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 jobs:
   release:
@@ -29,6 +35,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          make_latest: true
           files: |
             target/release/ccproxy.exe
             target/release/CCProxyTray.exe
