@@ -1,17 +1,17 @@
 name: Release
 
-# Build, test and publish a release. Triggered when a `v*` tag is pushed
-# (the normal release flow) or manually from the Actions tab
-# (workflow_dispatch) when a release is needed without a new tag.
+# Build, test and publish a release as ONE ready-to-run zip. Triggered when
+# a `v*` tag is pushed (the normal release flow) or manually from the
+# Actions tab (workflow_dispatch) when a release is needed without a new tag.
+#
+# Layout inside the zip (same as build-rust.cmd's package): the tray sits at
+# the root, the proxy it launches lives in service/, and package.json carries
+# the version — extract anywhere and double-click CCProxyTray.exe.
 #
 # GitHub decides "latest" by publish time, NOT by version ordering — v0.5.0
 # once won latest merely by being published a second later than v0.5.2.
 # make_latest: true pins every release produced here as latest, so the
-# newest publish is always what the download button points at.
-#
-# The hot-swap package layout is produced locally by build-rust.cmd; this
-# workflow exists so a tagged build always has reproducible binaries
-# attached and marked latest.
+# download button always points at the newest publish.
 
 on:
   push:
@@ -32,10 +32,23 @@ jobs:
         run: cargo test --locked
       - name: Build both binaries
         run: cargo build --release --locked
+      - name: Stage the runnable package
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches.Groups[1].Value
+          New-Item -ItemType Directory -Force pkg/service | Out-Null
+          Copy-Item target/release/CCProxyTray.exe pkg/
+          Copy-Item target/release/ccproxy.exe pkg/service/
+          Set-Content -Path pkg/package.json -Value ('{"version":"' + $ver + '"}') -Encoding utf8
+          Write-Output "staged version $ver"
+      - name: Zip the package
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches.Groups[1].Value
+          Compress-Archive -Path pkg/* -DestinationPath ("CCProxy-v" + $ver + ".zip") -CompressionLevel Optimal
+          Write-Output "packaged CCProxy-v$ver.zip"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           make_latest: true
-          files: |
-            target/release/ccproxy.exe
-            target/release/CCProxyTray.exe
+          files: CCProxy-v*.zip
