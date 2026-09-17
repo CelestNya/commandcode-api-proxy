@@ -288,6 +288,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         coalesce(sum(cachedTokens), 0),
                         coalesce(sum(completionTokens), 0)
                  from billing
+                 where ts >= datetime('now', 'localtime', '-' || ?1 || ' days')
                  group by day
                  order by day desc
                  limit ?1",
@@ -850,10 +851,12 @@ mod tests {
     #[test]
     fn sysinfo_reports_memory_and_uptime() {
         // Platform-portable: must never panic; on this dev machine both are real.
+        // Uptime is second-granular and a freshly spawned test process may read
+        // 0, so the assertion is a plausibility bound, not a positivity check.
         let mem = process_working_set_mb();
         let up = process_uptime_secs();
         assert!(mem.is_none() || mem.unwrap() > 0.0);
-        assert!(up.is_none() || up.unwrap() > 0);
+        assert!(up.is_none() || (up.unwrap() < 30 * 86400));
     }
 
     #[test]
