@@ -93,7 +93,7 @@
   .mcard.err .mvalue { color: var(--error); }
   .mcard.warn .mvalue { color: var(--aborted); }
 
-  .ov-row { display: grid; grid-template-columns: 340px 1fr; gap: 12px; margin-top: 12px; }
+  .ov-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
   .panel {
     background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 16px;
     padding: 14px 16px; box-shadow: var(--shadow);
@@ -112,22 +112,15 @@
     border-color: transparent; font-weight: 600;
   }
 
-  .plat-row {
-    display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 8px;
-    align-items: center; padding: 10px 12px; border: 1px solid var(--outline-variant);
-    border-radius: 12px; margin-bottom: 8px; background: var(--surface-variant);
-  }
-  .plat-row .pname { font-weight: 600; font-size: 13.5px; }
-  .plat-row .pname span { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
-  .plat-row .pnum { text-align: right; }
-  .plat-row .pnum b { display: block; font-weight: 600; font-size: 13.5px; font-variant-numeric: tabular-nums; }
-  .plat-row .pnum span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
   .model-layout { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: center; }
-  .model-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .model-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
   .model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--outline-variant); font-size: 12px; }
   .model-table th:first-child { text-align: left; }
-  .model-table td { padding: 6px 6px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--outline-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+  .model-table td { padding: 6px 6px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--outline-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 46%; }
+  .model-table th:nth-child(2), .model-table td:nth-child(2) { width: 24%; }
+  .model-table th:nth-child(3), .model-table td:nth-child(3) { width: 30%; }
   .model-table td:first-child { text-align: left; }
   .model-table tr:last-child td { border-bottom: none; }
 
@@ -272,10 +265,6 @@
       <section class="view active" id="view-stats">
         <div class="metric-cards" id="metric-cards"></div>
 
-        <div class="panel" style="margin-top:12px">
-          <h2>按平台拆分 <span class="extra" id="plat-count"></span></h2>
-          <div id="platforms"></div>
-        </div>
 
         <div class="panel" style="margin-top:12px">
           <h2>
@@ -430,17 +419,6 @@ function renderStats(s) {
            '<div class="mvalue">' + c.value + '</div><div class="msub">' + c.sub + '</div></div>';
   }).join("");
 
-  var plats = s.platforms || [];
-  el("plat-count").textContent = plats.length + " 个平台";
-  el("platforms").innerHTML = plats.map(function (pl) {
-    var pt = (pl.prompt || 0) + (pl.cached || 0) + (pl.completion || 0);
-    var name = (pl.wire || "?").charAt(0).toUpperCase() + (pl.wire || "?").slice(1);
-    return '<div class="plat-row">' +
-      '<div class="pname">' + esc(name) + '<span>协议入口</span></div>' +
-      '<div class="pnum"><b>' + fmtTokens(pt) + '</b><span>Token 总量</span></div>' +
-      '<div class="pnum"><b>' + fmtNum(pl.attempts) + '</b><span>请求</span></div>' +
-      '<div class="pnum"><b>' + fmtTokens((pl.prompt || 0) + (pl.cached || 0)) + '</b><span>输入 Token</span></div></div>';
-  }).join("") || '<div class="empty">暂无数据</div>';
 
   renderTrend(s.trend || []);
   renderModels(s.models || []);

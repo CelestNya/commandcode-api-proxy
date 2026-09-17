@@ -280,23 +280,43 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
         .unwrap_or((0, 0, 0, 0, 0));
 
     let trend = {
+        // The window is a strict calendar range: a recursive CTE materialises
+        // every day in it and left-joins the aggregated ledger, so the chart
+        // always shows `window` points and empty days read as zero tokens.
+        // A different window therefore visibly changes the curve.
         let stmt = conn
             .prepare(
-                "select strftime('%Y-%m-%d', ts, 'localtime') as day,
-                        count(*),
-                        coalesce(sum(promptTokens), 0),
-                        coalesce(sum(cachedTokens), 0),
-                        coalesce(sum(completionTokens), 0)
-                 from billing
-                 where ts >= datetime('now', 'localtime', '-' || ?1 || ' days')
-                 group by day
-                 order by day desc
-                 limit ?1",
+                "with recursive seq(x) as (
+                        select 0
+                        union all
+                        select x + 1 from seq where x < ?1 - 1
+                     ),
+                     days(day) as (
+                        select date('now', 'localtime', '-' || x || ' days') from seq
+                     ),
+                     agg as (
+                        select strftime('%Y-%m-%d', ts, 'localtime') as day,
+                               count(*) as attempts,
+                               coalesce(sum(promptTokens), 0) as prompt,
+                               coalesce(sum(cachedTokens), 0) as cached,
+                               coalesce(sum(completionTokens), 0) as completion
+                        from billing
+                        where ts >= datetime('now', 'localtime', '-' || ?2 || ' days')
+                        group by day
+                     )
+                 select d.day,
+                        coalesce(a.attempts, 0),
+                        coalesce(a.prompt, 0),
+                        coalesce(a.cached, 0),
+                        coalesce(a.completion, 0)
+                 from days d
+                 left join agg a on a.day = d.day
+                 order by d.day",
             )
             .ok();
         let mut days: Vec<Value> = Vec::new();
         if let Some(mut stmt) = stmt {
-            if let Ok(rows) = stmt.query_map([window], |row| {
+            if let Ok(rows) = stmt.query_map([window, window], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
@@ -323,8 +343,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                 }
             }
         }
-        days.reverse(); // oldest → newest for the chart
-        days
+        days // oldest → newest for the chart
     };
 
     let platforms = {
@@ -779,16 +798,27 @@ mod tests {
         ]);
         let s = stats_json(&conn, 14);
         let trend = s["trend"].as_array().unwrap();
-        assert_eq!(trend.len(), 2);
-        assert_eq!(trend[0]["date"], "2026-09-15");
-        assert_eq!(trend[1]["date"], "2026-09-16");
-        assert_eq!(trend[1]["attempts"], 1);
-        assert_eq!(trend[1]["prompt"], 50);
-        assert_eq!(trend[1]["cached"], 10);
-        assert_eq!(trend[1]["completion"], 0);
-        assert_eq!(trend[1]["hitRate"], 10.0 / 60.0);
-        assert_eq!(trend[0]["hitRate"], 0.0); // cached 0 with prompt > 0 is a real 0% hit
-                                              // platform aggregation
+        // The window is a strict calendar range: every day is present so a
+        // different window visibly changes the curve, empty days read 0.
+        assert_eq!(trend.len(), 14);
+        let i15 = trend
+            .iter()
+            .position(|d| d["date"] == "2026-09-15")
+            .unwrap();
+        let i16 = trend
+            .iter()
+            .position(|d| d["date"] == "2026-09-16")
+            .unwrap();
+        assert_eq!(i15 + 1, i16);
+        assert_eq!(trend[i16]["attempts"], 1);
+        assert_eq!(trend[i16]["prompt"], 50);
+        assert_eq!(trend[i16]["cached"], 10);
+        assert_eq!(trend[i16]["completion"], 0);
+        assert_eq!(trend[i16]["hitRate"], 10.0 / 60.0);
+        assert_eq!(trend[i15]["hitRate"], 0.0); // cached 0 with prompt > 0 is a real 0% hit
+        assert_eq!(trend[0]["attempts"], 0);
+        assert!(trend[0]["hitRate"].is_null());
+        // platform aggregation
         let platforms = s["platforms"].as_array().unwrap();
         assert_eq!(platforms.len(), 1);
         assert_eq!(platforms[0]["wire"], "openai");
