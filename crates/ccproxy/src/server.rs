@@ -289,6 +289,10 @@ pub fn handle(state: &SharedState, req: Request) {
     match (method.as_str(), path.as_str()) {
         ("GET", "/health") => handle_health(state, req, &ctx),
         ("GET", "/v1/models") => handle_models(state, req, &ctx),
+        ("GET", "/webui") => crate::webui::handle_page(state, req, &ctx),
+        ("GET", "/webui/api/stats") => crate::webui::handle_stats(state, req, &ctx),
+        ("GET", "/webui/api/attempts") => crate::webui::handle_attempts(state, req, &ctx),
+        ("GET", "/webui/events") => crate::webui::handle_events(state, req, &ctx),
         ("POST", "/v1/chat/completions") => handle_chat(state, req, &ctx),
         ("POST", "/v1/messages") => handle_messages(state, req, &ctx),
         ("POST", "/v1/messages/count_tokens") => handle_count_tokens(state, req, &ctx),
@@ -307,6 +311,10 @@ fn handle_preflight(state: &SharedState, req: Request, path: &str) {
         path,
         "/health"
             | "/v1/models"
+            | "/webui"
+            | "/webui/api/stats"
+            | "/webui/api/attempts"
+            | "/webui/events"
             | "/v1/chat/completions"
             | "/v1/messages"
             | "/v1/messages/count_tokens"

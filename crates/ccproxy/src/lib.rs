@@ -42,6 +42,7 @@ pub mod translate;
 pub mod upstream;
 pub mod usage;
 pub mod validation;
+pub mod webui;
 
 use serde_json::{json, Value};
 
