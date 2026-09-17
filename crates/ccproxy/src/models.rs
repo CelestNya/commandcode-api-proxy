@@ -5,7 +5,7 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-const MODELS_JSON: &str = include_str!("../../../src/models.json");
+const MODELS_JSON: &str = include_str!("models.json");
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelMeta {

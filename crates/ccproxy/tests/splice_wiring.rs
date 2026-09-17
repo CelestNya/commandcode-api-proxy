@@ -1,7 +1,7 @@
 //! The recovery wiring, end to end: the reconnect closure + `SseBody`'s Read
 //! loop + the billing ledger, all real.
 //!
-//! The encoder tests and `stream_golden` drive encoders directly; `record.mjs`
+//! The encoder tests and `stream_golden` drive encoders directly; the old Node recorder
 //! drives the whole binary from outside. The bugs this file is after live in
 //! neither place — they live in how the pieces are joined: whether a spliced
 //! recovery leaves exactly two ledger rows (interrupted/NULL, then ok/usage),

@@ -2,34 +2,29 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [rust-rewrite]
   pull_request:
-    branches: [main]
+    branches: [rust-rewrite]
 
 jobs:
   quality:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [24]
-
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: "pnpm"
+          components: rustfmt, clippy
+      - run: cargo build --release --locked -p ccproxy
+      - run: cargo test --locked -p ccproxy
+      - run: cargo clippy --all-targets --all-features --locked -p ccproxy -- -D warnings
+      - run: cargo fmt --check
 
-      - run: pnpm install --frozen-lockfile
-
-      - name: Type-check
-        run: pnpm tsc --noEmit
-
-      - name: Run tests
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build both binaries
+        run: cargo build --release --locked
+      - name: Run the full suite (proxy + tray)
+        run: cargo test --locked

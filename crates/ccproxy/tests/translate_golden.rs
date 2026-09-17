@@ -1,4 +1,4 @@
-//! Replays every sample in conformance/golden/translate.json against the Rust
+//! Replays every sample in tests/fixtures/translate.json against the Rust
 //! translation layer. This is the M2 acceptance gate: all 52 samples (14
 //! OpenAI requests + 15 Anthropic requests + 23 model resolutions) must match
 //! the recorded output.
@@ -10,14 +10,14 @@ use ccproxy::models::static_catalog;
 use ccproxy::translate::{anthropic_to_cc, openai_to_cc, resolve_model, ModelTables};
 use serde_json::Value;
 
-const GOLDEN: &str = include_str!("../../../conformance/golden/translate.json");
+const GOLDEN: &str = include_str!("fixtures/translate.json");
 
 fn golden() -> Value {
     serde_json::from_str(GOLDEN).expect("translate.json parses")
 }
 
 /// Drop the fields whose values legitimately differ per run, mirroring
-/// `normalisePhone` in conformance/record-translate.mjs.
+/// `normalisePhone` in the old Node recorder.
 fn normalise(mut body: Value) -> Value {
     if let Some(obj) = body.as_object_mut() {
         if obj.contains_key("threadId") {

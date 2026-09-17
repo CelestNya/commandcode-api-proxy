@@ -13,7 +13,7 @@ import time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXE = os.environ.get("CC_TEST_EXE") or os.path.join(ROOT, "release", "CCProxy", "CCProxyTray.exe")
+EXE = os.environ.get("CC_TEST_EXE") or os.path.join(ROOT, "release", "CCProxyRust", "CCProxyTray.exe")
 NS = "handovertest"
 PORT = 8899
 LOG = os.path.join(os.path.dirname(EXE), "logs", "test-" + NS, "proxy.log")

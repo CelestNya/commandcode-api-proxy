@@ -2,8 +2,8 @@
 //! (request half; the streaming encoders land in M3).
 //!
 //! Ported from src/translate/. The decision order in `models` and the field
-//! presence rules in `openai`/`anthropic` are the contract — the golden samples
-//! pin them, and the tests in `golden` replay all 52 of them.
+//! presence rules in `openai`/`anthropic` are the contract — the fixture suites
+//! pin them, and the fixture tests replay all 52 of them.
 
 pub mod anthropic;
 pub mod anthropic_stream;

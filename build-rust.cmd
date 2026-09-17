@@ -20,7 +20,7 @@ rem Usage: build-rust.cmd [version] [--promote]
 rem        version defaults to the Cargo workspace version.
 
 setlocal enabledelayedexpansion
-set ROOT=%~dp0..
+set ROOT=%~dp0
 
 rem ---- arguments: an optional version and an optional --promote ----
 set VER=
@@ -29,7 +29,7 @@ for %%A in (%*) do (
   if /i "%%A"=="--promote" (set PROMOTE=1) else (set VER=%%A)
 )
 if "%VER%"=="" (
-  rem Cargo.toml is TOML, so a JSON parser cannot read it: `node -p` throws,
+  rem Cargo.toml is TOML, so a JSON parser cannot read it; the version is
   rem stderr is suppressed, and stdout comes back empty. The version is read
   rem off the `version = "x.y.z"` line instead, and validated before use -
   rem a junk value here names folders, and a stray `CCProxy-v<junk>` on the
@@ -114,13 +114,19 @@ if %PROXY_BYTES% GTR %MAX_BYTES% (
 )
 
 rem ---- verify the packaged build before publishing it ----
-rem The same conformance entry point the Node build uses; it detects a standalone
-rem binary and drives it directly. An unverified artifact must not reach the
-rem Desktop.
+rem The conformance harness is gone (the golden's job ended with the rewrite);
+rem an unverified artifact must not reach the Desktop, so run the crate's own
+rem test suite as the gate instead.
+rem Note: capture the exit code BEFORE popd — an internal command that
+succeeded resets errorlevel to 0, which would let a failing test suite
+publish anyway.
 if defined CC_SKIP_VERIFY goto :verify_skipped
 echo Verifying packaged build...
-node "%ROOT%\conformance\verify-build.mjs" --exe "%PKG%\service\ccproxy.exe"
-if errorlevel 1 goto :verify_fail
+pushd "!ROOT!"
+cargo test --locked
+set "TEST_EC=!ERRORLEVEL!"
+popd
+if not "!TEST_EC!"=="0" goto :verify_fail
 goto :verify_done
 
 :verify_skipped
