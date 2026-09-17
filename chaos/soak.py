@@ -28,9 +28,9 @@ ENV = dict(os.environ,
 proxy_proc = None
 
 # Same override handover-test.py uses: point the soak at a packaged Rust build
-# instead of the working-tree Node one. Without it this drives dist/proxy.js,
-# which is the cross-validation path rather than the shipping artifact.
-EXE = os.environ.get("CC_TEST_EXE") or os.path.join(CC_DIR, "target", "release", "ccproxy.exe")
+# instead of the working-tree build; CC_TEST_EXE overrides it when the package
+# lives elsewhere.
+EXE = os.environ.get("CC_TEST_EXE") or os.path.join(ROOT, "release", "CCProxyRust", "ccproxy.exe")
 
 
 def start_proxy():

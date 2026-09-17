@@ -66,7 +66,7 @@ pub struct AnthropicEncoder {
     /// A replacement stream is being spliced onto what was already sent, so its
     /// replayed `start` and thinking are dropped.
     ///
-    /// Measured in conformance/client-probes/retry-splice.mjs: re-sending
+    /// re-sending
     /// `message_start` makes Anthropic clients drop the entire message.
     splice_replay: bool,
     pub last_usage: Option<UsageData>,
@@ -542,7 +542,7 @@ impl AnthropicEncoder {
     /// The absent `message_delta` is the point. Clients read
     /// `message_delta(stop_reason="end_turn")` as "the model finished talking",
     /// so sending one after an error launders a mid-stream failure into a
-    /// successful turn (measured in conformance/client-probes: finishReason
+    /// successful turn (measured upstream: finishReason
     /// became "stop"). `error` followed directly by `message_stop` leaves the
     /// client's finishReason non-stop.
     fn error_records(&mut self, failure: &StreamFailure) -> Vec<AnthropicRecord> {

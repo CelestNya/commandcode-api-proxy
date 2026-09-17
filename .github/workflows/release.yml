@@ -1,11 +1,12 @@
 name: Release
 
-# Personal fork: this never publishes to npm. The package name is shared with
-# the upstream project, so an accidental `pnpm publish` would be an outward
-# facing mistake. Releases here are GitHub-only.
+# Personal fork: this never publishes to npm. Releases here are GitHub-only —
+# the artifacts are the two Rust binaries built on a Windows runner (the tray
+# is Windows-only) and attached to the tag.
 #
-# The Windows tray zip is built locally (tray\build.cmd needs a Windows host and
-# the C# compiler) and attached to the release by hand.
+# The hot-swap package (release\CCProxyRust layout with the version-stamped
+# package.json) is produced locally by build-rust.cmd; the CI release exists
+# so a tagged build always has reproducible binaries attached.
 
 on:
   push:
@@ -14,33 +15,20 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: "pnpm"
-
-      - run: pnpm install --frozen-lockfile
-
+      - uses: dtolnay/rust-toolchain@stable
       - name: Test
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
-
+        run: cargo test --locked
+      - name: Build both binaries
+        run: cargo build --release --locked
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
-          body: |
-            Personal build. Source-only release — the Windows tray package
-            (`CCProxy-<version>-win-x64.zip`) is built locally with
-            `pnpm release:tray` and attached manually.
+          files: |
+            target/release/ccproxy.exe
+            target/release/CCProxyTray.exe

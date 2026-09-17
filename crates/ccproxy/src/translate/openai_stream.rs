@@ -44,7 +44,7 @@ pub struct OpenAIEncoder {
     /// A replacement stream is being spliced onto what was already sent, so its
     /// replayed opening (role chunk) and reasoning are dropped.
     ///
-    /// Measured in conformance/client-probes/retry-splice.mjs: a client that
+    /// a client that
     /// receives the answer twice is worse off than one that gets an honest
     /// error.
     splice_replay: bool,

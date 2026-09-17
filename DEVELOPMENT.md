@@ -4,37 +4,31 @@
 > The auth subsystem (stored key, `auth` subcommand, `--setup-*` generators) has been
 > removed in favour of key passthrough; the structure below reflects this fork.
 >
-> The Rust rewrite (M0–M8) is complete and is the maintenance target. The Node
-> sources (`src/`, `tests/`, `package.json`) are kept for cross-validation only —
-> the conformance golden is recorded from them and checked against the Rust build.
+> The Rust rewrite is complete and is the only implementation. The Node sources
+> and the conformance golden that pinned behaviour against them are gone; the
+> behaviour contract lives in `RUST-REWRITE-SPEC.md` + `ADEVIATIONS.md`, and the
+> test suite in this workspace is the acceptance gate.
 
 ## Prerequisites
 
 - Rust stable (MSVC toolchain on Windows)
-- Node.js >= 24 + pnpm — only for the conformance harness and the vendored Node tests
 
 ## Commands
 
 ```bash
 cargo build --release --locked   # Both binaries: ccproxy + CCProxyTray
-cargo test                       # Unit + golden + ledger tests (196)
+cargo test                       # Unit + fixture + ledger + tray tests (224)
 cargo clippy --all-targets --all-features --locked -- -D warnings   # The lint gate
 cargo fmt --check
-node conformance/record.mjs --check          # Golden behaviour (56 cases)
-node conformance/record-translate.mjs --check
-node conformance/verify-build.mjs --exe target/release/ccproxy.exe   # Verify any build
-tray\build-rust.cmd                          # Package + publish to the hot-swap folder
+build-rust.cmd                   # Package + publish to the hot-swap folder
 ```
-
-The legacy Node workflow (`pnpm install && pnpm build && pnpm test`) still works in
-this tree and is run when recording a new golden, but is not part of the Rust
-development loop.
 
 ## Windows tray (Rust, `crates/ccproxy-tray`)
 
 The tray is a second Rust binary in the same workspace, not a separate artifact.
-`tray\build-rust.cmd` builds both binaries, verifies the packaged proxy
-(`verify-build.mjs --exe`), and publishes to `%Desktop%\CCProxy-Release\CCProxy-v<version>-rust\`.
+`build-rust.cmd` builds both binaries, runs `cargo test --locked` as the publish
+gate (the conformance harness is gone), and publishes to
+`%Desktop%\CCProxy-Release\CCProxy-v<version>-rust\`.
 Pass `--promote` to switch `CCProxy-current` (a decision, not a side effect of building).
 
 Test a build against an isolated namespace so a running production instance is
@@ -71,6 +65,7 @@ crates/
 │       ├── validation.rs    # Request validation (OpenAI + Anthropic)
 │       ├── tool_arguments.rs
 │       ├── usage.rs         # /health cache stats
+│       ├── models.json      # Vendored model table (aliases, efforts, context)
 │       └── translate/       # openai.rs, anthropic_stream.rs, openai_stream.rs,
 │                            #   models.rs, catalog.rs, validation.rs, util.rs
 └── ccproxy-tray/          # The tray binary — #![deny(unsafe_code)], FFI sites expect()
@@ -83,11 +78,10 @@ crates/
         ├── process.rs       # Child supervision, log rotation, egress env
         ├── tray.rs          # Menu, icon, UI state
         └── health.rs        # /health probe for the handover gate
-src/models.json            # Single source of truth, include_str!'d by the Rust crate
-conformance/               # Golden fixtures + record/verify harness (Node-driven)
-tests/, src/, package.json # Vendored Node build — cross-validation and golden recording
-tray/                      # build-rust.cmd (Rust packaging), build.cmd (legacy Node)
-chaos/                     # Handover and soak scripts (manual, Python/Node)
+build-rust.cmd            # Packaging + hot-swap publish (root; the release gate)
+chaos/                     # Handover and soak scripts (manual, Python)
+RUST-REWRITE-SPEC.md       # Behaviour contract (historical spec + deviations)
+ADEVIATIONS.md             # Recorded intentional deviations from the Node version
 ```
 
 ## Tech stack
@@ -96,13 +90,15 @@ chaos/                     # Handover and soak scripts (manual, Python/Node)
 - **HTTP:** `tiny_http` (server) + `ureq` (client)
 - **Storage:** `rusqlite` (bundled SQLite, WAL)
 - **JSON:** `serde_json`
-- **Test:** plain `#[test]` + the golden conformance harness
+- **Test:** plain `#[test]` — unit, integration and fixture-replay suites
 
 # Rust rewrite — engineering rules
 
-Target: port this proxy to Rust, keeping the behaviour in `conformance/golden/`
-byte-identical. These rules are the project's Rust standard; they are normative
-for every crate in the workspace. Sources are the Rust API Guidelines, the
+Target: port this proxy to Rust, keeping the behaviour recorded in
+`RUST-REWRITE-SPEC.md` + `ADEVIATIONS.md` (the Node version and its golden are
+gone; the Rust test suite is the acceptance gate). These rules are the project's
+Rust standard; they are normative for every crate in the workspace. Sources are
+the Rust API Guidelines, the
 Clippy lint reference, and the Tokio documentation, plus the conventions that
 the community's better Rust skills converge on — no skill file is vendored.
 
@@ -173,10 +169,9 @@ A proxy is both a library and a binary, so both idioms apply to different parts.
   appear in a module that returns a typed error.
 - **One `IntoResponse` impl decides every status code.** This is the single
   place HTTP semantics live, and the place to diff against the `failure/*`
-  samples in `golden/behaviour.json`.
+  samples in the fixture suite.
 - **Never let an error type leak the API key.** CC's error bodies are echoed
-  downstream; scrub `Bearer …` and control characters, as the Node version does
-  in `reliability-upstream.test.ts`.
+  downstream; scrub `Bearer …` and control characters (pinned by tests).
 - Log at the boundary only — one `error!` where the request fails, not in the
   translation layer.
 
@@ -270,13 +265,13 @@ linked in, against 88 MB for the bundled Node runtime):
 - **Plain `#[test]` everywhere** — there is no async runtime to bridge, so no
   `#[tokio::test]` is needed. Snapshot/property tooling (`insta`, `proptest`) and
   extra runners (`nextest`, `cargo-deny`) were considered and deliberately
-  dropped: `cargo test` plus the golden conformance covers everything they
-  would, at none of their setup cost.
-- **The conformance harness is the primary acceptance test.** Load
-  `conformance/golden/behaviour.json` and `translate.json` and assert against
-  them; `node conformance/record.mjs --check` drives a built binary end-to-end
-  against the same fixtures. See `conformance/README.md`.
-- **Stream invariants that golden cannot see** are pinned by hand-rolled tests
+  dropped: `cargo test` covers everything they would, at none of their setup cost.
+- **The fixture-replay suites are the primary acceptance tests.** The recorded
+  transcripts live in `crates/ccproxy/tests/fixtures/` (moved out of the retired
+  `conformance/` golden): `translate_golden.rs` replays all 52 translation
+  samples, `stream_golden.rs` replays every stream transcript against both
+  encoders.
+- **Stream invariants the fixtures cannot see** are pinned by hand-rolled tests
   (`crates/ccproxy/tests/stream_body.rs`): byte-offset stream splits, block
   lifecycle (no delta before `content_block_start`, no record after
   `message_stop`), and the splice-retry transcripts.
@@ -334,8 +329,8 @@ Per the Rust API Guidelines, applied to an application:
   again. AF_INET6 requires a `_OWNER_PID_*` table class — the `BASIC` classes
   return `ERROR_NOT_SUPPORTED`.
 - **`#![windows_subsystem = "windows"]`** at the crate root only, so no console
-  appears. stdout is then unavailable — keep the Node version's `--selfcheck`
-  behaviour of writing `selfcheck.log` next to the exe.
+  appears. stdout is then unavailable — `--selfcheck` writes `selfcheck.log`
+  next to the exe.
 - **Tray:** `tray-icon` needs an event loop running on its thread. `tao` is the
   Tauri-aligned choice; `winit` has wider adoption. Taking a full windowing
   dependency for an icon is heavy — calling the shell APIs directly through

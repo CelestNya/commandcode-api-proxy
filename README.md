@@ -13,7 +13,8 @@
   代理原样转发给上游。没有 `auth login`、没有 `auth.json`、没有首启提示。
 - **Windows 托盘 + 热更新** —— 双击即用，新版可自动接管旧版，交接期服务永不真空。
 - **Rust 重写版** —— 两个原生二进制（代理 + 托盘，合计约 3 MB），不再内嵌 88 MB 的
-  node 运行时；行为由 golden 夹具与 Node 版逐字节对齐（见 `conformance/README.md`）。
+  node 运行时；行为契约记录在 `RUST-REWRITE-SPEC.md`（含 `ADEVIATIONS.md` 的有意偏差），
+  由全量测试套件保证。
 - **用量台账持久化** —— 每次上游尝试一行，落 `%LOCALAPPDATA%\cc-proxy\billing.db`
   （SQLite，WAL），保留 90 天；中断的尝试记 NULL 用量，绝不记 0。
 
@@ -200,8 +201,8 @@ Short names work in addition to full model IDs:
 | `fugu`, `fugu-ultra` | `sakana/fugu-ultra` |
 | `laguna` | `poolside/laguna-s-2.1-free` |
 
-This table is generated from `src/models.json` (`shortAliases`) — that file is the
-single source of truth.
+This table is generated from `crates/ccproxy/src/models.json` (`shortAliases`) —
+that file is the single source of truth.
 
 Any model ID is passed through as-is — the proxy does not validate against a fixed list.
 A bare name the catalog has not seen yet is forwarded verbatim; if CC rejects it with
@@ -263,11 +264,11 @@ flowchart TD
     E2 --> Z
 ```
 
-The model → levels table lives in `src/models.json` (`reasoningEfforts`). The upstream API
-does **not** report it — `/provider/v1/models` returns only id/name/context for every
-model — so the table is mirrored from the official CLI's embedded copy and pinned by a
-snapshot: see [`conformance/README.md`](conformance/README.md#official-effortsjson--the-upstream-cannot-enumerate-so-we-vendor-a-copy)
-for why, and `tests/effort-table.test.ts` for the guard that fails when the two drift.
+The model → levels table lives in the Rust crate (`crates/ccproxy/src/models.json`,
+included via `include_str!`), mirroring the official CLI's embedded copy. The
+upstream API does **not** report it — `/provider/v1/models` returns only
+id/name/context for every model — so the table is vendored once and pinned by the
+unit tests in `crates/ccproxy/src/translate/models.rs`, which fail when the two drift.
 
 ## Windows tray & hot-swap
 
@@ -298,9 +299,8 @@ incumbent only exits on commit, and is never force-killed.
 
 **Hot-swap folder**
 
-`tray/build-rust.cmd` builds both binaries in release mode, runs the conformance
-verifier against the packaged proxy (10/10 or the publish is refused), and publishes
-to your Desktop:
+`build-rust.cmd` builds both binaries in release mode, runs the crate's own test
+suite against the package, and publishes to your Desktop:
 
 ```
 <Desktop>\CCProxy-Release\CCProxy-v<version>-rust\   this build, ready to drop in

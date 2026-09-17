@@ -1,8 +1,8 @@
 //! Replays the recorded stream transcripts against the Rust encoders, with no
 //! network involved.
 //!
-//! Inputs come from conformance/scenarios/upstream-scenarios.json (the canonical
-//! upstream event sequences); expectations come from conformance/golden/
+//! Inputs come from tests/fixtures/upstream-scenarios.json (the canonical
+//! upstream event sequences); expectations come from tests/fixtures/
 //! behaviour.json (what the Node proxy sent downstream). Between them they cover
 //! every streaming case, including the terminal states that are hardest to
 //! reach in a live test: truncated streams, in-band errors before and after
@@ -17,8 +17,8 @@ use ccproxy::sse::{AnthropicRecord, StreamFailure};
 use ccproxy::translate::{AnthropicEncoder, OpenAIEncoder};
 use serde_json::Value;
 
-const SCENARIOS: &str = include_str!("../../../conformance/scenarios/upstream-scenarios.json");
-const GOLDEN: &str = include_str!("../../../conformance/golden/behaviour.json");
+const SCENARIOS: &str = include_str!("fixtures/upstream-scenarios.json");
+const GOLDEN: &str = include_str!("fixtures/behaviour.json");
 
 const MODEL: &str = "deepseek-v4-flash";
 
