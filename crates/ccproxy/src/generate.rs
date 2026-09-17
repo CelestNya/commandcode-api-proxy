@@ -41,7 +41,7 @@ pub struct UpstreamOptions<'a> {
 /// a disconnected client is dropping the reader, which is what closes the
 /// upstream socket. While the proxy is still waiting for the response headers
 /// there is nothing to drop, so a disconnect is noticed only at the first
-/// write — see `RUST-REWRITE-SPEC.md` on downstream give-up.
+/// write — see `docs/RUST-REWRITE-SPEC.md` on downstream give-up.
 fn send_once(opts: &UpstreamOptions, body: Value) -> Result<UpstreamStream, UpstreamError> {
     upstream::send_to_cc(
         opts.api_base,

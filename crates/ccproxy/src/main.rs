@@ -45,6 +45,10 @@ fn main() {
     }
 
     let state = ccproxy::server::new_state(config.clone());
+    // The proxy is key-passthrough: the upstream key arrives per request, so
+    // there is nothing to warm the catalog with at startup. The persisted
+    // cache seeds the store instead, and model discovery stays the fallback
+    // for names the cache does not know yet.
     if config.host != "127.0.0.1" && config.host != "localhost" && config.cors_origin == "*" {
         ccproxy::log::warn(&format!(
             "CORS is wide-open (\"*\") while HOST={} is exposed beyond localhost. \

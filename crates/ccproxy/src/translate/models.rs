@@ -10,6 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 const MODELS_JSON: &str = include_str!("../models.json");
+const MODELS_JSON: &str = include_str!("../../models.json");
 
 /// What an "off" marker becomes when the model's level set is unknown.
 /// "low" is the safest concrete level: most models accept it, and CC coerces an

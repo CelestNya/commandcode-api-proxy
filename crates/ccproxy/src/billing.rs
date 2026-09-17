@@ -350,7 +350,7 @@ impl DailyStats {
 /// Aggregate the last 24 hours for the tray. `None` when the database is
 /// missing or unreadable — the tray shows "no data" rather than failing.
 ///
-/// Opened read-only: the proxy is the only writer (see DEVELOPMENT.md §4), and
+/// Opened read-only: the proxy is the only writer (see docs/DEVELOPMENT.md §4), and
 /// a reader that creates the schema would be writing. This also keeps a
 /// stats query from racing the writer thread at startup.
 #[must_use]

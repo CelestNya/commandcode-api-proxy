@@ -8,3 +8,4 @@ release/
 logs/
 tray/CCProxyTray.exe
 /target/
+__pycache__/

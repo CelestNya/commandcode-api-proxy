@@ -13,8 +13,8 @@
   代理原样转发给上游。没有 `auth login`、没有 `auth.json`、没有首启提示。
 - **Windows 托盘 + 热更新** —— 双击即用，新版可自动接管旧版，交接期服务永不真空。
 - **Rust 重写版** —— 两个原生二进制（代理 + 托盘，合计约 3 MB），不再内嵌 88 MB 的
-  node 运行时；行为契约记录在 `RUST-REWRITE-SPEC.md`（含 `ADEVIATIONS.md` 的有意偏差），
-  由全量测试套件保证。
+  node 运行时；行为契约记录在 `docs/RUST-REWRITE-SPEC.md`（含 `docs/ADEVIATIONS.md`
+  的有意偏差），由全量测试套件保证。
 - **用量台账持久化** —— 每次上游尝试一行，落 `%LOCALAPPDATA%\cc-proxy\billing.db`
   （SQLite，WAL），保留 90 天；中断的尝试记 NULL 用量，绝不记 0。
 
