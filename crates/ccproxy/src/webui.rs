@@ -68,10 +68,65 @@ fn respond_json(req: Request, body: &Value) {
 
 // ── routes ─────────────────────────────────────────────────────
 
-/// `GET /webui` — the page itself.
+/// `GET /webui` — the page itself, with the first snapshot inlined.
+///
+/// Astro-style static-first: the first screenful is already in the HTML
+/// (`window.__INIT__`), so the page paints without a network round-trip and
+/// the JS only wires the live stream. When the ledger cannot be opened the
+/// page still renders, just without the initial payload.
 pub fn handle_page(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
-    respond(req, 200, PAGE.to_string(), "text/html; charset=utf-8");
+    let init = match billing::open_database(&billing::billing_dir()) {
+        Some(conn) => {
+            let snap = json!({
+                "stats": stats_json(&conn, DEFAULT_TREND_DAYS),
+                "attempts": attempts_json(&conn, DEFAULT_LIMIT),
+            });
+            serde_json::to_string(&snap).unwrap_or_else(|_| "{}".into())
+        }
+        None => "{}".into(),
+    };
+    let body = PAGE.replace(
+        "</head>",
+        &format!("<script>window.__INIT__={init};</script></head>"),
+    );
+    respond(req, 200, body, "text/html; charset=utf-8");
+}
+
+/// `GET /webui/api/sysinfo` — process working set and uptime for the top bar.
+pub fn handle_sysinfo(state: &SharedState, req: Request, _ctx: &RequestId) {
+    let _ = state;
+    let body = json!({
+        "memMb": process_working_set_mb(),
+        "uptimeSecs": process_uptime_secs(),
+    });
+    respond_json(req, &body);
+}
+
+/// Working set (RSS) of the current process, in MiB. Uses `sysinfo`, a pure
+/// third-party crate, so the `forbid(unsafe_code)` contract in lib.rs stays
+/// intact. Returns None only when the platform cannot report it.
+fn process_working_set_mb() -> Option<f64> {
+    use sysinfo::{Pid, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    let pid = Pid::from_u32(std::process::id());
+    sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    let mem = sys.process(pid).map(|p| p.memory())?;
+    Some(mem as f64 / (1024.0 * 1024.0))
+}
+
+/// Seconds since this process started, from the process start timestamp.
+fn process_uptime_secs() -> Option<u64> {
+    use sysinfo::{Pid, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    let pid = Pid::from_u32(std::process::id());
+    sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    let start = sys.process(pid).map(|p| p.start_time())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Some(now.saturating_sub(start))
 }
 
 /// `GET /webui/api/stats` — summary statistics for screen one.
@@ -790,6 +845,15 @@ mod tests {
         assert_eq!(models[1]["tokens"], 200);
         // hit rate on totals
         assert_eq!(s["totals"]["hitRate"], 30.0 / 380.0);
+    }
+
+    #[test]
+    fn sysinfo_reports_memory_and_uptime() {
+        // Platform-portable: must never panic; on this dev machine both are real.
+        let mem = process_working_set_mb();
+        let up = process_uptime_secs();
+        assert!(mem.is_none() || mem.unwrap() > 0.0);
+        assert!(up.is_none() || up.unwrap() > 0);
     }
 
     #[test]

@@ -290,6 +290,7 @@ pub fn handle(state: &SharedState, req: Request) {
         ("GET", "/health") => handle_health(state, req, &ctx),
         ("GET", "/v1/models") => handle_models(state, req, &ctx),
         ("GET", "/webui") => crate::webui::handle_page(state, req, &ctx),
+        ("GET", "/webui/api/sysinfo") => crate::webui::handle_sysinfo(state, req, &ctx),
         ("GET", "/webui/api/stats") => crate::webui::handle_stats(state, req, &ctx),
         ("GET", "/webui/api/attempts") => crate::webui::handle_attempts(state, req, &ctx),
         ("GET", "/webui/events") => crate::webui::handle_events(state, req, &ctx),
@@ -312,6 +313,7 @@ fn handle_preflight(state: &SharedState, req: Request, path: &str) {
         "/health"
             | "/v1/models"
             | "/webui"
+            | "/webui/api/sysinfo"
             | "/webui/api/stats"
             | "/webui/api/attempts"
             | "/webui/events"
