@@ -493,25 +493,47 @@ function renderTrend(trend) {
     });
     return arr;
   }
-  /* Catmull-Rom -> cubic Bezier, keeps the curve inside the data envelope */
-  function smoothPath(ps) {
-    if (!ps.length) return "";
-    if (ps.length === 1) return "M" + ps[0][0].toFixed(1) + " " + ps[0][1].toFixed(1);
-    var d = "M" + ps[0][0].toFixed(1) + " " + ps[0][1].toFixed(1);
-    for (var i = 0; i < ps.length - 1; i++) {
-      var p0 = ps[i - 1] || ps[i], p1 = ps[i], p2 = ps[i + 1], p3 = ps[i + 2] || p2;
-      var c1x = (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1), c1y = (p1[1] + (p2[1] - p0[1]) / 6).toFixed(1);
-      var c2x = (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1), c2y = (p2[1] - (p3[1] - p1[1]) / 6).toFixed(1);
-      d += " C" + c1x + " " + c1y + "," + c2x + " " + c2y + "," + p2[0].toFixed(1) + " " + p2[1].toFixed(1);
+  /* Shape-preserving cubic (Fritsch-Carlson PCHIP): smooth but never
+     overshoots — the curve stays inside the data's min/max envelope. */
+  function pchipSlopes(xs, ys) {
+    var n = xs.length, m = new Array(n);
+    if (n === 1) { m[0] = 0; return m; }
+    var d = new Array(n - 1);
+    for (var i = 0; i < n - 1; i++) d[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for (var i = 1; i < n - 1; i++) {
+      if (d[i - 1] * d[i] <= 0) { m[i] = 0; continue; }
+      var h0 = xs[i] - xs[i - 1], h1 = xs[i + 1] - xs[i];
+      /* Fritsch-Carlson weighted harmonic mean of adjacent secants */
+      var w1 = 2 * h1 + h0, w2 = h1 + 2 * h0;
+      m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+    }
+    return m;
+  }
+  function pchipPath(ps) {
+    var n = ps.length;
+    if (!n) return "";
+    if (n === 1) return "M" + ps[0][0].toFixed(1) + " " + ps[0][1].toFixed(1);
+    if (n === 2) return "M" + ps[0][0].toFixed(1) + " " + ps[0][1].toFixed(1) + " L" + ps[1][0].toFixed(1) + " " + ps[1][1].toFixed(1);
+    var xs = [], ys = [];
+    ps.forEach(function (pt) { xs.push(pt[0]); ys.push(pt[1]); });
+    var m = pchipSlopes(xs, ys);
+    var d = "M" + xs[0].toFixed(1) + " " + ys[0].toFixed(1);
+    for (var i = 0; i < n - 1; i++) {
+      var h = xs[i + 1] - xs[i];
+      var c1x = xs[i] + h / 3, c1y = ys[i] + m[i] * h / 3;
+      var c2x = xs[i + 1] - h / 3, c2y = ys[i + 1] - m[i + 1] * h / 3;
+      d += " C" + c1x.toFixed(1) + " " + c1y.toFixed(1) + "," + c2x.toFixed(1) + " " + c2y.toFixed(1) + "," + xs[i + 1].toFixed(1) + " " + ys[i + 1].toFixed(1);
     }
     return d;
   }
   var sIn = pts("prompt", yTok), sOut = pts("completion", yTok), sCa = pts("cached", yTok);
   var sHr = pts("hitRate", yPct);
-  out += '<path d="' + smoothPath(sIn) + '" fill="none" stroke="#8AB4F8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
-         '<path d="' + smoothPath(sOut) + '" fill="none" stroke="#81C995" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
-         '<path d="' + smoothPath(sCa) + '" fill="none" stroke="#FDD663" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
-         '<path d="' + smoothPath(sHr) + '" fill="none" stroke="#C58AF9" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>';
+  out += '<path d="' + pchipPath(sIn) + '" fill="none" stroke="#8AB4F8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+         '<path d="' + pchipPath(sOut) + '" fill="none" stroke="#81C995" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+         '<path d="' + pchipPath(sCa) + '" fill="none" stroke="#FDD663" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+         '<path d="' + pchipPath(sHr) + '" fill="none" stroke="#C58AF9" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>';
   /* data points, denser for short windows (7d) and sampled for long ones */
   var dotStep = Math.max(1, Math.ceil(trend.length / 14));
   [[sIn, "#8AB4F8"], [sOut, "#81C995"], [sCa, "#FDD663"], [sHr, "#C58AF9"]].forEach(function (se) {
