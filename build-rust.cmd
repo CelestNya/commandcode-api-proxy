@@ -117,12 +117,16 @@ rem ---- verify the packaged build before publishing it ----
 rem The conformance harness is gone (the golden's job ended with the rewrite);
 rem an unverified artifact must not reach the Desktop, so run the crate's own
 rem test suite as the gate instead.
+rem Note: capture the exit code BEFORE popd — an internal command that
+succeeded resets errorlevel to 0, which would let a failing test suite
+publish anyway.
 if defined CC_SKIP_VERIFY goto :verify_skipped
 echo Verifying packaged build...
 pushd "!ROOT!"
 cargo test --locked
+set "TEST_EC=!ERRORLEVEL!"
 popd
-if errorlevel 1 goto :verify_fail
+if not "!TEST_EC!"=="0" goto :verify_fail
 goto :verify_done
 
 :verify_skipped
