@@ -29,6 +29,8 @@ const PAGE: &str = include_str!("webui.html");
 
 /// How many ledger rows the detail screen shows by default.
 const DEFAULT_LIMIT: i64 = 200;
+/// Default trend window (days) for the overview screen.
+const DEFAULT_TREND_DAYS: i64 = 14;
 const MAX_LIMIT: i64 = 1000;
 /// Poll interval of the live stream.
 const SSE_POLL_MS: u64 = 1000;
@@ -75,7 +77,8 @@ pub fn handle_page(state: &SharedState, req: Request, _ctx: &RequestId) {
 /// `GET /webui/api/stats` — summary statistics for screen one.
 pub fn handle_stats(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
-    let body = with_ledger(stats_json);
+    let days = parse_days(req.url());
+    let body = with_ledger(|conn| stats_json(conn, days));
     respond_json(req, &body);
 }
 
@@ -129,13 +132,26 @@ fn parse_limit(url: &str) -> i64 {
     DEFAULT_LIMIT
 }
 
+fn parse_days(url: &str) -> i64 {
+    let query = url.split('?').nth(1).unwrap_or("");
+    for pair in query.split('&') {
+        let mut it = pair.split('=');
+        if it.next() == Some("days") {
+            if let Ok(n) = it.next().unwrap_or("").parse::<i64>() {
+                return n.clamp(1, 90);
+            }
+        }
+    }
+    DEFAULT_TREND_DAYS
+}
+
 // ── queries ────────────────────────────────────────────────────
 
 /// Screen-one payload: lifetime totals, today's totals and a 14-day trend.
 ///
 /// Token columns are NULL when unknown (a failed attempt has no tokens) and
 /// must never be shown as 0 — every SUM is coalesced so the aggregate is real.
-fn stats_json(conn: &Connection) -> Value {
+fn stats_json(conn: &Connection, window: i64) -> Value {
     let totals = conn
         .query_row(
             "select count(*),
@@ -148,6 +164,7 @@ fn stats_json(conn: &Connection) -> Value {
                     coalesce(sum(completionTokens), 0),
                     coalesce(sum(reasoningTokens), 0),
                     coalesce(avg(durationMs), 0),
+                    coalesce(avg(ttfbMs), 0),
                     max(ts)
              from billing",
             [],
@@ -163,11 +180,12 @@ fn stats_json(conn: &Connection) -> Value {
                     row.get::<_, i64>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, f64>(9)?,
-                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, f64>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             },
         )
-        .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, None));
+        .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, None));
 
     let (
         count,
@@ -180,6 +198,7 @@ fn stats_json(conn: &Connection) -> Value {
         completion,
         reasoning,
         avg_ms,
+        avg_ttfb_ms,
         latest_ts,
     ) = totals;
 
@@ -210,17 +229,102 @@ fn stats_json(conn: &Connection) -> Value {
             .prepare(
                 "select strftime('%Y-%m-%d', ts, 'localtime') as day,
                         count(*),
+                        coalesce(sum(promptTokens), 0),
+                        coalesce(sum(cachedTokens), 0),
+                        coalesce(sum(completionTokens), 0)
+                 from billing
+                 group by day
+                 order by day desc
+                 limit ?1",
+            )
+            .ok();
+        let mut days: Vec<Value> = Vec::new();
+        if let Some(mut stmt) = stmt {
+            if let Ok(rows) = stmt.query_map([window], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            }) {
+                for row in rows.flatten() {
+                    let denom = row.2.saturating_add(row.3);
+                    let hit_rate = if denom > 0 {
+                        Some(row.3 as f64 / denom as f64)
+                    } else {
+                        None
+                    };
+                    days.push(json!({
+                        "date": row.0,
+                        "attempts": row.1,
+                        "prompt": row.2,
+                        "cached": row.3,
+                        "completion": row.4,
+                        "hitRate": hit_rate,
+                    }));
+                }
+            }
+        }
+        days.reverse(); // oldest → newest for the chart
+        days
+    };
+
+    let platforms = {
+        let stmt = conn
+            .prepare(
+                "select wire,
+                        count(*),
+                        coalesce(sum(promptTokens), 0),
+                        coalesce(sum(cachedTokens), 0),
+                        coalesce(sum(completionTokens), 0)
+                 from billing
+                 group by wire
+                 order by count(*) desc",
+            )
+            .ok();
+        let mut out: Vec<Value> = Vec::new();
+        if let Some(mut stmt) = stmt {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            }) {
+                for row in rows.flatten() {
+                    out.push(json!({
+                        "wire": row.0,
+                        "attempts": row.1,
+                        "prompt": row.2,
+                        "cached": row.3,
+                        "completion": row.4,
+                    }));
+                }
+            }
+        }
+        out
+    };
+
+    let models = {
+        let stmt = conn
+            .prepare(
+                "select model,
+                        count(*),
                         coalesce(sum(promptTokens), 0)
                             + coalesce(sum(cachedTokens), 0)
                             + coalesce(sum(completionTokens), 0)
                             + coalesce(sum(reasoningTokens), 0)
                  from billing
-                 group by day
-                 order by day desc
-                 limit 14",
+                 group by model
+                 order by count(*) desc, 3 desc
+                 limit 10",
             )
             .ok();
-        let mut days: Vec<Value> = Vec::new();
+        let mut out: Vec<Value> = Vec::new();
         if let Some(mut stmt) = stmt {
             if let Ok(rows) = stmt.query_map([], |row| {
                 Ok((
@@ -230,12 +334,18 @@ fn stats_json(conn: &Connection) -> Value {
                 ))
             }) {
                 for row in rows.flatten() {
-                    days.push(json!({ "date": row.0, "attempts": row.1, "tokens": row.2 }));
+                    out.push(json!({ "model": row.0, "attempts": row.1, "tokens": row.2 }));
                 }
             }
         }
-        days.reverse(); // oldest → newest for the chart
-        days
+        out
+    };
+
+    let hit_denom = prompt.saturating_add(cached);
+    let hit_rate = if hit_denom > 0 {
+        Some(cached as f64 / hit_denom as f64)
+    } else {
+        None
     };
 
     json!({
@@ -250,6 +360,8 @@ fn stats_json(conn: &Connection) -> Value {
             "completionTokens": completion,
             "reasoningTokens": reasoning,
             "avgDurationMs": avg_ms,
+            "avgTtfbMs": avg_ttfb_ms,
+            "hitRate": hit_rate,
             "latestTs": latest_ts,
         },
         "today": {
@@ -260,9 +372,10 @@ fn stats_json(conn: &Connection) -> Value {
             "reasoningTokens": today.4,
         },
         "trend": trend,
+        "platforms": platforms,
+        "models": models,
     })
 }
-
 /// Screen-two payload: the most recent attempts, newest first.
 fn attempts_json(conn: &Connection, limit: i64) -> Value {
     let mut stmt = match conn.prepare(
@@ -306,7 +419,7 @@ fn attempts_json(conn: &Connection, limit: i64) -> Value {
 /// A snapshot of both screens, pushed over the event stream.
 fn snapshot_json(conn: &Connection) -> Value {
     json!({
-        "stats": stats_json(conn),
+        "stats": stats_json(conn, DEFAULT_TREND_DAYS),
         "attempts": attempts_json(conn, DEFAULT_LIMIT),
     })
 }
@@ -473,7 +586,7 @@ mod tests {
                 1,
             ),
         ]);
-        let s = stats_json(&conn);
+        let s = stats_json(&conn, 14);
         let t = &s["totals"];
         assert_eq!(t["attempts"], 3);
         assert_eq!(t["ok"], 2);
@@ -502,7 +615,7 @@ mod tests {
             1,
             0,
         )]);
-        let s = stats_json(&conn);
+        let s = stats_json(&conn, 14);
         assert_eq!(s["totals"]["promptTokens"], 0); // NULLs summed to 0, not fabricated
         assert_eq!(s["totals"]["attempts"], 1);
         assert_eq!(s["totals"]["error"], 1);
@@ -608,13 +721,83 @@ mod tests {
                 0,
             ),
         ]);
-        let s = stats_json(&conn);
+        let s = stats_json(&conn, 14);
         let trend = s["trend"].as_array().unwrap();
         assert_eq!(trend.len(), 2);
         assert_eq!(trend[0]["date"], "2026-09-15");
         assert_eq!(trend[1]["date"], "2026-09-16");
         assert_eq!(trend[1]["attempts"], 1);
-        assert_eq!(trend[1]["tokens"], 60);
+        assert_eq!(trend[1]["prompt"], 50);
+        assert_eq!(trend[1]["cached"], 10);
+        assert_eq!(trend[1]["completion"], 0);
+        assert_eq!(trend[1]["hitRate"], 10.0 / 60.0);
+        assert_eq!(trend[0]["hitRate"], 0.0); // cached 0 with prompt > 0 is a real 0% hit
+                                              // platform aggregation
+        let platforms = s["platforms"].as_array().unwrap();
+        assert_eq!(platforms.len(), 1);
+        assert_eq!(platforms[0]["wire"], "openai");
+        assert_eq!(platforms[0]["attempts"], 2);
+        assert_eq!(platforms[0]["cached"], 10);
+    }
+
+    #[test]
+    fn models_aggregate_by_model() {
+        let conn = ledger(&[
+            (
+                "2026-09-15T10:00:00Z",
+                "openai",
+                "gpt-4o",
+                "ok",
+                100,
+                20,
+                300,
+                1500,
+                1,
+                0,
+            ),
+            (
+                "2026-09-15T11:00:00Z",
+                "openai",
+                "gpt-4o",
+                "ok",
+                50,
+                10,
+                100,
+                900,
+                1,
+                0,
+            ),
+            (
+                "2026-09-16T10:00:00Z",
+                "anthropic",
+                "claude-3-7",
+                "ok",
+                200,
+                0,
+                0,
+                700,
+                1,
+                0,
+            ),
+        ]);
+        let s = stats_json(&conn, 14);
+        let models = s["models"].as_array().unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0]["model"], "gpt-4o"); // more attempts first
+        assert_eq!(models[0]["attempts"], 2);
+        assert_eq!(models[0]["tokens"], 580);
+        assert_eq!(models[1]["model"], "claude-3-7");
+        assert_eq!(models[1]["tokens"], 200);
+        // hit rate on totals
+        assert_eq!(s["totals"]["hitRate"], 30.0 / 380.0);
+    }
+
+    #[test]
+    fn parse_days_clamps_to_known_bounds() {
+        assert_eq!(parse_days("/webui/api/stats"), DEFAULT_TREND_DAYS);
+        assert_eq!(parse_days("/webui/api/stats?days=30"), 30);
+        assert_eq!(parse_days("/webui/api/stats?days=999"), 90);
+        assert_eq!(parse_days("/webui/api/stats?days=abc"), DEFAULT_TREND_DAYS);
     }
 
     #[test]
