@@ -329,9 +329,10 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                 ))
             }) {
                 for row in rows.flatten() {
-                    let denom = row.2.saturating_add(row.3);
-                    let hit_rate = if denom > 0 {
-                        Some(row.3 as f64 / denom as f64)
+                    // promptTokens already counts cached tokens (AI SDK
+                    // accounting), so the hit rate is cached / prompt.
+                    let hit_rate = if row.2 > 0 {
+                        Some(row.3 as f64 / row.2 as f64)
                     } else {
                         None
                     };
@@ -419,11 +420,10 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                 ))
             }) {
                 for row in rows.flatten() {
-                    let tokens = row
-                        .2
-                        .saturating_add(row.3)
-                        .saturating_add(row.4)
-                        .saturating_add(row.5);
+                    // promptTokens includes cached tokens and completionTokens
+                    // includes reasoning tokens; adding them again would
+                    // double-count, so the total is prompt + completion.
+                    let tokens = row.2.saturating_add(row.4);
                     let cost = pricing.cost(
                         &row.0,
                         row.2,
@@ -435,6 +435,10 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         "model": row.0,
                         "attempts": row.1,
                         "tokens": tokens,
+                        "promptTokens": row.2,
+                        "cachedTokens": row.3,
+                        "completionTokens": row.4,
+                        "reasoningTokens": row.5,
                         "costUsd": cost,
                     }));
                 }
@@ -453,9 +457,9 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
         "count": pricing.models.len(),
     });
 
-    let hit_denom = prompt.saturating_add(cached);
-    let hit_rate = if hit_denom > 0 {
-        Some(cached as f64 / hit_denom as f64)
+    // promptTokens already includes cachedTokens; hit rate is cached / prompt.
+    let hit_rate = if prompt > 0 {
+        Some(cached as f64 / prompt as f64)
     } else {
         None
     };
@@ -853,7 +857,7 @@ mod tests {
         assert_eq!(trend[i16]["prompt"], 50);
         assert_eq!(trend[i16]["cached"], 10);
         assert_eq!(trend[i16]["completion"], 0);
-        assert_eq!(trend[i16]["hitRate"], 10.0 / 60.0);
+        assert_eq!(trend[i16]["hitRate"], 10.0 / 50.0); // cached / prompt (prompt includes cached)
         assert_eq!(trend[i15]["hitRate"], 0.0); // cached 0 with prompt > 0 is a real 0% hit
         assert_eq!(trend[0]["attempts"], 0);
         assert!(trend[0]["hitRate"].is_null());
@@ -910,11 +914,15 @@ mod tests {
         assert_eq!(models.len(), 2);
         assert_eq!(models[0]["model"], "gpt-4o"); // more attempts first
         assert_eq!(models[0]["attempts"], 2);
-        assert_eq!(models[0]["tokens"], 580);
+        // tokens = prompt (incl cached) + completion (incl reasoning)
+        assert_eq!(models[0]["tokens"], 550);
+        assert_eq!(models[0]["promptTokens"], 150);
+        assert_eq!(models[0]["cachedTokens"], 30);
+        assert_eq!(models[0]["completionTokens"], 400);
         assert_eq!(models[1]["model"], "claude-3-7");
         assert_eq!(models[1]["tokens"], 200);
         // hit rate on totals
-        assert_eq!(s["totals"]["hitRate"], 30.0 / 380.0);
+        assert_eq!(s["totals"]["hitRate"], 30.0 / 350.0); // cached / prompt
     }
 
     #[test]

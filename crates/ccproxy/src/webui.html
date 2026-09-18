@@ -400,20 +400,23 @@ window.addEventListener("hashchange", route);
 function renderStats(s) {
   state.stats = s;
   var t = s.totals || {}, td = s.today || {};
-  var tTok = (t.promptTokens || 0) + (t.cachedTokens || 0) + (t.completionTokens || 0) + (t.reasoningTokens || 0);
-  var tTokIn = (t.promptTokens || 0) + (t.cachedTokens || 0);
-  var dTok = (td.promptTokens || 0) + (td.cachedTokens || 0) + (td.completionTokens || 0) + (td.reasoningTokens || 0);
+  // AI SDK accounting: promptTokens already includes cached tokens and
+  // completionTokens already includes reasoning tokens, so the totals are
+  // prompt + completion; cached is shown as a subset of input.
+  var tTok = (t.promptTokens || 0) + (t.completionTokens || 0);
+  var tTokIn = t.promptTokens || 0;
+  var dTok = (td.promptTokens || 0) + (td.completionTokens || 0);
   var fail = (t.error || 0) + (t.aborted || 0) + (t.interrupted || 0);
   var succRate = t.attempts > 0 ? (t.ok / t.attempts) : null;
 
   var cards = [
     { label: "今日请求", value: fmtNum(td.attempts), sub: "总计: " + fmtNum(t.attempts), cls: "" },
-    { label: "今日 Token", value: fmtTokens(dTok), sub: "输入:" + fmtTokens(td.promptTokens) + " / 输出:" + fmtTokens(td.completionTokens) + " / 缓存:" + fmtTokens(td.cachedTokens), cls: "" },
-    { label: "累计 Token", value: fmtTokens(tTok), sub: "输入:" + fmtTokens(tTokIn) + " / 输出:" + fmtTokens(t.completionTokens) + " / 缓存:" + fmtTokens(t.cachedTokens), cls: "accent" },
+    { label: "今日 Token", value: fmtTokens(dTok), sub: "输入 " + fmtTokens(td.promptTokens) + "（含缓存 " + fmtTokens(td.cachedTokens) + "）/ 输出 " + fmtTokens(td.completionTokens), cls: "" },
+    { label: "累计 Token", value: fmtTokens(tTok), sub: "输入 " + fmtTokens(tTokIn) + "（含缓存 " + fmtTokens(t.cachedTokens) + "）/ 输出 " + fmtTokens(t.completionTokens), cls: "accent" },
     { label: "成功率", value: fmtPct(succRate), sub: "失败 " + fmtNum(fail) + " 次", cls: (succRate == null || succRate >= 0.95) ? "ok" : "warn" },
     { label: "平均响应", value: fmtDur(t.avgDurationMs), sub: "总耗时", cls: "" },
     { label: "平均首字", value: fmtDur(t.avgTtfbMs), sub: "首字节延迟", cls: "" },
-    { label: "缓存命中率", value: fmtPct(t.hitRate), sub: "缓存 / 输入+缓存", cls: "" },
+    { label: "缓存命中率", value: fmtPct(t.hitRate), sub: "缓存命中 / 输入", cls: "" },
     { label: "总尝试", value: fmtNum(t.attempts), sub: "成功 " + fmtNum(t.ok) + " / 失败 " + fmtNum(fail), cls: "accent" }
   ];
   el("metric-cards").innerHTML = cards.map(function (c) {
@@ -588,7 +591,7 @@ function renderMiniCards(s) {
     { label: "今日请求", value: fmtNum(td.attempts), sub: "累计 " + fmtNum(t.attempts) },
     { label: "成功率", value: fmtPct(succRate / 100), sub: "ok " + fmtNum(t.ok) },
     { label: "平均耗时", value: fmtDur(t.avgDurationMs), sub: "首字 " + fmtDur(t.avgTtfbMs) },
-    { label: "缓存命中", value: fmtPct(t.hitRate), sub: fmtTokens((t.promptTokens || 0) + (t.cachedTokens || 0)) + " 输入" },
+    { label: "缓存命中", value: fmtPct(t.hitRate), sub: fmtTokens(t.promptTokens || 0) + " 输入中命中 " + fmtTokens(t.cachedTokens || 0) },
     { label: "消耗金额", value: fmtUsd(t.costUsd), sub: "按官网价估算" }
   ];
   el("mini-cards").innerHTML = cards.map(function (c) {
@@ -669,9 +672,9 @@ function renderAttempts(list) {
   var body = el("attempts-body");
   body.innerHTML = pageRows.map(function (a, i) {
     var p = a.promptTokens, c = a.cachedTokens, o = a.completionTokens;
-    var denom = (p || 0) + (c || 0);
-    var hit = denom > 0 ? ((c || 0) / denom * 100) : null;
-    var hitTxt = (p == null && c == null) ? "未知" : (hit == null ? "无输入" : fmtTokens(denom) + " (" + hit.toFixed(2) + "%)");
+    // promptTokens already includes cached; hit rate is cached / prompt.
+    var hit = (p || 0) > 0 ? ((c || 0) / p * 100) : null;
+    var hitTxt = (p == null && c == null) ? "未知" : (hit == null ? "无输入" : fmtTokens(p) + " 输入, 命中 " + hit.toFixed(1) + "%");
     var pTxt = (p == null) ? "?" : fmtNum(p);
     var oTxt = (o == null) ? "?" : fmtNum(o);
     /* the ledger deliberately stores the request id, never the API key */
