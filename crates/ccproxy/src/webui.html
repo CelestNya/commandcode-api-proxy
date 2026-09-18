@@ -448,7 +448,39 @@ function renderStats(s) {
   renderMiniCards(s);
 }
 
-function renderTrend(trend) {
+/* Down-sample the daily series to a fixed point count. The curve keeps a
+   constant complexity across the 7/14/30-day windows: fewer points means
+   less curvature and fewer corners, and a wider window means each point
+   spans more days (longer time between points), which smooths the shape.
+   Buckets average their days (same unit as the 1-day windows, so the y-axis
+   stays comparable), and the hit rate is re-derived from the bucket totals. */
+function downsampleTrend(arr, n) {
+  var L = arr.length;
+  if (L <= n) return arr;
+  var out = [];
+  var step = L / n;
+  for (var i = 0; i < n; i++) {
+    var s = Math.floor(i * step);
+    var e = Math.min(L, Math.max(s + 1, Math.floor((i + 1) * step)));
+    var a = { date: arr[Math.floor((s + e) / 2)].date, attempts: 0, prompt: 0, cached: 0, completion: 0 };
+    for (var j = s; j < e; j++) {
+      a.attempts += arr[j].attempts || 0;
+      a.prompt += arr[j].prompt || 0;
+      a.cached += arr[j].cached || 0;
+      a.completion += arr[j].completion || 0;
+    }
+    var cnt = e - s;
+    a.prompt /= cnt;
+    a.cached /= cnt;
+    a.completion /= cnt;
+    a.hitRate = a.prompt > 0 ? a.cached / a.prompt : null;
+    out.push(a);
+  }
+  return out;
+}
+
+function renderTrend(raw) {
+  var trend = downsampleTrend(raw, 12);
   var LEG = [
     { key: "prompt", name: "Input", color: "#8AB4F8" },
     { key: "completion", name: "Output", color: "#81C995" },
