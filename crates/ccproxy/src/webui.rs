@@ -424,7 +424,13 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         .saturating_add(row.3)
                         .saturating_add(row.4)
                         .saturating_add(row.5);
-                    let cost = pricing.cost(&row.0, row.2, row.3, row.4);
+                    let cost = pricing.cost(
+                        &row.0,
+                        row.2,
+                        row.3,
+                        row.4,
+                        crate::pricing::utc_minute_of_day(),
+                    );
                     out.push(json!({
                         "model": row.0,
                         "attempts": row.1,

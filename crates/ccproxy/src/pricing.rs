@@ -15,6 +15,7 @@
 //! the remaining prompt at the input rate and completion at the output rate.
 //! All rates are USD per million tokens.
 
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
@@ -35,8 +36,17 @@ const USER_AGENT: &str = concat!(
     " (+https://github.com/CelestNya/commandcode-api-proxy)"
 );
 
+/// One rate triple in USD per million tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct RateSet {
+    pub input: f64,
+    pub output: f64,
+    #[serde(rename = "cacheRead")]
+    pub cache_read: f64,
+}
+
 /// USD per million tokens for one model.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelPrice {
     pub input: f64,
     pub output: f64,
@@ -44,6 +54,43 @@ pub struct ModelPrice {
     /// Most open models expose no cache-write rate; `None` means the column
     /// showed "—" on the source page.
     pub cache_write: Option<f64>,
+    /// API model id as recorded in the ledger, when the page's embedded data
+    /// carries it (e.g. "deepseek-v4.1-flash").
+    pub id: Option<String>,
+    /// Time-of-day rates; only a few models have peak/off-peak pricing.
+    pub peak: Option<RateSet>,
+    pub off_peak: Option<RateSet>,
+}
+
+impl ModelPrice {
+    /// Rates that apply at `utc_minute_of_day` (minutes since UTC midnight).
+    ///
+    /// Command Code's peak windows are 01:00–04:00 and 06:00–10:00 UTC
+    /// (7 hours a day, full price); the other 17 hours are off-peak and
+    /// roughly half price. Models without time-of-day data are flat.
+    pub fn rate_at(&self, utc_minute_of_day: u32) -> RateSet {
+        match (self.peak, self.off_peak) {
+            (Some(pk), Some(op)) => {
+                let in_peak = (60..240).contains(&utc_minute_of_day)
+                    || (360..600).contains(&utc_minute_of_day);
+                if in_peak {
+                    pk
+                } else {
+                    op
+                }
+            }
+            _ => RateSet {
+                input: self.input,
+                output: self.output,
+                cache_read: self.cache_read,
+            },
+        }
+    }
+}
+
+/// Minutes since UTC midnight — the input for peak/off-peak selection.
+pub fn utc_minute_of_day() -> u32 {
+    ((crate::now_epoch_secs() % 86_400) / 60) as u32
 }
 
 /// The full table plus provenance, persisted as `pricing.json`.
@@ -81,12 +128,19 @@ impl Pricing {
     }
 
     /// Rate lookup for an exact model id as recorded in the ledger.
-    pub fn price(&self, model: &str) -> Option<ModelPrice> {
+    pub fn price(&self, model: &str) -> Option<&ModelPrice> {
         if let Some(p) = self.models.get(model) {
-            return Some(*p);
+            return Some(p);
         }
-        // Ledger names carry a provider prefix ("deepseek/deepseek-v4.1-flash")
-        // while the page names the bare model; try the id after the slash.
+        // The embedded page data gives us the true API id; a ledger row may
+        // use it directly.
+        if let Some(p) = self
+            .models
+            .values()
+            .find(|m| m.id.as_deref() == Some(model))
+        {
+            return Some(p);
+        }
         // Normalize both sides ("DeepSeek V4.1 Flash" → "deepseek-v4.1-flash").
         // Exact equality only, so "gpt-5" can never match "gpt-5-pro".
         let want = normalize(model);
@@ -100,27 +154,41 @@ impl Pricing {
         })
     }
 
-    fn find_normalized(&self, want: &str) -> Option<ModelPrice> {
+    fn find_normalized(&self, want: &str) -> Option<&ModelPrice> {
         self.models
             .iter()
             .find(|(k, _)| normalize(k) == *want)
-            .map(|(_, v)| *v)
+            .map(|(_, v)| v)
     }
 
     /// Cost in USD of one ledger row: cache-read for the cached portion of
-    /// the prompt, input for the rest, output for completion tokens.
-    pub fn cost(&self, model: &str, prompt: i64, cached: i64, completion: i64) -> Option<f64> {
-        let p = self.price(model)?;
+    /// the prompt, input for the rest, output for completion tokens. The rate
+    /// is picked by the current UTC hour (peak vs off-peak) when the model
+    /// has time-of-day pricing.
+    pub fn cost(
+        &self,
+        model: &str,
+        prompt: i64,
+        cached: i64,
+        completion: i64,
+        utc_minute_of_day: u32,
+    ) -> Option<f64> {
+        let r = self.price(model)?.rate_at(utc_minute_of_day);
         let uncached = prompt.saturating_sub(cached).max(0) as f64;
         let cached_n = cached.max(0) as f64;
         let completion_n = completion.max(0) as f64;
-        Some((p.input * uncached + p.cache_read * cached_n + p.output * completion_n) / 1e6)
+        Some((r.input * uncached + r.cache_read * cached_n + r.output * completion_n) / 1e6)
     }
 
     fn stale(&self) -> bool {
         match self.fetched_at {
             None => true,
-            Some(ts) => crate::now_epoch_secs().saturating_sub(ts) > REFRESH_AFTER_SECS,
+            Some(ts) => {
+                let aged = crate::now_epoch_secs().saturating_sub(ts) > REFRESH_AFTER_SECS;
+                // Cache files written before the embedded-payload upgrade carry
+                // no ids at all; refresh once so peak/off-peak rates appear.
+                aged || self.models.values().all(|m| m.id.is_none())
+            }
         }
     }
 }
@@ -137,7 +205,16 @@ pub fn fetch_latest() -> Option<Pricing> {
     }
     let mut body = String::new();
     resp.into_reader().read_to_string(&mut body).ok()?;
-    let models = parse_pricing_html(&body);
+    // The page embeds a structured model list (Next.js RSC payload) with the
+    // true API ids and peak/off-peak rates; prefer it. Fall back to the HTML
+    // grid when the payload moves, and always patch cache-write from the grid
+    // (the payload does not carry it).
+    let mut models = parse_models_json(&body);
+    if models.is_empty() {
+        models = parse_pricing_html(&body);
+    } else {
+        patch_cache_write(&mut models, &body);
+    }
     if models.is_empty() {
         return None; // the page no longer parses — keep whatever we had
     }
@@ -146,6 +223,114 @@ pub fn fetch_latest() -> Option<Pricing> {
         fetched_at: Some(crate::now_epoch_secs()),
         source: PRICING_SOURCE,
     })
+}
+
+/// Parse the embedded model list out of the raw page.
+///
+/// The docs page is a Next.js app; the rendered payload contains a chunk of
+/// the form `"models":[{"id":"deepseek-v4.1-flash","name":"DeepSeek V4.1
+/// Flash","inputCost":0.15,"outputCost":0.6,"cacheReadCost":0.003,
+/// "timeOfDay":{"peak":{...},"offPeak":{...}}},…]`. Quotes are JS-escaped
+/// (`\"`) in the HTML source. This path yields the API ids and the
+/// peak/off-peak rates the table rows do not show.
+#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+fn parse_models_json(body: &str) -> BTreeMap<String, ModelPrice> {
+    let mut out = BTreeMap::new();
+    const NEEDLE: &str = r#"\"models\":["#;
+    let Some(start) = body.find(NEEDLE) else {
+        return out;
+    };
+    // The needle ends with the opening '['; walk it to the matching ']',
+    // skipping escaped quotes so a `\"` inside a string is not a bracket.
+    let mut i = start;
+    let mut depth = 0usize;
+    let bytes = body.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+            i += 2;
+            continue;
+        }
+        match bytes[i] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if depth != 0 {
+        return out;
+    }
+    // The needle ends with the opening bracket; the JSON array starts there.
+    let raw = &body[start + NEEDLE.len() - 1..=i];
+    // Undo the JS-string escaping of quotes; \uXXXX stays intact for serde.
+    let unescaped = raw.replace(r#"\""#, "\"");
+    let Ok(v) = serde_json::from_str::<Value>(&unescaped) else {
+        return out;
+    };
+    let Some(arr) = v.as_array() else {
+        return out;
+    };
+    for m in arr {
+        let (Some(name), Some(input), Some(output), Some(cache_read)) = (
+            m.get("name").and_then(|x| x.as_str()),
+            m.get("inputCost").and_then(|x| x.as_f64()),
+            m.get("outputCost").and_then(|x| x.as_f64()),
+            m.get("cacheReadCost").and_then(|x| x.as_f64()),
+        ) else {
+            continue;
+        };
+        let tod = m.get("timeOfDay");
+        let peak = tod.and_then(|x| x.get("peak")).and_then(rate_from_json);
+        let off_peak = tod.and_then(|x| x.get("offPeak")).and_then(rate_from_json);
+        out.insert(
+            name.to_string(),
+            ModelPrice {
+                input,
+                output,
+                cache_read,
+                cache_write: None,
+                id: m.get("id").and_then(|x| x.as_str()).map(String::from),
+                peak,
+                off_peak,
+            },
+        );
+    }
+    out
+}
+
+fn rate_from_json(v: &Value) -> Option<RateSet> {
+    // The embedded payload names the fields inputCost/outputCost/cacheReadCost;
+    // the cache file stores input/output/cacheRead. Accept both.
+    let num = |a: &str, b: &str, c: &str| {
+        v.get(a)
+            .and_then(|x| x.as_f64())
+            .or_else(|| v.get(b).and_then(|x| x.as_f64()))
+            .or_else(|| v.get(c).and_then(|x| x.as_f64()))
+    };
+    Some(RateSet {
+        input: num("input", "inputCost", "input")?,
+        output: num("output", "outputCost", "output")?,
+        // cache files written before the rename used the raw field name
+        cache_read: num("cacheRead", "cacheReadCost", "cache_read")?,
+    })
+}
+
+/// The embedded list omits cache-write rates; the grid carries them. Merge by
+/// display name, only filling fields the payload left empty.
+fn patch_cache_write(models: &mut BTreeMap<String, ModelPrice>, body: &str) {
+    let grid = parse_pricing_html(body);
+    for (name, g) in &grid {
+        if let Some(e) = models.get_mut(name) {
+            if e.cache_write.is_none() {
+                e.cache_write = g.cache_write;
+            }
+        }
+    }
 }
 
 /// Parse the pricing table out of the raw page.
@@ -202,6 +387,9 @@ fn parse_row(row: &str) -> Option<(String, ModelPrice)> {
             output,
             cache_read,
             cache_write,
+            id: None,
+            peak: None,
+            off_peak: None,
         },
     ))
 }
@@ -332,6 +520,9 @@ fn read_cache(dir: &Path) -> Option<Pricing> {
         let output = mv.get("output")?.as_f64()?;
         let cache_read = mv.get("cacheRead")?.as_f64()?;
         let cache_write = mv.get("cacheWrite").and_then(|x| x.as_f64());
+        let id = mv.get("id").and_then(|x| x.as_str()).map(String::from);
+        let peak = mv.get("peak").and_then(rate_from_json);
+        let off_peak = mv.get("offPeak").and_then(rate_from_json);
         map.insert(
             k.clone(),
             ModelPrice {
@@ -339,6 +530,9 @@ fn read_cache(dir: &Path) -> Option<Pricing> {
                 output,
                 cache_read,
                 cache_write,
+                id,
+                peak,
+                off_peak,
             },
         );
     }
@@ -359,6 +553,9 @@ fn write_cache(dir: &Path, p: &Pricing) {
                 "output": m.output,
                 "cacheRead": m.cache_read,
                 "cacheWrite": m.cache_write,
+                "id": m.id,
+                "peak": m.peak,
+                "offPeak": m.off_peak,
             }),
         );
     }
@@ -455,6 +652,9 @@ mod tests {
                     output: 0.42,
                     cache_read: 0.028,
                     cache_write: None,
+                    id: None,
+                    peak: None,
+                    off_peak: None,
                 },
             )]),
             fetched_at: Some(1),
@@ -488,6 +688,129 @@ mod tests {
     }
 
     #[test]
+    fn parses_embedded_json_with_ids_and_peak_off_peak() {
+        // A faithful miniature of the Next.js RSC payload chunk: quotes are
+        // JS-escaped (\\") in the HTML source.
+        let body = r#"x\"models\":[{"id":"deepseek-v4.1-flash","name":"DeepSeek V4.1 Flash","category":"opensource","provider":"DeepSeek","inputCost":0.15,"outputCost":0.6,"cacheReadCost":0.003,"timeOfDay":{"effective":"2026-08-16T16:00:00Z","peak":{"inputCost":0.3,"outputCost":1.2,"cacheReadCost":0.006},"offPeak":{"inputCost":0.15,"outputCost":0.6,"cacheReadCost":0.003}}}]"#;
+        let m = parse_models_json(body);
+        let p = m.get("DeepSeek V4.1 Flash").expect("model parsed");
+        assert_eq!(p.id.as_deref(), Some("deepseek-v4.1-flash"));
+        assert_eq!(p.input, 0.15);
+        let pk = p.peak.expect("peak present");
+        assert_eq!(pk.input, 0.3);
+        assert_eq!(pk.output, 1.2);
+        assert_eq!(p.off_peak.expect("off-peak present").input, 0.15);
+    }
+
+    #[test]
+    fn rate_at_picks_peak_and_off_peak_windows() {
+        let p = ModelPrice {
+            input: 0.15,
+            output: 0.6,
+            cache_read: 0.003,
+            cache_write: None,
+            id: Some("deepseek-v4.1-flash".to_string()),
+            peak: Some(RateSet {
+                input: 0.3,
+                output: 1.2,
+                cache_read: 0.006,
+            }),
+            off_peak: Some(RateSet {
+                input: 0.15,
+                output: 0.6,
+                cache_read: 0.003,
+            }),
+        };
+        // 02:00 UTC -> peak window 01:00-04:00
+        assert_eq!(p.rate_at(120).input, 0.3);
+        // 07:00 UTC -> peak window 06:00-10:00
+        assert_eq!(p.rate_at(420).input, 0.3);
+        // 00:00, 05:00, 10:30, 23:59 -> off-peak
+        assert_eq!(p.rate_at(0).input, 0.15);
+        assert_eq!(p.rate_at(300).input, 0.15);
+        assert_eq!(p.rate_at(630).input, 0.15);
+        assert_eq!(p.rate_at(1439).input, 0.15);
+        // flat models ignore the clock
+        let flat = ModelPrice {
+            input: 1.0,
+            output: 2.0,
+            cache_read: 0.1,
+            cache_write: None,
+            id: None,
+            peak: None,
+            off_peak: None,
+        };
+        assert_eq!(flat.rate_at(120).input, 1.0);
+        assert_eq!(flat.rate_at(0).input, 1.0);
+    }
+
+    /// Live check against the official page: the embedded payload should
+    /// yield the full model set with ids and the four DeepSeek peak/off-peak
+    /// entries, and the grid should have patched cache-write rates in.
+
+    #[test]
+    #[ignore = "network"]
+    fn live_fetch_parses_peak_off_peak_and_cache_write() {
+        let p = fetch_latest().expect("live fetch");
+        assert!(
+            p.models.len() >= 58,
+            "expected >=58 models, got {}",
+            p.models.len()
+        );
+        let flash = p
+            .price("deepseek/deepseek-v4.1-flash")
+            .expect("v4.1-flash resolves via provider prefix");
+        assert!(flash.id.is_some(), "embedded payload carries api ids");
+        let (Some(pk), Some(op)) = (flash.peak, flash.off_peak) else {
+            panic!("v4.1-flash must carry peak/off-peak");
+        };
+        assert_eq!(pk.input, 0.3);
+        assert_eq!(pk.output, 1.2);
+        assert_eq!(op.input, 0.15);
+        assert_eq!(op.output, 0.6);
+        // cache-write patched from the HTML grid where the payload has none
+        let with_cw = p
+            .models
+            .values()
+            .filter(|m| m.cache_write.is_some())
+            .count();
+        assert!(with_cw >= 10, "expected cache-write patch, got {}", with_cw);
+    }
+
+    #[test]
+    fn cost_respects_peak_hour() {
+        let p = Pricing {
+            models: BTreeMap::from([(
+                "DeepSeek V4.1 Flash".to_string(),
+                ModelPrice {
+                    input: 0.15,
+                    output: 0.6,
+                    cache_read: 0.003,
+                    cache_write: None,
+                    id: None,
+                    peak: Some(RateSet {
+                        input: 0.3,
+                        output: 1.2,
+                        cache_read: 0.006,
+                    }),
+                    off_peak: Some(RateSet {
+                        input: 0.15,
+                        output: 0.6,
+                        cache_read: 0.003,
+                    }),
+                },
+            )]),
+            fetched_at: Some(1),
+            source: PRICING_SOURCE,
+        };
+        // 1M prompt tokens, 0 cached, 0 completion.
+        let off = p.cost("DeepSeek V4.1 Flash", 1_000_000, 0, 0, 0).unwrap();
+        let peak = p.cost("DeepSeek V4.1 Flash", 1_000_000, 0, 0, 120).unwrap();
+        assert!((off - 0.15).abs() < 1e-9);
+        assert!((peak - 0.30).abs() < 1e-9);
+    }
+
+    #[test]
     fn cost_uses_cache_read_for_cached_tokens() {
         let m = parse_pricing_html(SAMPLE);
         let p = Pricing {
@@ -497,15 +820,15 @@ mod tests {
         };
         // 1000 prompt, 800 cached, 100 completion on DeepSeek V4.1 Flash:
         // 200*0.15 + 800*0.003 + 100*0.60 = 30 + 2.4 + 60 = 92.4e-6 USD.
-        let c = p.cost("DeepSeek V4.1 Flash", 1000, 800, 100).unwrap();
+        let c = p.cost("DeepSeek V4.1 Flash", 1000, 800, 100, 0).unwrap();
         assert!((c - 92.4e-6).abs() < 1e-12);
         // Unknown model → no cost.
-        assert!(p.cost("nope", 1, 0, 1).is_none());
+        assert!(p.cost("nope", 1, 0, 1, 0).is_none());
         // Cached > prompt cannot go negative: clamp keeps it sane.
-        let c2 = p.cost("DeepSeek V4.1 Flash", 100, 800, 0).unwrap();
+        let c2 = p.cost("DeepSeek V4.1 Flash", 100, 800, 0, 0).unwrap();
         assert!(c2 >= 0.0);
         // Free model costs nothing.
-        let c3 = p.cost("Laguna S 2.1", 1000, 0, 100).unwrap();
+        let c3 = p.cost("Laguna S 2.1", 1000, 0, 100, 0).unwrap();
         assert_eq!(c3, 0.0);
     }
 
@@ -533,7 +856,14 @@ mod tests {
 
     #[test]
     fn stale_depends_on_age() {
-        let m = parse_pricing_html(SAMPLE);
+        // Give the sample ids so the schema-upgrade check does not fire.
+        let m: BTreeMap<String, ModelPrice> = parse_pricing_html(SAMPLE)
+            .into_iter()
+            .map(|(k, mut v)| {
+                v.id = Some(k.clone());
+                (k, v)
+            })
+            .collect();
         let fresh = Pricing {
             models: m.clone(),
             fetched_at: Some(crate::now_epoch_secs()),
