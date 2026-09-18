@@ -161,23 +161,41 @@ impl Pricing {
             .map(|(_, v)| v)
     }
 
-    /// Cost in USD of one ledger row: cache-read for the cached portion of
-    /// the prompt, input for the rest, output for completion tokens. The rate
-    /// is picked by the current UTC hour (peak vs off-peak) when the model
-    /// has time-of-day pricing.
+    /// Cost in USD of one ledger row: cache-write for tokens that created a
+    /// cache entry, cache-read for tokens that hit it, input for the remaining
+    /// uncached prompt, output for completion tokens. The rate is picked by
+    /// the current UTC hour (peak vs off-peak) when the model has time-of-day
+    /// pricing.
     pub fn cost(
         &self,
         model: &str,
         prompt: i64,
         cached: i64,
+        cache_creation: i64,
         completion: i64,
         utc_minute_of_day: u32,
     ) -> Option<f64> {
-        let r = self.price(model)?.rate_at(utc_minute_of_day);
-        let uncached = prompt.saturating_sub(cached).max(0) as f64;
+        let m = self.price(model)?;
+        let r = m.rate_at(utc_minute_of_day);
+        // promptTokens includes both cachedTokens and cacheCreationTokens, so
+        // each is a subset of the prompt; only the rest is truly uncached.
+        let creation_n = cache_creation.max(0) as f64;
         let cached_n = cached.max(0) as f64;
+        let uncached = prompt
+            .saturating_sub(cached)
+            .saturating_sub(cache_creation)
+            .max(0) as f64;
         let completion_n = completion.max(0) as f64;
-        Some((r.input * uncached + r.cache_read * cached_n + r.output * completion_n) / 1e6)
+        // Most open models expose no cache-write rate; bill those tokens at
+        // the input rate so a missing column never understates the cost.
+        let write_rate = m.cache_write.unwrap_or(r.input);
+        Some(
+            (r.input * uncached
+                + r.cache_read * cached_n
+                + write_rate * creation_n
+                + r.output * completion_n)
+                / 1e6,
+        )
     }
 
     fn stale(&self) -> bool {
@@ -804,8 +822,12 @@ mod tests {
             source: PRICING_SOURCE,
         };
         // 1M prompt tokens, 0 cached, 0 completion.
-        let off = p.cost("DeepSeek V4.1 Flash", 1_000_000, 0, 0, 0).unwrap();
-        let peak = p.cost("DeepSeek V4.1 Flash", 1_000_000, 0, 0, 120).unwrap();
+        let off = p
+            .cost("DeepSeek V4.1 Flash", 1_000_000, 0, 0, 0, 0)
+            .unwrap();
+        let peak = p
+            .cost("DeepSeek V4.1 Flash", 1_000_000, 0, 0, 0, 120)
+            .unwrap();
         assert!((off - 0.15).abs() < 1e-9);
         assert!((peak - 0.30).abs() < 1e-9);
     }
@@ -820,16 +842,35 @@ mod tests {
         };
         // 1000 prompt, 800 cached, 100 completion on DeepSeek V4.1 Flash:
         // 200*0.15 + 800*0.003 + 100*0.60 = 30 + 2.4 + 60 = 92.4e-6 USD.
-        let c = p.cost("DeepSeek V4.1 Flash", 1000, 800, 100, 0).unwrap();
+        let c = p.cost("DeepSeek V4.1 Flash", 1000, 800, 0, 100, 0).unwrap();
         assert!((c - 92.4e-6).abs() < 1e-12);
         // Unknown model → no cost.
-        assert!(p.cost("nope", 1, 0, 1, 0).is_none());
+        assert!(p.cost("nope", 1, 0, 0, 1, 0).is_none());
         // Cached > prompt cannot go negative: clamp keeps it sane.
-        let c2 = p.cost("DeepSeek V4.1 Flash", 100, 800, 0, 0).unwrap();
+        let c2 = p.cost("DeepSeek V4.1 Flash", 100, 800, 0, 0, 0).unwrap();
         assert!(c2 >= 0.0);
         // Free model costs nothing.
-        let c3 = p.cost("Laguna S 2.1", 1000, 0, 100, 0).unwrap();
+        let c3 = p.cost("Laguna S 2.1", 1000, 0, 0, 100, 0).unwrap();
         assert_eq!(c3, 0.0);
+    }
+
+    #[test]
+    fn cost_bills_cache_creation_at_the_write_rate() {
+        // DeepSeek V4.1 Flash has no cache-write column, so creation is billed
+        // at the input rate (never understated).
+        let m = parse_pricing_html(SAMPLE);
+        let p = Pricing {
+            models: m,
+            fetched_at: None,
+            source: PRICING_SOURCE,
+        };
+        // 1000 prompt, 300 cached-read, 200 cache-creation, 100 completion:
+        // uncached = 1000-300-200 = 500 x 0.15 + 300 x 0.003 + 200 x 0.15
+        //            + 100 x 0.60 = 75 + 0.9 + 30 + 60 = 165.9e-6 USD.
+        let c = p
+            .cost("DeepSeek V4.1 Flash", 1000, 300, 200, 100, 0)
+            .unwrap();
+        assert!((c - 165.9e-6).abs() < 1e-12);
     }
 
     #[test]

@@ -400,6 +400,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         count(*),
                         coalesce(sum(promptTokens), 0),
                         coalesce(sum(cachedTokens), 0),
+                        coalesce(sum(cacheCreationTokens), 0),
                         coalesce(sum(completionTokens), 0),
                         coalesce(sum(reasoningTokens), 0)
                  from billing
@@ -417,18 +418,20 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             }) {
                 for row in rows.flatten() {
                     // promptTokens includes cached tokens and completionTokens
                     // includes reasoning tokens; adding them again would
                     // double-count, so the total is prompt + completion.
-                    let tokens = row.2.saturating_add(row.4);
+                    let tokens = row.2.saturating_add(row.5);
                     let cost = pricing.cost(
                         &row.0,
                         row.2,
                         row.3,
                         row.4,
+                        row.5,
                         crate::pricing::utc_minute_of_day(),
                     );
                     out.push(json!({
@@ -437,8 +440,9 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         "tokens": tokens,
                         "promptTokens": row.2,
                         "cachedTokens": row.3,
-                        "completionTokens": row.4,
-                        "reasoningTokens": row.5,
+                        "cacheCreationTokens": row.4,
+                        "completionTokens": row.5,
+                        "reasoningTokens": row.6,
                         "costUsd": cost,
                     }));
                 }
@@ -640,6 +644,7 @@ mod tests {
                 errorTag text,
                 promptTokens integer,
                 cachedTokens integer,
+                cacheCreationTokens integer,
                 completionTokens integer,
                 reasoningTokens integer,
                 durationMs integer,

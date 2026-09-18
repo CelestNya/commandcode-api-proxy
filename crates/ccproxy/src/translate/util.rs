@@ -45,6 +45,11 @@ pub fn extract_usage(data: &Value) -> Option<UsageData> {
         .or_else(|| nested("/inputTokenDetails/cacheReadTokens"))
         .or_else(|| nested("/promptTokensDetails/cachedTokens"))
         .or_else(|| nested("/prompt_tokens_details/cached_tokens"));
+    let cache_creation_tokens = first(&["cacheCreationTokens", "cacheCreationInputTokens"])
+        .or_else(|| nested("/inputTokenDetails/cacheCreationTokens"))
+        .or_else(|| nested("/promptTokensDetails/cacheCreationTokens"))
+        .or_else(|| nested("/prompt_tokens_details/cache_creation_tokens"))
+        .or_else(|| nested("/usage/cache_creation_input_tokens"));
     let reasoning_tokens = first(&["reasoningTokens"])
         .or_else(|| nested("/outputTokenDetails/reasoningTokens"))
         .or_else(|| nested("/completion_tokens_details/reasoning_tokens"));
@@ -54,6 +59,7 @@ pub fn extract_usage(data: &Value) -> Option<UsageData> {
         completion_tokens,
         total_tokens,
         cached_tokens,
+        cache_creation_tokens,
         reasoning_tokens,
     };
     if usage.is_empty() {
@@ -228,6 +234,39 @@ pub fn prune_dangling_tools(messages: &mut Vec<Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_usage_reads_cache_creation_from_input_token_details() {
+        let data = json!({
+            "totalUsage": {
+                "promptTokens": 100,
+                "completionTokens": 10,
+                "totalTokens": 110,
+                "inputTokenDetails": {
+                    "cacheReadTokens": 60,
+                    "cacheCreationTokens": 30
+                },
+                "outputTokenDetails": { "reasoningTokens": 2 }
+            }
+        });
+        let u = extract_usage(&data).unwrap();
+        assert_eq!(u.prompt_tokens, Some(100));
+        assert_eq!(u.cached_tokens, Some(60));
+        assert_eq!(u.cache_creation_tokens, Some(30));
+        assert_eq!(u.reasoning_tokens, Some(2));
+
+        // AI SDK flat alias is accepted too.
+        let flat = json!({
+            "usage": { "promptTokens": 5, "completionTokens": 1,
+                       "cacheCreationInputTokens": 4 }
+        });
+        let u2 = extract_usage(&flat).unwrap();
+        assert_eq!(u2.cache_creation_tokens, Some(4));
+
+        // Absence stays None (never a fabricated 0).
+        let none = json!({"usage": { "promptTokens": 1, "completionTokens": 1 }});
+        assert_eq!(extract_usage(&none).unwrap().cache_creation_tokens, None);
+    }
 
     #[test]
     fn cc_config_matches_the_golden_shape() {

@@ -100,6 +100,9 @@ pub struct AttemptRecord {
     pub error_tag: Option<String>,
     pub prompt_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
+    /// Tokens written into a cache entry (subset of prompt_tokens), billed at
+    /// the cache-write rate when the model has one.
+    pub cache_creation_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
     pub duration_ms: u64,
@@ -121,6 +124,7 @@ create table if not exists billing (
   errorTag           text,
   promptTokens       integer,
   cachedTokens       integer,
+  cacheCreationTokens integer,
   completionTokens   integer,
   reasoningTokens    integer,
   durationMs         integer,
@@ -293,9 +297,28 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "busy_timeout", 5000)?;
     conn.execute_batch(SCHEMA)?;
+    // Migrate pre-0.5.3 databases: `create table if not exists` leaves the
+    // existing table alone, so a column added to SCHEMA never appears there.
+    // Adding the column is idempotent (checked first), and old rows are NULL,
+    // which the aggregations treat as "no cache creation" — exactly right for
+    // history recorded before the field existed.
+    migrate_column(&conn, "cacheCreationTokens")?;
     // Drop rows past the retention window at startup.
     prune_old_rows(&conn);
     Ok(conn)
+}
+
+/// Add `column` to `billing` when it is missing. Idempotent and cheap: the
+/// pragma query runs once per open; the alter is a no-op once applied.
+fn migrate_column(conn: &Connection, column: &str) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("pragma table_info(billing)")?;
+    let names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    if names.iter().any(|n| n == column) {
+        return Ok(());
+    }
+    conn.execute_batch(&format!("alter table billing add column {column} integer"))
 }
 
 /// Open the ledger database in `dir`, creating the directory and schema.
@@ -306,6 +329,30 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
 pub fn open_database(dir: &Path) -> Option<Connection> {
     std::fs::create_dir_all(dir).ok()?;
     open_connection(&dir.join("billing.db")).ok()
+}
+
+#[cfg(test)]
+fn create_legacy_table(conn: &Connection) {
+    conn.execute_batch(
+        "create table billing (
+            id integer primary key autoincrement,
+            ts text not null,
+            reqId text,
+            model text not null,
+            wire text not null,
+            stream integer not null,
+            attempt integer not null,
+            status text not null,
+            errorTag text,
+            promptTokens integer,
+            cachedTokens integer,
+            completionTokens integer,
+            reasoningTokens integer,
+            durationMs integer,
+            ttfbMs integer
+        );",
+    )
+    .unwrap();
 }
 
 /// Delete rows older than [`RETENTION_DAYS`]. Best effort.
@@ -503,6 +550,7 @@ fn import_jsonl_file(conn: &Connection, path: &Path) -> usize {
             error_tag: None,
             prompt_tokens: row.prompt_tokens,
             cached_tokens: row.cached_tokens,
+            cache_creation_tokens: None,
             completion_tokens: row.completion_tokens,
             reasoning_tokens: None,
             duration_ms: 0,
@@ -581,9 +629,9 @@ fn insert_batch(conn: &Connection, batch: &[AttemptRecord]) -> rusqlite::Result<
         let mut stmt = conn.prepare_cached(
             "insert into billing
                (ts, reqId, model, wire, stream, attempt, status, errorTag,
-                promptTokens, cachedTokens, completionTokens, reasoningTokens,
-                durationMs, ttfbMs)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                promptTokens, cachedTokens, cacheCreationTokens,
+                completionTokens, reasoningTokens, durationMs, ttfbMs)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         )?;
         for record in batch {
             stmt.execute(rusqlite::params![
@@ -603,6 +651,12 @@ fn insert_batch(conn: &Connection, batch: &[AttemptRecord]) -> rusqlite::Result<
                     .flatten(),
                 record
                     .cached_tokens
+                    .map(i64::try_from)
+                    .transpose()
+                    .ok()
+                    .flatten(),
+                record
+                    .cache_creation_tokens
                     .map(i64::try_from)
                     .transpose()
                     .ok()
@@ -835,6 +889,7 @@ impl RequestLedger {
             error_tag: error_tag.map(str::to_string),
             prompt_tokens: usage.and_then(|u| u.prompt_tokens),
             cached_tokens: usage.and_then(|u| u.cached_tokens),
+            cache_creation_tokens: usage.and_then(|u| u.cache_creation_tokens),
             completion_tokens: usage.and_then(|u| u.completion_tokens),
             reasoning_tokens: usage.and_then(|u| u.reasoning_tokens),
             duration_ms: millis(elapsed),
@@ -909,6 +964,7 @@ mod tests {
             error_tag: None,
             prompt_tokens: None,
             cached_tokens: None,
+            cache_creation_tokens: None,
             completion_tokens: None,
             reasoning_tokens: None,
             duration_ms: 1,
@@ -917,6 +973,48 @@ mod tests {
     }
 
     /// A ledger in a fresh temp directory, plus that directory.
+    #[test]
+    fn opening_a_legacy_database_adds_the_cache_creation_column() {
+        let dir =
+            std::env::temp_dir().join(format!("ccproxy-billing-migrate-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("billing.db");
+        // A database created by a pre-cacheCreation build: no column at all.
+        let conn = Connection::open(&path).unwrap();
+        create_legacy_table(&conn);
+        drop(conn);
+
+        let opened = open_database(&dir).expect("open must succeed");
+        {
+            let mut stmt = opened.prepare("pragma table_info(billing)").unwrap();
+            let names: Vec<String> = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(names.iter().any(|n| n == "cacheCreationTokens"));
+        }
+        // And it is insertable/readable: a NULL reads back as NULL (unknown),
+        // not 0.
+        opened
+            .execute(
+                "insert into billing (ts, model, wire, stream, attempt, status)
+                 values ('2026-09-18T00:00:00Z', 'm', 'openai', 0, 1, 'ok')",
+                [],
+            )
+            .unwrap();
+        let v: Option<i64> = opened
+            .query_row(
+                "select cacheCreationTokens from billing where model = 'm'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v, None);
+        drop(opened);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn temp_ledger(tag: &str) -> (Ledger, PathBuf) {
         let dir =
             std::env::temp_dir().join(format!("ccproxy-billing-{tag}-{}", uuid::Uuid::new_v4()));

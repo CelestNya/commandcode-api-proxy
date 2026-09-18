@@ -155,6 +155,7 @@ mod tests {
             completion_tokens: Some(20),
             total_tokens: None,
             cached_tokens: Some(4),
+            cache_creation_tokens: Some(1),
             reasoning_tokens: Some(2),
         };
         let v = openai_usage(&usage);

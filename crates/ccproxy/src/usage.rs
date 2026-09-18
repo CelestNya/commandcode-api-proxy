@@ -23,6 +23,10 @@ pub struct UsageData {
     pub completion_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
+    /// Tokens written into a cache entry (subset of prompt_tokens). Open
+    /// models rarely report it; models with a cache-write price bill it at
+    /// the write rate rather than the input rate.
+    pub cache_creation_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
 }
 
