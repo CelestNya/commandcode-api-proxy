@@ -15,6 +15,7 @@
 //! intermediate proxies keep the connection open.
 
 use crate::billing;
+use crate::pricing::{Pricing, PRICING_SOURCE};
 use crate::server::{RequestId, SharedState};
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -207,6 +208,8 @@ fn parse_days(url: &str) -> i64 {
 /// Token columns are NULL when unknown (a failed attempt has no tokens) and
 /// must never be shown as 0 — every SUM is coalesced so the aggregate is real.
 fn stats_json(conn: &Connection, window: i64) -> Value {
+    // Crawled price table; loads from disk and refreshes when stale (24h).
+    let pricing = Pricing::load(&billing::billing_dir());
     let totals = conn
         .query_row(
             "select count(*),
@@ -385,18 +388,22 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
     };
 
     let models = {
+        // Per-model totals, plus the three token families the cost model
+        // needs (prompt, cached, completion). Costs are computed here in
+        // Rust against the crawled price table; the ledger itself never
+        // stores prices, so history re-prices automatically when the table
+        // changes.
         let stmt = conn
             .prepare(
                 "select model,
                         count(*),
-                        coalesce(sum(promptTokens), 0)
-                            + coalesce(sum(cachedTokens), 0)
-                            + coalesce(sum(completionTokens), 0)
-                            + coalesce(sum(reasoningTokens), 0)
+                        coalesce(sum(promptTokens), 0),
+                        coalesce(sum(cachedTokens), 0),
+                        coalesce(sum(completionTokens), 0),
+                        coalesce(sum(reasoningTokens), 0)
                  from billing
                  group by model
-                 order by count(*) desc, 3 desc
-                 limit 10",
+                 order by count(*) desc, 3 desc",
             )
             .ok();
         let mut out: Vec<Value> = Vec::new();
@@ -406,15 +413,39 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
                 ))
             }) {
                 for row in rows.flatten() {
-                    out.push(json!({ "model": row.0, "attempts": row.1, "tokens": row.2 }));
+                    let tokens = row
+                        .2
+                        .saturating_add(row.3)
+                        .saturating_add(row.4)
+                        .saturating_add(row.5);
+                    let cost = pricing.cost(&row.0, row.2, row.3, row.4);
+                    out.push(json!({
+                        "model": row.0,
+                        "attempts": row.1,
+                        "tokens": tokens,
+                        "costUsd": cost,
+                    }));
                 }
             }
         }
         out
     };
+
+    let cost_total: f64 = models
+        .iter()
+        .filter_map(|m| m.get("costUsd").and_then(|c| c.as_f64()))
+        .sum();
+    let pricing_meta = json!({
+        "source": PRICING_SOURCE,
+        "fetchedAt": pricing.fetched_at,
+        "count": pricing.models.len(),
+    });
 
     let hit_denom = prompt.saturating_add(cached);
     let hit_rate = if hit_denom > 0 {
@@ -438,6 +469,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
             "avgTtfbMs": avg_ttfb_ms,
             "hitRate": hit_rate,
             "latestTs": latest_ts,
+            "costUsd": cost_total,
         },
         "today": {
             "attempts": today.0,
@@ -449,6 +481,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
         "trend": trend,
         "platforms": platforms,
         "models": models,
+        "pricing": pricing_meta,
     })
 }
 /// Screen-two payload: the most recent attempts, newest first.

@@ -118,9 +118,10 @@
   .model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--outline-variant); font-size: 11.5px; letter-spacing: .2px; }
   .model-table th:first-child { text-align: left; }
   .model-table td { padding: 6px 6px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--outline-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 46%; }
-  .model-table th:nth-child(2), .model-table td:nth-child(2) { width: 24%; }
-  .model-table th:nth-child(3), .model-table td:nth-child(3) { width: 30%; }
+  .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 40%; }
+  .model-table th:nth-child(2), .model-table td:nth-child(2) { width: 18%; }
+  .model-table th:nth-child(3), .model-table td:nth-child(3) { width: 22%; }
+  .model-table th:nth-child(4), .model-table td:nth-child(4) { width: 20%; }
   .model-table td:first-child { text-align: left; }
   .model-table tr:last-child td { border-bottom: none; }
 
@@ -137,7 +138,7 @@
   .sbr-fill { height: 100%; border-radius: 999px; }
 
   /* ── detail screen ── */
-  .mini-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+  .mini-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 12px; }
   .mini-card {
     background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 14px;
     padding: 10px 14px; box-shadow: var(--shadow);
@@ -255,7 +256,7 @@
       <div class="app-name">cc-proxy<small id="ver"></small></div>
       <div class="spacer"></div>
       <span class="chip" id="chip-live"><span class="dot"></span><b id="chip-live-text">连接中</b></span>
-      <span class="chip">消耗 <b id="chip-tokens">—</b></span>
+      <span class="chip">消耗 <b id="chip-cost">—</b></span>
       <span class="chip">内存 <b id="chip-mem">—</b></span>
       <span class="chip">运行 <b id="chip-uptime">—</b></span>
     </header>
@@ -289,7 +290,7 @@
               <svg id="model-donut" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet"></svg>
               <div>
                 <table class="model-table">
-                  <thead><tr><th>模型</th><th>请求</th><th>Token</th></tr></thead>
+                  <thead><tr><th>模型</th><th>请求</th><th>Token</th><th>费用</th></tr></thead>
                   <tbody id="model-table"></tbody>
                 </table>
               </div>
@@ -355,6 +356,7 @@ var PALETTE = ["#8AB4F8", "#81C995", "#FDD663", "#F28B82", "#C58AF9", "#7FD1FF",
 
 function el(id) { return document.getElementById(id); }
 function fmtNum(n) { return (n == null) ? "—" : Number(n).toLocaleString("en-US"); }
+function fmtUsd(v) { if (v == null || isNaN(v)) return "—"; return v >= 1 ? "$" + v.toFixed(2) : "$" + v.toFixed(4); }
 function fmtTokens(n) {
   if (n == null) return "—";
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
@@ -439,7 +441,7 @@ function renderStats(s) {
   }).join("");
 
   /* top-bar consumption chip */
-  el("chip-tokens").textContent = fmtTokens(tTok) + " tok";
+  el("chip-cost").textContent = fmtUsd(t.costUsd);
   renderMiniCards(s);
 }
 
@@ -552,8 +554,9 @@ function renderModels(models) {
   models.forEach(function (m) { tot += m.tokens || 0; });
   el("model-table").innerHTML = models.map(function (m, i) {
     return '<tr><td title="' + esc(m.model) + '">' + esc(m.model) + '</td>' +
-      '<td>' + fmtNum(m.attempts) + '</td><td>' + fmtTokens(m.tokens) + '</td></tr>';
-  }).join("") || '<tr><td colspan="3" class="muted">暂无数据</td></tr>';
+      '<td>' + fmtNum(m.attempts) + '</td><td>' + fmtTokens(m.tokens) + '</td>' +
+      '<td>' + fmtUsd(m.costUsd) + '</td></tr>';
+  }).join("") || '<tr><td colspan="4" class="muted">暂无数据</td></tr>';
   var svg = el("model-donut");
   var C = 2 * Math.PI * 62;
   if (!tot) {
@@ -585,7 +588,8 @@ function renderMiniCards(s) {
     { label: "今日请求", value: fmtNum(td.attempts), sub: "累计 " + fmtNum(t.attempts) },
     { label: "成功率", value: fmtPct(succRate / 100), sub: "ok " + fmtNum(t.ok) },
     { label: "平均耗时", value: fmtDur(t.avgDurationMs), sub: "首字 " + fmtDur(t.avgTtfbMs) },
-    { label: "缓存命中", value: fmtPct(t.hitRate), sub: fmtTokens((t.promptTokens || 0) + (t.cachedTokens || 0)) + " 输入" }
+    { label: "缓存命中", value: fmtPct(t.hitRate), sub: fmtTokens((t.promptTokens || 0) + (t.cachedTokens || 0)) + " 输入" },
+    { label: "消耗金额", value: fmtUsd(t.costUsd), sub: "按官网价估算" }
   ];
   el("mini-cards").innerHTML = cards.map(function (c) {
     return '<div class="mini-card"><div class="mc-label">' + c.label + '</div>' +
