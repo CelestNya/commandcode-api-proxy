@@ -69,6 +69,12 @@ impl AnthropicRecord {
 /// tag exists to keep the real cause legible to a human.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StreamFailure {
+    /// The upstream produced nothing at all within the no-output window.
+    ///
+    /// Distinct from [`Self::IdleTimeout`]: no byte has reached the client yet,
+    /// so the attempt can be discarded and re-sent from scratch without the
+    /// client ever knowing — the retry-from-zero path.
+    NoOutput { ms: u64 },
     /// Upstream socket stayed open but stopped producing bytes.
     IdleTimeout { ms: u64 },
     /// The upstream reported failure in-band, before anything was delivered.
@@ -89,6 +95,7 @@ impl StreamFailure {
     /// The bracket prefix, per class.
     pub fn tag(&self) -> &'static str {
         match self {
+            Self::NoOutput { .. } => "[no-output]",
             Self::IdleTimeout { .. } => "[idle-timeout]",
             Self::UpstreamEvent(_) => "[upstream-error]",
             Self::ConnectionReset => "[connection-reset]",
@@ -101,6 +108,7 @@ impl StreamFailure {
     /// The message body, without the tag.
     pub fn detail(&self) -> String {
         match self {
+            Self::NoOutput { ms } => format!("CC upstream produced no output for {ms}ms"),
             Self::IdleTimeout { ms } => format!("CC upstream idle timeout: no data for {ms}ms"),
             Self::UpstreamEvent(m) | Self::BadUpstreamData(m) | Self::Other(m) => m.clone(),
             Self::ConnectionReset => "terminated".to_string(),

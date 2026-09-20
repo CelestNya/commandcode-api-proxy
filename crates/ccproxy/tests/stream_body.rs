@@ -13,6 +13,7 @@ use ccproxy::stream_body::{Dialect, SseBody};
 use ccproxy::translate::{AnthropicEncoder, OpenAIEncoder};
 use ccproxy::upstream::UpstreamStream;
 use std::io::Read;
+use std::sync::Arc;
 
 /// A reader that yields the given bytes and then reports a transport failure.
 struct Failing {
@@ -169,6 +170,127 @@ fn a_failure_before_any_output_is_re_sent_invisibly() {
     assert!(!text.contains("error"), "no error record expected: {text}");
     assert!(text.contains(r#""content":"hi""#), "{text}");
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+}
+
+/// A reader that produces nothing and always reports a read timeout, which is
+/// how a socket that never sends a byte surfaces.
+struct SilentUpstream;
+
+impl Read for SilentUpstream {
+    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "silent"))
+    }
+}
+
+/// Build a body whose reconnect closure counts its calls, so the number of
+/// re-sends can be asserted.
+fn silent_then_ok_body(
+    dialect: Dialect,
+    retries: u64,
+    calls: Arc<std::sync::atomic::AtomicU32>,
+) -> SseBody {
+    let no_output = UpstreamStream::with_tick(Box::new(SilentUpstream), 5_000, 300, 100);
+    let reconnect: Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send> =
+        Box::new(move || {
+            let n = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n == 0 {
+                // The first replacement is still silent — the retry must happen
+                // again rather than give up.
+                Ok(UpstreamStream::with_tick(
+                    Box::new(SilentUpstream),
+                    5_000,
+                    300,
+                    100,
+                ))
+            } else {
+                Ok(UpstreamStream::new(
+                    Box::new(Failing::clean(&ndjson(OPENAI_EVENTS))),
+                    800,
+                ))
+            }
+        });
+    SseBody::with_no_output_retries(
+        no_output,
+        dialect,
+        "m",
+        Some(reconnect),
+        SseBody::new_slot(),
+        None,
+        retries,
+    )
+}
+
+/// A stream that goes silent before producing anything is re-sent from scratch,
+/// and — unlike the single-splice path — more than once: the retry is bounded by
+/// the configured budget, not by a one-shot flag.
+#[test]
+fn a_silent_start_is_re_sent_from_scratch_more_than_once() {
+    let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let mut body = silent_then_ok_body(Dialect::Openai, 3, Arc::clone(&calls));
+    let text = read_all(&mut body);
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the second re-send is what makes this a budget, not a one-shot"
+    );
+    assert!(text.contains(r#""content":"hi""#), "{text}");
+    assert!(
+        !text.contains("[no-output]"),
+        "a recovered stream must not report the failure: {text}"
+    );
+}
+
+#[test]
+fn the_no_output_retry_budget_is_respected() {
+    // Budget exhausted: every attempt is silent, so after `retries` re-sends the
+    // client is told. With a budget of 1 that is exactly one re-send.
+    let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let silent = UpstreamStream::with_tick(Box::new(SilentUpstream), 5_000, 300, 100);
+    let counter = Arc::clone(&calls);
+    let reconnect: Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send> =
+        Box::new(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(UpstreamStream::with_tick(
+                Box::new(SilentUpstream),
+                5_000,
+                300,
+                100,
+            ))
+        });
+    let mut body = SseBody::with_no_output_retries(
+        silent,
+        Dialect::Openai,
+        "m",
+        Some(reconnect),
+        SseBody::new_slot(),
+        None,
+        1,
+    );
+    let text = read_all(&mut body);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(text.contains("[no-output]"), "{text}");
+}
+
+#[test]
+fn a_zero_budget_never_re_sends() {
+    // CC_NO_OUTPUT_RETRIES=0 disables the mechanism for a caller that does not
+    // want it, and must not call reconnect at all.
+    let silent = UpstreamStream::with_tick(Box::new(SilentUpstream), 5_000, 300, 100);
+    let reconnect: Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send> =
+        Box::new(|| -> Result<UpstreamStream, StreamFailure> {
+            panic!("a zero budget must not re-send")
+        });
+    let mut body = SseBody::with_no_output_retries(
+        silent,
+        Dialect::Openai,
+        "m",
+        Some(reconnect),
+        SseBody::new_slot(),
+        None,
+        0,
+    );
+    let text = read_all(&mut body);
+    assert!(text.contains("[no-output]"), "{text}");
 }
 
 #[test]

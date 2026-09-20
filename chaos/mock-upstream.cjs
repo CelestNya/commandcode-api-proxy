@@ -2,7 +2,7 @@
 // 用法：node mock-upstream.js   （监听 9888）
 // 控制接口：POST /__mode {"mode":"..."}   GET /__stats
 // 故障模式：ok refuse status_429 status_500 status_403 slow_headers
-//           hang reset_mid error_event garbage trickle
+//           silent slow_start gap hang reset_mid error_event garbage trickle
 const http = require("node:http");
 const PORT = 9888;
 
@@ -68,6 +68,43 @@ const server = http.createServer((req, res) => {
   }
 
   ndjsonHead(res);
+  if (m === "slow_start") {
+    // 真实"排队/思考"场景：拖很久才吐第一个字节，但没死。
+    // 默认 29s（恰好卡在生产 30s 窗口内），用于验证不会误伤慢上游。
+    const delay = Number(process.env.MOCK_SLOW_MS || 29000);
+    try { res.flushHeaders(); } catch {}
+    setTimeout(() => {
+      try { w(res, startEv()); w(res, deltaEv("slow-but-alive")); w(res, finishEv()); res.end(); }
+      catch (e) { console.error("[slow_start] write failed:", e.message); }
+    }, delay);
+    return;
+  }
+  if (m === "gap") {
+    // 先发一个块，沉默 3s（超过探针的 2s read 超时），再发剩下的。
+    // 探针用它判断：read 超时触发后，同一个 reader 还能不能继续读到后续字节。
+    try { res.flushHeaders(); } catch {}
+    w(res, startEv());
+    w(res, deltaEv("early"));
+    setTimeout(() => {
+      try { w(res, deltaEv("late")); w(res, finishEv()); res.end(); }
+      catch (e) { console.error("[gap] write after gap failed:", e.message); }
+    }, 3000);
+    return;
+  }
+  if (m === "silent") {
+    // 发了 200 响应头之后 body 一个字节都不写 —— "流已开但完全无字"场景。
+    // 必须 flushHeaders：Node 的 writeHead 只入缓冲，不 flush 的话连接上
+    // 连状态行都没有，测到的是"等响应头"而不是"响应头已到、正文沉默"。
+    try { res.flushHeaders(); } catch {}
+    const t0 = Date.now();
+    stats.silentOpened = (stats.silentOpened || 0) + 1;
+    res.socket.on("close", () => {
+      stats.silentClosed = (stats.silentClosed || 0) + 1;
+      stats.silentCloseMs = stats.silentCloseMs || [];
+      stats.silentCloseMs.push(Date.now() - t0);
+    });
+    return;
+  }
   if (m === "hang") {
     // 只发 start，然后永久沉默 —— 测 idle 超时
     w(res, startEv());

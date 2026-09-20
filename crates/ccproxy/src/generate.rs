@@ -27,6 +27,11 @@ pub struct UpstreamOptions<'a> {
     pub cc_version: &'a str,
     pub timeout_ms: u64,
     pub idle_timeout_ms: u64,
+    /// How long an attempt may produce no bytes at all before it is discarded
+    /// and re-sent from scratch. `0` disables the check.
+    pub no_output_timeout_ms: u64,
+    /// How many times a silent attempt may be re-sent before the client is told.
+    pub no_output_retries: u64,
     /// Records every upstream attempt this request makes, so an abandoned
     /// retry leaves a row instead of vanishing. `None` for callers that do not
     /// account usage.
@@ -50,6 +55,7 @@ fn send_once(opts: &UpstreamOptions, body: Value) -> Result<UpstreamStream, Upst
         body,
         opts.timeout_ms,
         opts.idle_timeout_ms,
+        opts.no_output_timeout_ms,
         opts.attempts.as_ref(),
     )
 }

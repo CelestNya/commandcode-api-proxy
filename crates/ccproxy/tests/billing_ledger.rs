@@ -191,6 +191,10 @@ fn start_proxy(mock: u16, dir: &Path) -> u16 {
         cors_origin: "*".into(),
         upstream_timeout_ms: 5000,
         idle_timeout_ms: 5000,
+        // The no-output retry is exercised by its own tests; leaving it off
+        // here keeps these cases on the pre-existing path.
+        no_output_timeout_ms: 0,
+        no_output_retries: 0,
         max_body_bytes: 50 * 1024 * 1024,
     };
     let ledger = ccproxy::billing::Ledger::open(dir).expect("open a test ledger");
@@ -530,6 +534,10 @@ fn start_proxy_without_ledger(mock: u16) -> u16 {
         cors_origin: "*".into(),
         upstream_timeout_ms: 5000,
         idle_timeout_ms: 5000,
+        // The no-output retry is exercised by its own tests; leaving it off
+        // here keeps these cases on the pre-existing path.
+        no_output_timeout_ms: 0,
+        no_output_retries: 0,
         max_body_bytes: 50 * 1024 * 1024,
     };
     let state = ccproxy::server::new_state(config);

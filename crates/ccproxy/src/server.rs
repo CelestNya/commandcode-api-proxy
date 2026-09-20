@@ -694,6 +694,8 @@ fn upstream_options<'a>(
         cc_version: &state.config.cc_version,
         timeout_ms: state.config.upstream_timeout_ms,
         idle_timeout_ms: state.config.idle_timeout_ms,
+        no_output_timeout_ms: state.config.no_output_timeout_ms,
+        no_output_retries: state.config.no_output_retries,
         attempts: Some(ledger),
     }
 }
@@ -831,13 +833,14 @@ fn serve_sse(sse: SseRequest<'_>) {
     });
 
     let usage_slot = SseBody::new_slot();
-    let body = SseBody::with_outcome(
+    let body = SseBody::with_no_output_retries(
         stream,
         dialect,
         model,
         Some(reconnect),
         Arc::clone(&usage_slot),
         Some(Arc::clone(&ledger) as Arc<dyn stream_body::StreamOutcomeSink>),
+        state.config.no_output_retries,
     );
 
     let mut headers = Vec::new();

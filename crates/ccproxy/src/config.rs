@@ -13,6 +13,14 @@ const DEFAULT_PORT: u64 = 8787;
 const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
 const MAX_BODY_BYTES_MAX: u64 = 50 * 1024 * 1024;
 const TIMEOUT_MAX_MS: u64 = 30 * 60 * 1000;
+/// Default window in which a request must produce its first byte upstream
+/// before the attempt is discarded and re-sent.
+const NO_OUTPUT_TIMEOUT_DEFAULT_MS: u64 = 30_000;
+/// How many times one discarded-for-silence attempt may be re-sent before the
+/// client is told. Counts re-sends, so 3 means the request goes out at most 4
+/// times in total (the original plus three).
+const NO_OUTPUT_RETRIES_DEFAULT: u64 = 3;
+const NO_OUTPUT_RETRIES_MAX: u64 = 10;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -26,6 +34,12 @@ pub struct Config {
     pub upstream_timeout_ms: u64,
     /// Max ms between consecutive chunks during streaming. 0 = disabled.
     pub idle_timeout_ms: u64,
+    /// Max ms an attempt may produce *no bytes at all* before it is discarded
+    /// and re-sent from scratch. Measured only before the first byte; once any
+    /// byte has arrived, `idle_timeout_ms` governs instead. 0 = disabled.
+    pub no_output_timeout_ms: u64,
+    /// How many times a silent attempt is re-sent before the client is told.
+    pub no_output_retries: u64,
     /// Maximum request body size in bytes (Content-Length pre-check + streaming guard).
     pub max_body_bytes: u64,
 }
@@ -57,6 +71,18 @@ pub fn load(argv: &[String], env: &EnvLookup) -> Config {
     let upstream_timeout_ms = clamp_timeout(raw_upstream, TIMEOUT_MAX_MS, 600_000);
     let idle_timeout_ms = clamp_timeout(raw_idle, TIMEOUT_MAX_MS, 120_000);
 
+    let raw_no_output = parse_positive_int(
+        env("CC_NO_OUTPUT_TIMEOUT_MS").as_deref(),
+        NO_OUTPUT_TIMEOUT_DEFAULT_MS,
+    );
+    let no_output_timeout_ms =
+        clamp_timeout(raw_no_output, TIMEOUT_MAX_MS, NO_OUTPUT_TIMEOUT_DEFAULT_MS);
+    let raw_no_output_retries = parse_non_negative_int(
+        env("CC_NO_OUTPUT_RETRIES").as_deref(),
+        NO_OUTPUT_RETRIES_DEFAULT,
+    );
+    let no_output_retries = raw_no_output_retries.min(NO_OUTPUT_RETRIES_MAX);
+
     Config {
         host,
         port: port as u16,
@@ -66,6 +92,8 @@ pub fn load(argv: &[String], env: &EnvLookup) -> Config {
         cors_origin,
         upstream_timeout_ms,
         idle_timeout_ms,
+        no_output_timeout_ms,
+        no_output_retries,
         max_body_bytes,
     }
 }
@@ -184,6 +212,22 @@ fn clamp_timeout(value: f64, max: u64, fallback: u64) -> u64 {
         return 0;
     }
     (value as u64).min(max)
+}
+
+/// A count where 0 is meaningful (retry zero times means never re-send), so it
+/// follows the same shape as `parse_positive_int` but floors at the fallback
+/// only for unparseable input, not for a literal zero.
+fn parse_non_negative_int(raw: Option<&str>, fallback: u64) -> u64 {
+    let Some(raw) = raw else {
+        return fallback;
+    };
+    if raw.is_empty() {
+        return fallback;
+    }
+    match js_number(raw) {
+        Some(n) if n.is_finite() && n >= 0.0 => n.floor() as u64,
+        _ => fallback,
+    }
 }
 
 #[cfg(test)]

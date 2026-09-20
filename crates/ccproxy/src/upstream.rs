@@ -190,6 +190,33 @@ pub struct PumpStop;
 pub struct UpstreamStream {
     reader: Box<dyn Read + Send>,
     idle_timeout_ms: u64,
+    /// How long the stream may produce no bytes at all before this is reported
+    /// as [`StreamFailure::NoOutput`]. `0` disables the check.
+    ///
+    /// Distinct from `idle_timeout_ms`: this measures the wait for the *first*
+    /// byte — the window in which a caller may discard the attempt and re-send
+    /// from scratch — while `idle_timeout_ms` measures a stall after bytes have
+    /// begun to flow.
+    no_output_timeout_ms: u64,
+    /// The socket read timeout, which is also the granularity at which silence
+    /// is accounted (see `silent_ms`).
+    tick_ms: u64,
+    /// Whether any byte has arrived. Once true the no-output deadline no longer
+    /// applies: the attempt is no longer retryable from scratch, only resumable.
+    bytes_seen: bool,
+    /// Accumulated silence, reset by every byte.
+    ///
+    /// `ureq` arms one socket read timeout for the connection's whole life and
+    /// cannot adjust it after the headers arrive, so a single socket timeout
+    /// cannot express "no byte for 30 s" and "no byte for 120 s after the first
+    /// one" at once. A timed-out read leaves the connection readable (measured:
+    /// six consecutive 2 s timeouts, connection still alive — ledger §26), so
+    /// the silence is accumulated here instead: each timed-out read blocked for
+    /// `tick_ms`, so it adds exactly that, and the thresholds are applied to
+    /// the total. Counting the tick rather than wall time keeps this
+    /// deterministic (a reader that returns `TimedOut` at once still advances)
+    /// and cannot spin.
+    silent_ms: u64,
     /// Bytes read but not yet split into a complete line.
     partial: Vec<u8>,
     /// Complete lines from the last chunk that have not been returned yet.
@@ -199,9 +226,42 @@ pub struct UpstreamStream {
 
 impl UpstreamStream {
     pub fn new(reader: Box<dyn Read + Send>, idle_timeout_ms: u64) -> Self {
+        // Without a configured no-output window the socket timeout stays what
+        // it always was, and silence is accounted in those units.
+        Self::with_no_output(reader, idle_timeout_ms, 0)
+    }
+
+    /// As [`Self::new`], with the retry-from-scratch deadline enabled.
+    ///
+    /// `tick_ms` is the socket read timeout the caller armed; it is the unit of
+    /// silence accounting. Callers that do not know it pass `idle_timeout_ms`.
+    pub fn with_no_output(
+        reader: Box<dyn Read + Send>,
+        idle_timeout_ms: u64,
+        no_output_timeout_ms: u64,
+    ) -> Self {
+        Self::with_tick(
+            reader,
+            idle_timeout_ms,
+            no_output_timeout_ms,
+            read_tick_ms(idle_timeout_ms, no_output_timeout_ms, DEFAULT_TICK_MS),
+        )
+    }
+
+    /// The full constructor, with the socket tick supplied explicitly.
+    pub fn with_tick(
+        reader: Box<dyn Read + Send>,
+        idle_timeout_ms: u64,
+        no_output_timeout_ms: u64,
+        tick_ms: u64,
+    ) -> Self {
         Self {
             reader,
             idle_timeout_ms,
+            no_output_timeout_ms,
+            tick_ms: tick_ms.max(1),
+            bytes_seen: false,
+            silent_ms: 0,
             partial: Vec::new(),
             pending: std::collections::VecDeque::new(),
             done: false,
@@ -245,6 +305,8 @@ impl UpstreamStream {
                     return Ok(None);
                 }
                 Ok(n) => {
+                    self.bytes_seen = true;
+                    self.silent_ms = 0;
                     // Bytes are accumulated before splitting: a multi-byte
                     // character straddling two reads would decode as garbage if
                     // each chunk were decoded on its own.
@@ -259,9 +321,57 @@ impl UpstreamStream {
                         self.pending.push_back(line);
                     }
                 }
-                Err(e) => return Err(classify_read_error(&e, self.idle_timeout_ms)),
+                Err(e) => {
+                    // A read timeout is a silence marker, not an end: the
+                    // connection stays readable, so the elapsed silence is
+                    // accounted and measured against the two deadlines before
+                    // deciding. A non-timeout error is a real failure.
+                    if is_timeout(&e) {
+                        self.silent_ms = self.silent_ms.saturating_add(self.tick_ms);
+                        if let Some(failure) = self.silence_deadline() {
+                            return Err(failure);
+                        }
+                        // Neither deadline applies (both disabled): fall back to
+                        // reporting the timeout immediately, which is what this
+                        // code did before the deadlines existed. Looping instead
+                        // would spin forever on a reader that never yields.
+                        if self.idle_timeout_ms == 0 && self.no_output_timeout_ms == 0 {
+                            return Err(classify_read_error(&e, self.tick_ms));
+                        }
+                        continue;
+                    }
+                    return Err(classify_read_error(&e, self.idle_timeout_ms));
+                }
             }
         }
+    }
+
+    /// Which deadline, if any, the accumulated silence has crossed.
+    ///
+    /// Silence before the first byte is [`StreamFailure::NoOutput`] — the
+    /// attempt can be discarded and re-sent from scratch — but only when the
+    /// no-output window is configured. With it disabled, pre-first-byte silence
+    /// keeps the historical [`StreamFailure::IdleTimeout`] meaning, so a proxy
+    /// that never sets the new variable behaves exactly as before.
+    ///
+    /// After the first byte the class is always `IdleTimeout`: a retry-from-zero
+    /// would duplicate an answer that has already started, so the splice path
+    /// handles it instead. That distinction is the safety property here.
+    fn silence_deadline(&self) -> Option<StreamFailure> {
+        if !self.bytes_seen && self.no_output_timeout_ms > 0 {
+            if self.silent_ms >= self.no_output_timeout_ms {
+                return Some(StreamFailure::NoOutput {
+                    ms: self.no_output_timeout_ms,
+                });
+            }
+            return None;
+        }
+        if self.idle_timeout_ms > 0 && self.silent_ms >= self.idle_timeout_ms {
+            return Some(StreamFailure::IdleTimeout {
+                ms: self.idle_timeout_ms,
+            });
+        }
+        None
     }
 
     /// Drain the stream, handing each event to `on_event`. Returns `Err` for an
@@ -278,6 +388,42 @@ impl UpstreamStream {
         }
         Ok(())
     }
+}
+
+/// Whether an I/O error is a read timeout rather than a real failure.
+///
+/// A timeout leaves the connection readable, so it is treated as a silence
+/// marker by [`UpstreamStream::next_event`] rather than as a terminal error.
+fn is_timeout(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+    )
+}
+
+/// Fallback tick when neither deadline is configured.
+const DEFAULT_TICK_MS: u64 = 2_000;
+
+/// The socket read timeout, which doubles as the silence-accounting unit.
+///
+/// Both application deadlines are checked only when a read returns, so the tick
+/// must be short enough that the check happens before a deadline is due: at
+/// most half the smallest configured deadline. Capped at 2 s so a slow check
+/// never delays the no-output decision by more than that. Zero deadlines are
+/// ignored (they disable a check rather than setting a target).
+fn read_tick_ms(idle_timeout_ms: u64, no_output_timeout_ms: u64, fallback: u64) -> u64 {
+    let mut tick = u64::MAX;
+    for deadline in [idle_timeout_ms, no_output_timeout_ms] {
+        if deadline > 0 {
+            tick = tick.min((deadline / 2).max(1));
+        }
+    }
+    if tick == u64::MAX {
+        // Neither is configured; fall back to the caller's value (the upstream
+        // timeout in practice), so behaviour is unchanged from before.
+        return fallback.max(1);
+    }
+    tick.clamp(1, DEFAULT_TICK_MS)
 }
 
 /// Classify an I/O error from the upstream body.
@@ -330,6 +476,10 @@ pub enum Attempt {
 /// a name CC rejects needs a catalog refresh, which is a different layer
 /// (`generate::send_with_model_discovery`), and doing it inside this loop would
 /// retry a rejection that a retry cannot fix.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the timeout set is the caller's config, passed through verbatim; bundling it would add a type with one call site"
+)]
 pub fn send_to_cc(
     api_base: &str,
     api_key: &str,
@@ -337,6 +487,7 @@ pub fn send_to_cc(
     mut body: Value,
     timeout_ms: u64,
     idle_timeout_ms: u64,
+    no_output_timeout_ms: u64,
     attempts: Option<&Arc<dyn AttemptSink>>,
 ) -> Result<UpstreamStream, UpstreamError> {
     // CC's endpoint is always streaming; the downstream `stream` flag is
@@ -361,6 +512,7 @@ pub fn send_to_cc(
             &body,
             timeout_ms,
             idle_timeout_ms,
+            no_output_timeout_ms,
         );
 
         match outcome {
@@ -430,6 +582,7 @@ fn attempt_send(
     body: &Value,
     timeout_ms: u64,
     idle_timeout_ms: u64,
+    no_output_timeout_ms: u64,
 ) -> Result<Attempt, UpstreamError> {
     let thread_id = body.get("threadId").and_then(Value::as_str).unwrap_or("");
     let working_dir = body
@@ -445,15 +598,18 @@ fn attempt_send(
     // applies one socket read timeout for the connection's whole life and does
     // not expose it for adjustment after the headers arrive, and the alternative
     // (an overall `.timeout()`) would cap the generation, which is forbidden.
+    //
+    // The read timeout is therefore a *tick*, not a deadline: it must be short
+    // enough that a read returns and the application-level silence check in
+    // `UpstreamStream` gets to run before the no-output deadline passes. Both
+    // configured deadlines are enforced there, by accumulating the elapsed
+    // silence across successive timed-out reads.
+    let tick_ms = read_tick_ms(idle_timeout_ms, no_output_timeout_ms, timeout_ms);
     let mut agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_millis(timeout_ms))
-        .timeout_write(Duration::from_millis(timeout_ms));
-    if idle_timeout_ms > 0 {
-        agent = agent.timeout_read(Duration::from_millis(idle_timeout_ms));
-    } else {
-        // CC_IDLE_TIMEOUT_MS=0 disables idle detection entirely.
-        agent = agent.timeout_read(Duration::from_millis(timeout_ms));
-    }
+        .timeout_write(Duration::from_millis(timeout_ms))
+        .timeout_read(Duration::from_millis(tick_ms));
+    let _ = &mut agent;
     let agent = agent.build();
 
     let mut request = agent.post(url).set("Content-Type", "application/json");
@@ -485,9 +641,11 @@ fn attempt_send(
         }
     };
 
-    Ok(Attempt::Streaming(UpstreamStream::new(
+    Ok(Attempt::Streaming(UpstreamStream::with_tick(
         Box::new(response.into_reader()),
         idle_timeout_ms,
+        no_output_timeout_ms,
+        tick_ms,
     )))
 }
 
@@ -733,5 +891,138 @@ mod tests {
         let mut stream = UpstreamStream::new(Box::new(Once), 800);
         let result = stream.pump(|_| Err(PumpStop));
         assert_eq!(result, Err(StreamFailure::ClientGone));
+    }
+
+    /// One NDJSON line per event, the shape the upstream sends.
+    fn ndjson(events: &[&str]) -> String {
+        events
+            .iter()
+            .map(|e| format!("data: {e}\n"))
+            .collect::<String>()
+    }
+
+    /// A reader that times out forever, so the silence accounting is what ends
+    /// it. Each timed-out read is one tick (the socket read timeout).
+    struct AlwaysTimesOut;
+    impl Read for AlwaysTimesOut {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "tick"))
+        }
+    }
+
+    /// Yields `data` once, then times out forever — a stall after output.
+    struct DataThenStalls {
+        data: Vec<u8>,
+        pos: usize,
+    }
+    impl Read for DataThenStalls {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.pos < self.data.len() {
+                let take = (self.data.len() - self.pos).min(buf.len());
+                buf[..take].copy_from_slice(&self.data[self.pos..self.pos + take]);
+                self.pos += take;
+                return Ok(take);
+            }
+            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "tick"))
+        }
+    }
+
+    #[test]
+    fn silence_before_the_first_byte_is_a_no_output_failure() {
+        // 3 ticks of 100 ms reach exactly the 300 ms no-output window.
+        let mut stream = UpstreamStream::with_tick(Box::new(AlwaysTimesOut), 5_000, 300, 100);
+        let result = stream.pump(|_| Ok(()));
+        assert_eq!(result, Err(StreamFailure::NoOutput { ms: 300 }));
+    }
+
+    #[test]
+    fn silence_after_the_first_byte_is_an_idle_timeout_not_a_no_output() {
+        // The distinction is the whole safety property: once a byte has been
+        // delivered the attempt must not be re-sent from scratch (that would
+        // duplicate output), only continued.
+        let data = ndjson(&[r#"{"type":"text-delta","text":"hi"}"#]);
+        let reader = DataThenStalls {
+            data: data.into_bytes(),
+            pos: 0,
+        };
+        // The stream delivers its event, then stalls. Five 100 ms ticks reach
+        // the 500 ms idle window; the 300 ms no-output window must not apply
+        // now that a byte has arrived.
+        let mut stream = UpstreamStream::with_tick(Box::new(reader), 500, 300, 100);
+        let first = stream.next_event().expect("first event").is_some();
+        assert!(first);
+        let result = stream.pump(|_| Ok(()));
+        assert_eq!(
+            result,
+            Err(StreamFailure::IdleTimeout { ms: 500 }),
+            "a stall after output must be an idle timeout"
+        );
+    }
+
+    #[test]
+    fn a_disabled_no_output_window_keeps_the_old_idle_behaviour() {
+        // A proxy that never sets CC_NO_OUTPUT_TIMEOUT_MS must behave exactly
+        // as before: silence before the first byte is an idle timeout, and the
+        // read does not spin.
+        let mut stream = UpstreamStream::with_tick(Box::new(AlwaysTimesOut), 300, 0, 100);
+        let result = stream.pump(|_| Ok(()));
+        assert_eq!(result, Err(StreamFailure::IdleTimeout { ms: 300 }));
+    }
+
+    #[test]
+    fn bytes_reset_the_accumulated_silence() {
+        // Two silent ticks, a byte, then two more: if the byte did not reset
+        // the counter the second pair would reach 400 ms and trip the 300 ms
+        // window. The event must come through instead.
+        // did not reset the counter the second pair would reach 400 ms and trip
+        // a 300 ms window. It must survive instead.
+        let data = ndjson(&[r#"{"type":"text-delta","text":"hi"}"#]);
+        struct Pattern {
+            steps: Vec<u8>,
+            i: usize,
+            data: Vec<u8>,
+            pos: usize,
+        }
+        impl Read for Pattern {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let Some(step) = self.steps.get(self.i).copied() else {
+                    return Ok(0);
+                };
+                self.i += 1;
+                if step == 0 {
+                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "tick"));
+                }
+                if self.pos >= self.data.len() {
+                    return Ok(0);
+                }
+                let take = (self.data.len() - self.pos).min(buf.len());
+                buf[..take].copy_from_slice(&self.data[self.pos..self.pos + take]);
+                self.pos += take;
+                Ok(take)
+            }
+        }
+        // 0,0 = 200 ms silent; 1 = a byte (resets); 0,0 = another 200 ms.
+        let reader = Pattern {
+            steps: vec![0, 0, 1, 0, 0],
+            i: 0,
+            data: data.into_bytes(),
+            pos: 0,
+        };
+        let mut stream = UpstreamStream::with_tick(Box::new(reader), 5_000, 300, 100);
+        // The event must come through; the silence never reaches 300 ms.
+        let event = stream.next_event().expect("no failure").expect("an event");
+        assert_eq!(event.kind, "text-delta");
+    }
+
+    #[test]
+    fn the_read_tick_is_at_most_half_the_smallest_deadline() {
+        // The application checks the deadlines only when a read returns, so the
+        // tick must be short enough to check before one is due — at most half
+        // the smallest configured window, and never more than the 2 s cap.
+        assert_eq!(read_tick_ms(5_000, 30_000, 1), 2_000); // min(2500,15000) → capped
+        assert_eq!(read_tick_ms(600, 30_000, 1), 300);
+        assert_eq!(read_tick_ms(0, 30_000, 1), 2_000); // 15000 → capped
+        assert_eq!(read_tick_ms(0, 0, 600_000), 600_000); // neither set: unchanged
+        assert_eq!(read_tick_ms(0, 1, 1), 1); // 1/2 = 0 → floored to 1
     }
 }

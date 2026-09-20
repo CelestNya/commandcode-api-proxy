@@ -81,8 +81,10 @@ Equivalent env vars (lower priority than CLI flags):
 | `PORT`                   | Port                                                                                                                    |
 | `CC_API_BASE`            | Upstream API base URL                                                                                                   |
 | `CC_CLI_VERSION`         | CLI version sent upstream                                                                                               |
-| `CC_UPSTREAM_TIMEOUT_MS` | Max ms for upstream to return response headers + first byte (default `600000` / 10 min). Bump for slow reasoning models |
+| `CC_UPSTREAM_TIMEOUT_MS` | Max ms for the upstream connection and request write (default `600000` / 10 min). Not a read deadline — see the two below |
 | `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams           |
+| `CC_NO_OUTPUT_TIMEOUT_MS`| Max ms an attempt may produce **no bytes at all** before it is discarded and re-sent from scratch (default `30000` / 30 s). Applies only before the first byte; `0` disables |
+| `CC_NO_OUTPUT_RETRIES`   | How many times a silent attempt is re-sent before the client is told (default `3`, max `10`). `0` disables              |
 | `CC_MAX_BODY_BYTES`      | Max request body size (default `10485760` / 10 MiB, capped at 50 MiB). Raise for large vision/PDF payloads.             |
 | `CC_NO_TOOLS_GUARD`      | Set to `off` to disable the injected "tools are disabled" instruction for tool-less chat requests.                       |
 | `CC_PROXY`               | Tray only: `off` forces a direct connection, `<url>` overrides the auto-detected system proxy.                          |

@@ -152,6 +152,11 @@ pub struct SseBody {
     finished: bool,
     /// One replacement attempt is allowed while nothing has been delivered.
     retried: bool,
+    /// How many times an attempt may be discarded and re-sent after producing
+    /// no output at all. Comes from `CC_NO_OUTPUT_RETRIES`; independent of the
+    /// single splice below, because the two recover from different things — a
+    /// silent start is re-sent from scratch, a mid-stream stall is continued.
+    no_output_retries_left: u32,
     /// Tracks whether the first byte has been reported yet.
     ttfb_reported: bool,
     /// Re-sends the request for a replacement attempt. `None` disables the
@@ -183,6 +188,21 @@ impl SseBody {
         usage: UsageSlot,
         outcome: Option<Arc<dyn StreamOutcomeSink>>,
     ) -> Self {
+        Self::with_no_output_retries(upstream, dialect, model, reconnect, usage, outcome, 0)
+    }
+
+    /// The full constructor. `no_output_retries` is how many times a silent
+    /// start may be discarded and re-sent (0 keeps the historical behaviour: a
+    /// single splice only).
+    pub fn with_no_output_retries(
+        upstream: UpstreamStream,
+        dialect: Dialect,
+        model: &str,
+        reconnect: Option<Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send>>,
+        usage: UsageSlot,
+        outcome: Option<Arc<dyn StreamOutcomeSink>>,
+        no_output_retries: u64,
+    ) -> Self {
         Self {
             upstream,
             dialect,
@@ -192,6 +212,7 @@ impl SseBody {
             out_pos: 0,
             finished: false,
             retried: false,
+            no_output_retries_left: u32::try_from(no_output_retries).unwrap_or(u32::MAX),
             ttfb_reported: false,
             reconnect,
             usage,
@@ -316,27 +337,48 @@ impl SseBody {
         self.encoder().last_usage()
     }
 
-    /// Re-send upstream once, splicing the replacement onto the same response.
-    /// Returns whether it was replaced.
+    /// Recover from a failed attempt by re-sending the request. Returns whether
+    /// a replacement was installed.
     ///
-    /// Safe while nothing worth keeping has been delivered. Bytes already handed
-    /// to the writer cannot be taken back, so the replacement must continue the
-    /// stream rather than restart it — hence `begin_continuation`, which drops
-    /// the replayed opening and reasoning.
+    /// Two distinct recoveries share this path, and the failure class decides
+    /// which applies:
     ///
-    /// `can_splice_retry` is the whole gate: this runs only from `produce()`,
-    /// which `read()` calls only with the buffer drained (`out_pos == 0`), so
-    /// undelivered bytes cannot leak out and delivered ones are covered by
-    /// `saw_answer`.
+    /// * [`StreamFailure::NoOutput`] — the attempt produced nothing at all, so
+    ///   it is discarded and re-sent **from scratch**, up to `no_output_retries`
+    ///   times. Nothing has been handed to the client, so the replacement must
+    ///   not skip its opening (no `begin_continuation`).
+    /// * anything else — the attempt had begun to deliver, so bytes already
+    ///   handed to the writer cannot be taken back: the replacement must
+    ///   *continue* the stream, which is why the replayed opening and reasoning
+    ///   are dropped. One such splice is allowed.
+    ///
+    /// `can_splice_retry` gates the second case only: it exists to avoid
+    /// duplicating answer text the client already read, which a from-scratch
+    /// resend with nothing delivered cannot do.
     fn try_replacement(&mut self, failure: &StreamFailure) -> Result<bool, StreamFailure> {
-        if self.retried || !self.can_splice_retry() {
+        let from_scratch = matches!(failure, StreamFailure::NoOutput { .. });
+        if from_scratch {
+            if self.no_output_retries_left == 0 {
+                return Ok(false);
+            }
+        } else if self.retried || !self.can_splice_retry() {
             return Ok(false);
         }
         let Some(reconnect) = self.reconnect.as_mut() else {
             return Ok(false);
         };
-        self.retried = true;
-        crate::log::warn("[stream] continuing after upstream failure");
+
+        if from_scratch {
+            self.no_output_retries_left = self.no_output_retries_left.saturating_sub(1);
+            crate::log::warn(&format!(
+                "[stream] no output from upstream; re-sending from scratch ({} re-sends left)",
+                self.no_output_retries_left
+            ));
+        } else {
+            self.retried = true;
+            crate::log::warn("[stream] continuing after upstream failure");
+        }
+
         let replaced = reconnect()?;
         // The attempt that just died is recorded before the replacement is read:
         // its usage is unknowable (CC reports usage only at the end), so this
@@ -345,7 +387,9 @@ impl SseBody {
             sink.interrupted(failure.tag());
         }
         self.upstream = replaced;
-        self.begin_continuation();
+        if !from_scratch {
+            self.begin_continuation();
+        }
         Ok(true)
     }
 
