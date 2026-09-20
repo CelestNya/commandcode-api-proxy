@@ -75,6 +75,18 @@ fn respond_json(req: Request, body: &Value) {
 /// (`window.__INIT__`), so the page paints without a network round-trip and
 /// the JS only wires the live stream. When the ledger cannot be opened the
 /// page still renders, just without the initial payload.
+/// Makes a JSON document safe to embed inside a `<script>` element.
+///
+/// `serde_json` escapes quotes and control characters but never `<`, `>`, or
+/// `&`, so a ledger string — a model name arrives straight from the request
+/// body — could close the script tag from within the data. `\uXXXX` escapes
+/// are invisible to `JSON.parse` and end that hazard.
+fn inline_json(json: &str) -> String {
+    json.replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+}
+
 pub fn handle_page(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
     let init = match billing::open_database(&billing::billing_dir()) {
@@ -89,7 +101,10 @@ pub fn handle_page(state: &SharedState, req: Request, _ctx: &RequestId) {
     };
     let body = PAGE.replace(
         "</head>",
-        &format!("<script>window.__INIT__={init};</script></head>"),
+        &format!(
+            "<script>window.__INIT__={};</script></head>",
+            inline_json(&init)
+        ),
     );
     respond(req, 200, body, "text/html; charset=utf-8");
 }
@@ -142,7 +157,12 @@ pub fn handle_stats(state: &SharedState, req: Request, _ctx: &RequestId) {
 pub fn handle_attempts(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
     let limit = parse_limit(req.url());
-    let body = with_ledger(|conn| attempts_json(conn, limit));
+    let body = match billing::open_database(&billing::billing_dir()) {
+        Some(conn) => attempts_json(&conn, limit),
+        // No ledger yet (proxy never ran): an empty array keeps this
+        // endpoint's array contract, which the page filters and paginates.
+        None => json!([]),
+    };
     respond_json(req, &body);
 }
 
@@ -262,13 +282,18 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
 
     let today = conn
         .query_row(
+            // The boundary must come out of strftime, not datetime(): the ts
+            // column holds T-separated ISO instants, and since 'T' > ' ' a
+            // space-formatted boundary would let every same-day row through
+            // regardless of its actual time (the old query silently dropped
+            // everything before 08:00 local in UTC+8).
             "select count(*),
                     coalesce(sum(promptTokens), 0),
                     coalesce(sum(cachedTokens), 0),
                     coalesce(sum(completionTokens), 0),
                     coalesce(sum(reasoningTokens), 0)
              from billing
-             where ts >= datetime('now', 'localtime', 'start of day')",
+             where ts >= strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', 'start of day', 'utc')",
             [],
             |row| {
                 Ok((
@@ -286,7 +311,9 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
         // The window is a strict calendar range: a recursive CTE materialises
         // every day in it and left-joins the aggregated ledger, so the chart
         // always shows `window` points and empty days read as zero tokens.
-        // A different window therefore visibly changes the curve.
+        // A different window therefore visibly changes the curve. The filter
+        // boundary is strftime for the same T-format reason as `today` above;
+        // whole-day shifts are timezone-invariant, so UTC is exact here.
         let stmt = conn
             .prepare(
                 "with recursive seq(x) as (
@@ -304,7 +331,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                                coalesce(sum(cachedTokens), 0) as cached,
                                coalesce(sum(completionTokens), 0) as completion
                         from billing
-                        where ts >= datetime('now', 'localtime', '-' || ?2 || ' days')
+                        where ts >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-' || ?2 || ' days')
                         group by day
                      )
                  select d.day,
@@ -389,14 +416,25 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
     };
 
     let models = {
-        // Per-model totals, plus the three token families the cost model
-        // needs (prompt, cached, completion). Costs are computed here in
-        // Rust against the crawled price table; the ledger itself never
-        // stores prices, so history re-prices automatically when the table
+        // Per-model totals, plus the token families the cost model needs.
+        // Costs are computed here in Rust against the crawled price table; the
+        // ledger never stores prices, so history re-prices when the table
         // changes.
+        //
+        // Rows are bucketed by their own peak/off-peak period before summing:
+        // a peak-hour request must keep its peak price however much later the
+        // page is opened. Bucketing in SQL (rather than pricing the aggregate)
+        // is what makes that exact — the aggregate cannot know which rows were
+        // peak.
         let stmt = conn
             .prepare(
                 "select model,
+                        case when (
+                            (cast(strftime('%H', ts) as integer) * 60
+                             + cast(strftime('%M', ts) as integer)) between 60 and 239
+                            or (cast(strftime('%H', ts) as integer) * 60
+                             + cast(strftime('%M', ts) as integer)) between 360 and 599
+                        ) then 1 else 0 end as peak,
                         count(*),
                         coalesce(sum(promptTokens), 0),
                         coalesce(sum(cachedTokens), 0),
@@ -404,11 +442,24 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         coalesce(sum(completionTokens), 0),
                         coalesce(sum(reasoningTokens), 0)
                  from billing
-                 group by model
-                 order by count(*) desc, 3 desc",
+                 group by model, peak
+                 order by count(*) desc, 4 desc",
             )
             .ok();
-        let mut out: Vec<Value> = Vec::new();
+        // model -> accumulated totals across its peak and off-peak buckets.
+        #[derive(Default)]
+        struct Row {
+            attempts: i64,
+            prompt: i64,
+            cached: i64,
+            cache_creation: i64,
+            completion: i64,
+            reasoning: i64,
+            cost: f64,
+            priced: bool,
+        }
+        let mut by_model: std::collections::BTreeMap<String, Row> =
+            std::collections::BTreeMap::new();
         if let Some(mut stmt) = stmt {
             if let Ok(rows) = stmt.query_map([], |row| {
                 Ok((
@@ -419,34 +470,58 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
                 ))
             }) {
                 for row in rows.flatten() {
-                    // promptTokens includes cached tokens and completionTokens
-                    // includes reasoning tokens; adding them again would
-                    // double-count, so the total is prompt + completion.
-                    let tokens = row.2.saturating_add(row.5);
-                    let cost = pricing.cost(
-                        &row.0,
-                        row.2,
-                        row.3,
-                        row.4,
-                        row.5,
-                        crate::pricing::utc_minute_of_day(),
-                    );
-                    out.push(json!({
-                        "model": row.0,
-                        "attempts": row.1,
-                        "tokens": tokens,
-                        "promptTokens": row.2,
-                        "cachedTokens": row.3,
-                        "cacheCreationTokens": row.4,
-                        "completionTokens": row.5,
-                        "reasoningTokens": row.6,
-                        "costUsd": cost,
-                    }));
+                    // Rate period of this bucket: any minute inside the peak
+                    // window selects the same rate, so a representative one is
+                    // enough; minute 0 is off-peak.
+                    let minute = if row.1 == 1 { 120 } else { 0 };
+                    let bucket_cost = pricing.cost(&row.0, row.3, row.4, row.5, row.6, minute);
+                    let entry = by_model.entry(row.0.clone()).or_insert_with(|| Row {
+                        // Priced only if the price table knows the model; each
+                        // bucket then connects with this.
+                        priced: true,
+                        ..Row::default()
+                    });
+                    entry.attempts = entry.attempts.saturating_add(row.2);
+                    entry.prompt = entry.prompt.saturating_add(row.3);
+                    entry.cached = entry.cached.saturating_add(row.4);
+                    entry.cache_creation = entry.cache_creation.saturating_add(row.5);
+                    entry.completion = entry.completion.saturating_add(row.6);
+                    entry.reasoning = entry.reasoning.saturating_add(row.7);
+                    entry.cost += bucket_cost.unwrap_or(0.0);
+                    // One unpriced bucket must not make the model look free.
+                    entry.priced = entry.priced && bucket_cost.is_some();
                 }
             }
+        }
+        // Biggest models first (attempts desc, then prompt tokens desc), the
+        // order the pre-bucketing query used.
+        let mut ordered: Vec<(String, Row)> = by_model.into_iter().collect();
+        ordered.sort_by(|a, b| {
+            b.1.attempts
+                .cmp(&a.1.attempts)
+                .then(b.1.prompt.cmp(&a.1.prompt))
+        });
+        let mut out: Vec<Value> = Vec::new();
+        for (model, r) in ordered {
+            // promptTokens includes cached tokens and completionTokens includes
+            // reasoning, so the total is prompt + completion (adding them again
+            // would double-count).
+            let tokens = r.prompt.saturating_add(r.completion);
+            out.push(json!({
+                "model": model,
+                "attempts": r.attempts,
+                "tokens": tokens,
+                "promptTokens": r.prompt,
+                "cachedTokens": r.cached,
+                "cacheCreationTokens": r.cache_creation,
+                "completionTokens": r.completion,
+                "reasoningTokens": r.reasoning,
+                "costUsd": if r.priced { Some(r.cost) } else { None },
+            }));
         }
         out
     };
@@ -502,8 +577,8 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
 fn attempts_json(conn: &Connection, limit: i64) -> Value {
     let mut stmt = match conn.prepare(
         "select ts, reqId, wire, model, stream, attempt, status, errorTag,
-                promptTokens, cachedTokens, completionTokens, reasoningTokens,
-                durationMs, ttfbMs
+                promptTokens, cachedTokens, cacheCreationTokens,
+                completionTokens, reasoningTokens, durationMs, ttfbMs
          from billing
          order by id desc
          limit ?1",
@@ -524,10 +599,11 @@ fn attempts_json(conn: &Connection, limit: i64) -> Value {
                 "errorTag": row.get::<_, Option<String>>(7)?,
                 "promptTokens": row.get::<_, Option<i64>>(8)?,
                 "cachedTokens": row.get::<_, Option<i64>>(9)?,
-                "completionTokens": row.get::<_, Option<i64>>(10)?,
-                "reasoningTokens": row.get::<_, Option<i64>>(11)?,
-                "durationMs": row.get::<_, Option<i64>>(12)?,
-                "ttfbMs": row.get::<_, Option<i64>>(13)?,
+                "cacheCreationTokens": row.get::<_, Option<i64>>(10)?,
+                "completionTokens": row.get::<_, Option<i64>>(11)?,
+                "reasoningTokens": row.get::<_, Option<i64>>(12)?,
+                "durationMs": row.get::<_, Option<i64>>(13)?,
+                "ttfbMs": row.get::<_, Option<i64>>(14)?,
             }))
         })
         .ok();
@@ -955,5 +1031,64 @@ mod tests {
         assert_eq!(parse_limit("/webui/api/attempts?limit=50"), 50);
         assert_eq!(parse_limit("/webui/api/attempts?limit=999999"), MAX_LIMIT);
         assert_eq!(parse_limit("/webui/api/attempts?limit=abc"), DEFAULT_LIMIT);
+    }
+
+    #[test]
+    fn inline_json_never_breaks_out_of_the_script_tag() {
+        let raw = r#"{"model":"</script><script>alert(1)</script>","n":"a&b<c>d"}"#;
+        let out = inline_json(raw);
+        assert!(!out.contains('<'), "raw `<` must not survive: {out}");
+        assert!(!out.contains('>'), "raw `>` must not survive: {out}");
+        // The escapes are plain JSON \uXXXX, so the document still parses and
+        // yields the original strings — the data survives, the hazard does not.
+        let parsed: Value = serde_json::from_str(&out).expect("still valid JSON");
+        assert_eq!(parsed["model"], "</script><script>alert(1)</script>");
+        assert_eq!(parsed["n"], "a&b<c>d");
+    }
+
+    #[test]
+    fn today_window_compares_timestamps_in_the_same_format() {
+        // The ledger stores T-separated UTC instants; a space-formatted
+        // boundary sorts before every same-day ts because 'T' > ' ', which
+        // used to drop the local 00:00–08:00 requests from "today". Both
+        // probes derive from the very expression the query uses, so this is
+        // exact: only the after-midnight row may count as today.
+        let conn = ledger(&[]);
+        conn.execute_batch(
+            "insert into billing (ts, reqId, model, wire, stream, attempt, status,
+                                  promptTokens, cachedTokens, completionTokens,
+                                  reasoningTokens, durationMs)
+             select strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', 'start of day', 'utc', '+1 seconds'),
+                    'req', 'gpt-4o', 'openai', 0, 1, 'ok', 10, 0, 5, null, 100;
+             insert into billing (ts, reqId, model, wire, stream, attempt, status,
+                                  promptTokens, cachedTokens, completionTokens,
+                                  reasoningTokens, durationMs)
+             select strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', 'start of day', 'utc', '-1 seconds'),
+                    'req', 'gpt-4o', 'openai', 0, 2, 'ok', 20, 0, 5, null, 100;",
+        )
+        .unwrap();
+        let s = stats_json(&conn, 14);
+        assert_eq!(
+            s["today"]["attempts"], 1,
+            "only the after-midnight row is today"
+        );
+    }
+
+    #[test]
+    fn attempts_rows_carry_cache_creation_tokens() {
+        let conn = ledger(&[]);
+        conn.execute(
+            "insert into billing (ts, reqId, model, wire, stream, attempt, status,
+                                  promptTokens, cachedTokens, cacheCreationTokens,
+                                  completionTokens, reasoningTokens, durationMs)
+             values ('2026-09-18T10:00:00.000Z', 'req', 'gemini-3.7-flash', 'openai', 1, 1,
+                     'ok', 100, 0, 100, 40, null, 900)",
+            [],
+        )
+        .unwrap();
+        let a = attempts_json(&conn, 10);
+        let row = &a.as_array().unwrap()[0];
+        assert_eq!(row["cacheCreationTokens"], 100);
+        assert_eq!(row["promptTokens"], 100);
     }
 }

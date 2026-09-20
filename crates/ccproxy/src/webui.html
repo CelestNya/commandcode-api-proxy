@@ -365,7 +365,12 @@ function fmtTokens(n) {
   return String(n);
 }
 function fmtPct(v) { return (v == null) ? "—" : (v * 100).toFixed(1) + "%"; }
-function fmtDur(ms) { return (ms == null) ? "—" : (ms / 1000).toFixed(2) + "s"; }
+function fmtDur(ms) {
+  if (ms == null) return "—";
+  if (ms >= 3600000) return (ms / 3600000).toFixed(2) + "h";
+  if (ms >= 60000) return (ms / 60000).toFixed(1) + "m";
+  return (ms / 1000).toFixed(2) + "s";
+}
 function fmtTime(ts) {
   if (!ts) return "—";
   var d = new Date(ts);
@@ -399,6 +404,15 @@ window.addEventListener("hashchange", route);
 /* ── overview ── */
 function renderStats(s) {
   state.stats = s;
+  renderSummary(s);
+  renderTrend(s.trend || []);
+}
+
+/* Everything in the overview except the trend chart. The live stream calls
+   this on every snapshot regardless of the selected trend window — lifetime
+   and today numbers are window-independent, and freezing the spend chip and
+   mini-cards for up to 30s just because the user picked 近7天 is wrong. */
+function renderSummary(s) {
   var t = s.totals || {}, td = s.today || {};
   // AI SDK accounting: promptTokens already includes cached tokens and
   // completionTokens already includes reasoning tokens, so the totals are
@@ -425,7 +439,6 @@ function renderStats(s) {
   }).join("");
 
 
-  renderTrend(s.trend || []);
   renderModels(s.models || []);
   var sts = [
     { k: "ok", v: t.ok || 0, c: "var(--ok)" },
@@ -618,10 +631,10 @@ function renderModels(models) {
 function renderMiniCards(s) {
   if (!s) return;
   var t = s.totals || {}, td = s.today || {};
-  var succRate = t.attempts > 0 ? (t.ok / t.attempts * 100) : null;
+  var succRate = t.attempts > 0 ? (t.ok / t.attempts) : null;
   var cards = [
     { label: "今日请求", value: fmtNum(td.attempts), sub: "累计 " + fmtNum(t.attempts) },
-    { label: "成功率", value: fmtPct(succRate / 100), sub: "ok " + fmtNum(t.ok) },
+    { label: "成功率", value: fmtPct(succRate), sub: "ok " + fmtNum(t.ok) },
     { label: "平均耗时", value: fmtDur(t.avgDurationMs), sub: "首字 " + fmtDur(t.avgTtfbMs) },
     { label: "缓存命中", value: fmtPct(t.hitRate), sub: fmtTokens(t.promptTokens || 0) + " 输入中命中 " + fmtTokens(t.cachedTokens || 0) },
     { label: "消耗金额", value: fmtUsd(t.costUsd), sub: "按官网价估算" }
@@ -651,7 +664,7 @@ function pageList(cur, total) {
 function renderPager(totalPages, shown) {
   var pager = el("pager");
   if (totalPages <= 1 && !shown) { pager.innerHTML = ""; return; }
-  var h = '<span class="pg-count">共 ' + shown + ' 条</span>';
+  var h = '<span class="pg-count" title="筛选范围：账本最近 ' + attemptsLimit() + ' 条">共 ' + shown + ' 条</span>';
   h += '<button class="pg-btn" id="pg-prev">上一页</button>';
   pageList(state.page, totalPages).forEach(function (p) {
     if (p === "…") { h += '<span class="pg-ellipsis">…</span>'; return; }
@@ -674,6 +687,7 @@ function renderPager(totalPages, shown) {
     state.pageSize = Number(el("pg-size").value);
     state.page = 1;
     renderAttempts(state.attempts);
+    fetchAttempts(); /* widen the fetched window to match the new page size */
   });
 }
 
@@ -696,6 +710,7 @@ function filterAttempts(list) {
 }
 
 function renderAttempts(list) {
+  if (!Array.isArray(list)) list = [];
   var rows = filterAttempts(list);
   var totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
   if (state.page > totalPages) state.page = totalPages;
@@ -707,6 +722,9 @@ function renderAttempts(list) {
     // promptTokens already includes cached; hit rate is cached / prompt.
     var hit = (p || 0) > 0 ? ((c || 0) / p * 100) : null;
     var hitTxt = (p == null && c == null) ? "未知" : (hit == null ? "无输入" : fmtTokens(p) + " 输入, 命中 " + hit.toFixed(1) + "%");
+    if (a.cacheCreationTokens != null && a.cacheCreationTokens > 0) {
+      hitTxt += " · 缓存创建 " + fmtTokens(a.cacheCreationTokens);
+    }
     var pTxt = (p == null) ? "?" : fmtNum(p);
     var oTxt = (o == null) ? "?" : fmtNum(o);
     /* the ledger deliberately stores the request id, never the API key */
@@ -718,7 +736,7 @@ function renderAttempts(list) {
               (a.durationMs != null ? "总耗时 " + fmtDur(a.durationMs) : "总耗时 —");
     var retry = (a.attempt || 1) > 1 ? '<span class="muted" title="第 ' + a.attempt + ' 次尝试">x' + a.attempt + '</span>' : "";
     return '<tr>' +
-      '<td class="muted">' + (i + 1) + '</td>' +
+      '<td class="muted">' + (start + i + 1) + '</td>' +
       '<td title="' + esc(rid) + '">' + esc(ridShow) + '</td>' +
       '<td title="' + esc(a.model) + '">' + esc(a.model) + '</td>' +
       '<td>' + wire + '</td>' +
@@ -731,6 +749,7 @@ function renderAttempts(list) {
       '</tr>';
   }).join("");
   el("attempts-empty").style.display = rows.length ? "none" : "block";
+  el("attempts-empty").textContent = state.attempts.length ? "没有符合条件的记录" : "暂无记录";
   renderPager(totalPages, rows.length);
   var models = {};
   list.forEach(function (a) { models[a.model] = true; });
@@ -743,13 +762,19 @@ function renderAttempts(list) {
 }
 
 /* ── data ── */
+/* The live snapshot ships a fixed 200-row window; the pager may ask for
+   more, so direct fetches always cover the chosen page size. */
+function attemptsLimit() { return Math.max(state.pageSize, 200); }
 function fetchStats() {
   return fetch("/webui/api/stats?days=" + state.days).then(function (r) { return r.json(); })
     .then(renderStats).catch(function () { /* next poll retries */ });
 }
 function fetchAttempts() {
-  return fetch("/webui/api/attempts?limit=200").then(function (r) { return r.json(); })
-    .then(function (list) { state.attempts = list; renderAttempts(list); })
+  return fetch("/webui/api/attempts?limit=" + attemptsLimit()).then(function (r) { return r.json(); })
+    .then(function (list) {
+      state.attempts = Array.isArray(list) ? list : [];
+      renderAttempts(state.attempts);
+    })
     .catch(function () { /* next poll retries */ });
 }
 function fetchSysinfo() {
@@ -770,9 +795,16 @@ function connect() {
   es.onmessage = function (ev) {
     var msg;
     try { msg = JSON.parse(ev.data); } catch (e) { return; }
-    if (msg.attempts) { state.attempts = msg.attempts; renderAttempts(msg.attempts); }
+    if (msg.attempts) {
+      state.attempts = Array.isArray(msg.attempts) ? msg.attempts : [];
+      renderAttempts(state.attempts);
+      /* the snapshot ships a fixed-size window; top it up when the chosen
+         page size needs more rows than it carries */
+      if (state.attempts.length < attemptsLimit()) fetchAttempts();
+    }
     if (msg.stats) {
-      if (state.days === 14) renderStats(msg.stats);
+      renderSummary(msg.stats);
+      if (state.days === 14) renderTrend(msg.stats.trend || []);
       else if (Date.now() - state.daysFetchAt > 30000) { state.daysFetchAt = Date.now(); fetchStats(); }
     }
   };
