@@ -171,6 +171,7 @@ fn main() {
                 &actions_proxy,
                 &actions_log,
                 &actions_root,
+                port,
                 actions_job.as_deref(),
             );
         },
@@ -207,6 +208,7 @@ fn dispatch(
     proxy: &process::SharedProxy,
     log: &process::LogFile,
     root: &std::path::Path,
+    port: u16,
     job: Option<&win::job::KillOnClose>,
 ) {
     match action {
@@ -221,32 +223,57 @@ fn dispatch(
             }
         }
         tray::Action::OpenLog => open_log(log),
+        tray::Action::OpenWebUi => open_webui(port, log),
         tray::Action::ToggleAutostart => settings::toggle_autostart(root, log),
         tray::Action::Quit => {}
         tray::Action::None => {}
     }
 }
 
+/// The WebUI address. The proxy binds the loopback interface, so the page is
+/// reached at `127.0.0.1` regardless of which port this instance uses.
+#[must_use]
+pub fn webui_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/webui")
+}
+
 /// Open the log in Notepad. Creating it first means an empty log still opens.
 fn open_log(log: &process::LogFile) {
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
     let path = log.path().to_path_buf();
     if !path.exists() {
         let _ = std::fs::File::create(&path);
     }
-    let file = win::Wide::new(path.as_os_str());
+    shell_open(&win::Wide::new(path.as_os_str()), log);
+}
+
+/// Open the WebUI in the default browser.
+///
+/// The menu greys this out while the proxy is stopped, but the proxy can also
+/// die between the menu being built and the choice being taken; a failed launch
+/// is logged rather than swallowed so that case is diagnosable.
+fn open_webui(port: u16, log: &process::LogFile) {
+    shell_open(&win::Wide::new(webui_url(port)), log);
+}
+
+/// Hand a string to the shell's `open` verb.
+fn shell_open(target: &win::Wide, log: &process::LogFile) {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
     let verb = win::Wide::new("open");
     // SAFETY: all three strings outlive the call; no owner window is needed.
-    unsafe {
+    let rc = unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
         ShellExecuteW(
             std::ptr::null_mut(),
             verb.as_ptr(),
-            file.as_ptr(),
+            target.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
             SW_SHOWNORMAL,
-        );
+        )
+    };
+    // ShellExecuteW returns a value > 32 on success; <= 32 is an error code.
+    if rc as isize <= 32 {
+        log.append(&format!("[tray] 无法打开：code={}", rc as isize));
     }
 }
 
@@ -381,4 +408,17 @@ fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
 fn fatal(log: &process::LogFile, message: &str) {
     log.append(&format!("[tray] {message}"));
     win::message_box(message, false);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webui_url_targets_the_instance_port_on_loopback() {
+        // The page is served by the proxy on the instance's own port, so a
+        // namespaced instance (8890) must not be sent to the production 8787.
+        assert_eq!(webui_url(8787), "http://127.0.0.1:8787/webui");
+        assert_eq!(webui_url(8890), "http://127.0.0.1:8890/webui");
+    }
 }

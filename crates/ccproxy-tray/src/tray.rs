@@ -30,6 +30,7 @@ pub mod cmd {
     pub const OPEN_LOG: usize = 3;
     pub const AUTOSTART: usize = 4;
     pub const QUIT: usize = 5;
+    pub const OPEN_WEBUI: usize = 6;
     /// A read-only line, drawn greyed and never chosen.
     pub const LABEL: usize = 0;
     /// A separator.
@@ -42,6 +43,7 @@ pub enum Action {
     Start,
     Stop,
     OpenLog,
+    OpenWebUi,
     ToggleAutostart,
     Quit,
     None,
@@ -52,6 +54,7 @@ fn action_from_id(id: usize) -> Action {
         cmd::START => Action::Start,
         cmd::STOP => Action::Stop,
         cmd::OPEN_LOG => Action::OpenLog,
+        cmd::OPEN_WEBUI => Action::OpenWebUi,
         cmd::AUTOSTART => Action::ToggleAutostart,
         cmd::QUIT => Action::Quit,
         _ => Action::None,
@@ -168,6 +171,7 @@ impl UiState {
             Action::Start => cmd::START,
             Action::Stop => cmd::STOP,
             Action::OpenLog => cmd::OPEN_LOG,
+            Action::OpenWebUi => cmd::OPEN_WEBUI,
             Action::ToggleAutostart => cmd::AUTOSTART,
             Action::Quit => cmd::QUIT,
             Action::None => 0,
@@ -192,27 +196,12 @@ impl UiState {
     /// Build and run the context menu; record the choice.
     fn show_menu(&self, hwnd: HWND) {
         let running = (self.running)();
-        let (headline, detail) = self.cache_lines();
-        let autostart_line = if (self.autostart)() {
-            "开机自启 ✓"
-        } else {
-            "开机自启"
-        };
-        let version_line = format!("版本：{}", self.version);
-        let entries: Vec<(usize, &str, bool)> = vec![
-            (cmd::LABEL, &headline, false),
-            (cmd::LABEL, &detail, false),
-            (cmd::SEPARATOR, "", false),
-            (cmd::START, "启动代理", !running),
-            (cmd::STOP, "停止代理", running),
-            (cmd::SEPARATOR, "", false),
-            (cmd::OPEN_LOG, "打开日志", true),
-            (cmd::AUTOSTART, autostart_line, true),
-            (cmd::SEPARATOR, "", false),
-            (cmd::QUIT, "退出（同时停止代理）", true),
-            (cmd::SEPARATOR, "", false),
-            (cmd::LABEL, &version_line, false),
-        ];
+        let entries = menu_entries(
+            running,
+            (self.autostart)(),
+            &self.cache_lines(),
+            &self.version,
+        );
 
         // SAFETY: the menu handle is checked before use and destroyed on every
         // path out of this block.
@@ -326,6 +315,43 @@ unsafe fn state_of(hwnd: HWND) -> Option<&'static UiState> {
     // SAFETY: installed by `UiState::attach` from a reference that outlives
     // the window; cleared by `detach` before destruction.
     Some(unsafe { &*(raw as *const UiState) })
+}
+
+/// The context menu, top to bottom, as `(command id, label, enabled)`.
+///
+/// Split out of `show_menu` so the composition — which entries appear, and
+/// which are greyed — is testable without a live shell: the Win32 calls that
+/// consume it cannot run in a test.
+#[must_use]
+pub fn menu_entries(
+    running: bool,
+    autostart: bool,
+    cache: &(String, String),
+    version: &str,
+) -> Vec<(usize, String, bool)> {
+    let autostart_line = if autostart {
+        "开机自启 ✓".to_string()
+    } else {
+        "开机自启".to_string()
+    };
+    vec![
+        (cmd::LABEL, cache.0.clone(), false),
+        (cmd::LABEL, cache.1.clone(), false),
+        (cmd::SEPARATOR, String::new(), false),
+        (cmd::START, "启动代理".into(), !running),
+        (cmd::STOP, "停止代理".into(), running),
+        (cmd::SEPARATOR, String::new(), false),
+        // The page is served by the proxy itself, so there is nothing to open
+        // while it is stopped — greyed rather than hidden, so the option stays
+        // discoverable.
+        (cmd::OPEN_WEBUI, "打开 WebUI".into(), running),
+        (cmd::OPEN_LOG, "打开日志".into(), true),
+        (cmd::AUTOSTART, autostart_line, true),
+        (cmd::SEPARATOR, String::new(), false),
+        (cmd::QUIT, "退出（同时停止代理）".into(), true),
+        (cmd::SEPARATOR, String::new(), false),
+        (cmd::LABEL, format!("版本：{version}"), false),
+    ]
 }
 
 /// Compact token counts for the menu (`12.3k`, `1.1M`).
@@ -518,6 +544,7 @@ mod tests {
     fn menu_ids_round_trip_to_actions() {
         assert_eq!(action_from_id(cmd::QUIT), Action::Quit);
         assert_eq!(action_from_id(cmd::START), Action::Start);
+        assert_eq!(action_from_id(cmd::OPEN_WEBUI), Action::OpenWebUi);
         assert_eq!(action_from_id(cmd::LABEL), Action::None);
         assert_eq!(action_from_id(cmd::SEPARATOR), Action::None);
     }
@@ -529,5 +556,47 @@ mod tests {
         // stats line would do something.
         assert_eq!(action_from_id(0), Action::None);
         assert_ne!(cmd::LABEL, cmd::START);
+    }
+
+    fn webui_entry(running: bool) -> (String, bool) {
+        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
+        let entry = menu_entries(running, false, &cache, "0.5.2")
+            .into_iter()
+            .find(|(id, ..)| *id == cmd::OPEN_WEBUI)
+            .expect("the WebUI entry is always present");
+        (entry.1, entry.2)
+    }
+
+    #[test]
+    fn the_webui_entry_is_present_and_greyed_only_while_stopped() {
+        assert_eq!(webui_entry(true), ("打开 WebUI".to_string(), true));
+        assert_eq!(webui_entry(false), ("打开 WebUI".to_string(), false));
+    }
+
+    #[test]
+    fn every_action_in_the_menu_has_an_entry() {
+        // A menu that silently loses an entry is how "打开 WebUI" would go
+        // missing again; every actionable id must appear exactly once.
+        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
+        for (running, autostart) in [(true, true), (true, false), (false, true), (false, false)] {
+            let ids: Vec<usize> = menu_entries(running, autostart, &cache, "0.5.2")
+                .into_iter()
+                .map(|(id, ..)| id)
+                .collect();
+            for id in [
+                cmd::START,
+                cmd::STOP,
+                cmd::OPEN_LOG,
+                cmd::OPEN_WEBUI,
+                cmd::AUTOSTART,
+                cmd::QUIT,
+            ] {
+                assert_eq!(
+                    ids.iter().filter(|i| **i == id).count(),
+                    1,
+                    "id {id} must appear exactly once (running={running})"
+                );
+            }
+        }
     }
 }
