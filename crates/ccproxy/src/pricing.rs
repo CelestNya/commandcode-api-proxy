@@ -89,8 +89,32 @@ impl ModelPrice {
 }
 
 /// Minutes since UTC midnight — the input for peak/off-peak selection.
+///
+/// This is "now"; for a ledger row use [`minute_of_day_from_iso8601`] instead,
+/// so the row is priced at the hour it actually ran.
 pub fn utc_minute_of_day() -> u32 {
     ((crate::now_epoch_secs() % 86_400) / 60) as u32
+}
+
+/// Minute-of-day of a ledger `ts` (`2026-09-20T17:52:17.917Z`, already UTC).
+///
+/// Returns `None` for a shape it does not recognise, so a caller can fall back
+/// to the current time rather than mis-price at minute 0.
+// Bounds are checked immediately above the arithmetic (hh <= 23, mm <= 59), so
+// the product is at most 1380 and the sum at most 1439.
+#[allow(clippy::arithmetic_side_effects)]
+pub fn minute_of_day_from_iso8601(ts: &str) -> Option<u32> {
+    // "YYYY-MM-DDTHH:MM:SS…" — offset 11 is the hour, 14 the minute.
+    let bytes = ts.as_bytes();
+    if bytes.len() < 16 || bytes.get(10) != Some(&b'T') {
+        return None;
+    }
+    let hh: u32 = ts.get(11..13)?.parse().ok()?;
+    let mm: u32 = ts.get(14..16)?.parse().ok()?;
+    if hh > 23 || mm > 59 {
+        return None;
+    }
+    Some(hh * 60 + mm)
 }
 
 /// The full table plus provenance, persisted as `pricing.json`.
@@ -144,14 +168,24 @@ impl Pricing {
         // Normalize both sides ("DeepSeek V4.1 Flash" → "deepseek-v4.1-flash").
         // Exact equality only, so "gpt-5" can never match "gpt-5-pro".
         let want = normalize(model);
-        self.find_normalized(&want).or_else(|| {
-            // Ledger names carry a provider prefix ("deepseek/deepseek-v4.1-flash");
-            // retry with the bare id.
-            model
-                .rsplit_once('/')
-                .map(|(_, id)| normalize(id))
-                .and_then(|want| self.find_normalized(&want))
-        })
+        if let Some(p) = self.find_normalized(&want) {
+            return Some(p);
+        }
+        // Ledger names carry a provider prefix ("deepseek/deepseek-v4.1-flash");
+        // retry with the bare id.
+        if let Some((_, id)) = model.rsplit_once('/') {
+            let want = normalize(id);
+            if let Some(p) = self.find_normalized(&want) {
+                return Some(p);
+            }
+            if let Some(p) = self.find_by_key(&match_key(id)) {
+                return Some(p);
+            }
+        }
+        // Last resort: drop the separators entirely, so a vendor space on the
+        // page ("Qwen 3.8 Flash") still meets a client's spelling
+        // ("qwen3.8-flash"). Still exact on the alphanumerics.
+        self.find_by_key(&match_key(model))
     }
 
     fn find_normalized(&self, want: &str) -> Option<&ModelPrice> {
@@ -161,11 +195,22 @@ impl Pricing {
             .map(|(_, v)| v)
     }
 
+    fn find_by_key(&self, want: &str) -> Option<&ModelPrice> {
+        self.models
+            .iter()
+            .find(|(k, _)| match_key(k) == *want)
+            .map(|(_, v)| v)
+    }
+
     /// Cost in USD of one ledger row: cache-write for tokens that created a
     /// cache entry, cache-read for tokens that hit it, input for the remaining
-    /// uncached prompt, output for completion tokens. The rate is picked by
-    /// the current UTC hour (peak vs off-peak) when the model has time-of-day
-    /// pricing.
+    /// uncached prompt, output for completion tokens.
+    ///
+    /// `utc_minute_of_day` is the minute-of-day **of the request this row
+    /// describes**, not of the moment the total is computed: a peak-hour row
+    /// keeps its peak price when viewed later. Callers reading ledger rows must
+    /// derive it from the row's own `ts` (see [`minute_of_day_from_iso8601`]);
+    /// passing the current time would silently restate history at today's rate.
     pub fn cost(
         &self,
         model: &str,
@@ -499,7 +544,24 @@ fn normalize(name: &str) -> String {
             _ => {}
         }
     }
-    out.to_ascii_lowercase().replace([' ', '/', '\\', '_'], "-")
+    // '.' folds with the other separators: the page writes "Qwen 3.8 Flash"
+    // while a client asks for "qwen3.8-flash", and the ledger stores the
+    // client's spelling.
+    out.to_ascii_lowercase()
+        .replace([' ', '/', '\\', '_', '.'], "-")
+}
+
+/// The comparison key for a model name: [`normalize`] with every separator
+/// removed.
+///
+/// The page writes "Qwen 3.8 Flash"; a client asks for "qwen3.8-flash" (no
+/// space after the vendor). Those normalize to `qwen-3-8-flash` and
+/// `qwen3-8-flash` — equal only once separators are dropped. Comparing on this
+/// key as a fallback is deliberately looser than [`normalize`], but still
+/// exact on the alphanumeric content, so "gpt-5" and "gpt5" match while
+/// "gpt-5" and "gpt-5-pro" do not.
+fn match_key(name: &str) -> String {
+    normalize(name).chars().filter(|c| *c != '-').collect()
 }
 #[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 fn cell_price(cell: &str) -> Option<f64> {
@@ -700,9 +762,133 @@ mod tests {
         );
         assert_eq!(
             normalize("deepseek/deepseek-v4.1-flash"),
-            "deepseek-deepseek-v4.1-flash"
+            "deepseek-deepseek-v4-1-flash"
         );
         assert_eq!(normalize("MiniMax M3"), "minimax-m3");
+    }
+
+    #[test]
+    fn normalize_folds_dots_so_page_and_client_names_agree() {
+        // '.' is a separator like any other once normalized.
+        assert_eq!(normalize("Qwen 3.8 Flash"), "qwen-3-8-flash");
+        assert_eq!(normalize("qwen3.8-flash"), "qwen3-8-flash");
+        assert_eq!(
+            normalize("DeepSeek V4.1 Flash"),
+            normalize("deepseek-v4.1-flash")
+        );
+    }
+
+    #[test]
+    fn a_vendor_space_does_not_hide_the_price() {
+        // The page writes "Qwen 3.8 Flash" (space after the vendor); clients
+        // ask for "qwen3.8-flash". normalize() cannot reconcile those, so the
+        // separator-free match key must — otherwise the row is silently
+        // unpriced, which is what happened in production for 4.35M tokens.
+        assert_eq!(match_key("Qwen 3.8 Flash"), match_key("qwen3.8-flash"));
+        assert_eq!(match_key("Qwen 3.8 Flash"), "qwen38flash");
+        let mut models = parse_pricing_html(SAMPLE);
+        for m in models.values_mut() {
+            m.id = None;
+        }
+        let p = Pricing {
+            models,
+            fetched_at: None,
+            source: PRICING_SOURCE,
+        };
+        let found = p
+            .price("deepseek-v4.1-flash")
+            .expect("dotted name resolves");
+        assert_eq!(found.input, 0.15);
+    }
+
+    /// A page row spelled with a vendor space, as the real table has it.
+    const VENDOR_SPACE_SAMPLE: &str = r#"
+<div role="row">
+<div class="flex min-w-0 items-center gap-2 px-4 py-3"><span class="truncate text-[13px] font-medium normal-case tracking-normal text-foreground">Qwen 3.8 Flash</span></div>
+<div class="px-2 py-3 text-right text-[11px] text-muted-foreground tabular-nums">256K</div>
+<div class="px-2 py-3 text-right text-[12px] text-foreground tabular-nums"><span><span>$0.10</span></span></div>
+<div class="px-2 py-3 text-right text-[12px] text-foreground tabular-nums"><span><span>$0.40</span></span></div>
+<div class="px-2 py-3 text-right text-[12px] text-foreground tabular-nums"><span><span>$0.002</span></span></div>
+<div class="px-2 py-3 text-right text-[12px] tabular-nums"><span class="text-muted-foreground">—</span></div>
+<div class="px-3 py-3"><button type="button"></button></div>
+</div>"#;
+
+    #[test]
+    fn an_unknown_model_still_does_not_match_a_prefix() {
+        // The looser key must stay exact on content: a name must never resolve
+        // to a different model that merely shares a prefix.
+        let mut models = parse_pricing_html(VENDOR_SPACE_SAMPLE);
+        for m in models.values_mut() {
+            m.id = None;
+        }
+        let p = Pricing {
+            models,
+            fetched_at: None,
+            source: PRICING_SOURCE,
+        };
+        assert!(
+            p.price("qwen3.8-flash").is_some(),
+            "the exact name resolves"
+        );
+        assert!(
+            p.price("qwen3.8-flash-thinking").is_none(),
+            "a longer name must not"
+        );
+        assert!(p.price("gpt-5").is_none());
+    }
+
+    #[test]
+    fn minute_of_day_is_read_from_the_rows_own_timestamp() {
+        assert_eq!(
+            minute_of_day_from_iso8601("2026-09-20T17:52:17.917Z"),
+            Some(1072)
+        );
+        assert_eq!(
+            minute_of_day_from_iso8601("2026-09-20T01:00:00.000Z"),
+            Some(60)
+        );
+        assert_eq!(
+            minute_of_day_from_iso8601("2026-09-20T00:00:00.000Z"),
+            Some(0)
+        );
+        // Unrecognised shapes yield None so a caller can fall back rather than
+        // silently pricing at minute 0.
+        assert_eq!(minute_of_day_from_iso8601(""), None);
+        assert_eq!(minute_of_day_from_iso8601("not-a-timestamp"), None);
+        assert_eq!(minute_of_day_from_iso8601("2026-09-20 17:52:17"), None);
+        assert_eq!(minute_of_day_from_iso8601("2026-09-20T25:00:00Z"), None);
+        assert_eq!(minute_of_day_from_iso8601("2026-09-20T12:99:00Z"), None);
+    }
+
+    #[test]
+    fn a_peak_row_is_priced_at_the_peak_rate_when_read_later() {
+        // The point of pricing by the row's own minute: a request that ran in
+        // the peak window keeps the peak price on a page opened during
+        // off-peak hours. Before this, the page used "now", so the same row
+        // changed price depending on when it was viewed.
+        let body = r#"x\"models\":[{"id":"deepseek-v4.1-flash","name":"DeepSeek V4.1 Flash","category":"opensource","provider":"DeepSeek","inputCost":0.15,"outputCost":0.6,"cacheReadCost":0.003,"timeOfDay":{"effective":"2026-08-16T16:00:00Z","peak":{"inputCost":0.3,"outputCost":1.2,"cacheReadCost":0.006},"offPeak":{"inputCost":0.15,"outputCost":0.6,"cacheReadCost":0.003}}}]"#;
+        let p = Pricing {
+            models: parse_models_json(body),
+            fetched_at: None,
+            source: PRICING_SOURCE,
+        };
+        // The row ran at 02:00 UTC — inside the peak window (01:00-04:00).
+        let minute = minute_of_day_from_iso8601("2026-09-20T02:00:00.000Z").expect("parseable");
+        assert_eq!(minute, 120);
+        let peak_cost = p
+            .cost("deepseek-v4.1-flash", 1_000_000, 0, 0, 0, minute)
+            .unwrap();
+        let off_cost = p
+            .cost("deepseek-v4.1-flash", 1_000_000, 0, 0, 0, 0)
+            .unwrap();
+        assert!(
+            (peak_cost - 0.30).abs() < 1e-9,
+            "peak hour must bill the peak rate"
+        );
+        assert!(
+            (off_cost - 0.15).abs() < 1e-9,
+            "off-peak bills the lower rate"
+        );
     }
 
     #[test]
