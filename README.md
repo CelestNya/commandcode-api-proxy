@@ -309,6 +309,18 @@ one line to `index.html` and nothing else (the build script discovers it from th
 A referenced file that does not exist fails the build rather than shipping a page
 quietly missing a stylesheet.
 
+**Editing the panel on a running install.** The package ships these sources at
+`service/webui/`, and the proxy prefers them at run time, falling back to the copy
+compiled into the binary. So a stylesheet can be edited and the page simply reloaded —
+no rebuild, no restart. The startup log says which copy is in use:
+
+```
+WebUI 使用磁盘源码（改后刷新即生效）: …\service\webui
+```
+
+Delete `service/webui/` for a smaller install; the page keeps working from the
+compiled copy.
+
 ## Windows tray & hot-swap
 
 The personal build ships a tray manager (`CCProxyTray.exe`) that runs the proxy as a

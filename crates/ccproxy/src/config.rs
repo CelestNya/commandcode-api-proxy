@@ -430,6 +430,22 @@ pub fn tray_log_path() -> std::path::PathBuf {
     tray_log_path_from(root, ns.as_deref())
 }
 
+/// The loose WebUI sources beside the executable: `webui/index.html`, if that
+/// directory exists.
+///
+/// The proxy ships the assembled page inside the binary, but a package may also
+/// carry the sources so a stylesheet can be edited and just reloaded (see
+/// `webui::page`). `None` means "no loose copy" — not an error, and the common
+/// case for a minimal install.
+#[must_use]
+pub fn webui_site_dir() -> Option<std::path::PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))?;
+    let dir = exe_dir.join("webui");
+    dir.join("index.html").is_file().then_some(dir)
+}
+
 /// JS `Number()` for the subset of strings these env vars realistically carry.
 /// Returns None where JS would yield NaN (parse failure). Note Number("") is 0,
 /// not NaN — callers treat "" before reaching here.

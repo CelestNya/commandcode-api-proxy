@@ -21,16 +21,99 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::io::{self, Read};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tiny_http::{Header, Request, Response, StatusCode};
 
-/// The page, assembled from `webui/` at build time — one self-contained file
-/// with inline CSS/JS, no external assets, so it works with the proxy offline.
+/// The page compiled into the binary — the fallback, and the whole story when
+/// no loose sources ship beside the executable.
 ///
-/// The sources live in `crates/ccproxy/webui/`: `index.html` lists the
-/// stylesheets and scripts, and `build.rs` inlines them in that order. Edit
+/// The authoring sources live in `crates/ccproxy/webui/`: `index.html` lists the
+/// stylesheets and scripts, and `build.rs` inlines them via `webui_site`. Edit
 /// the file you care about, not this constant.
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/webui.html"));
+
+/// The served page: the loose `webui/` beside the executable when it is present
+/// and assembles cleanly, otherwise the compiled-in copy.
+///
+/// Preferring the loose copy is what lets a stylesheet be edited and the page
+/// reloaded with no rebuild — the point of shipping the sources.
+///
+/// The assembly is cached against the newest mtime among the sources, so a
+/// request after an edit re-reads the files (that is the whole feature) while a
+/// request with nothing changed costs two `stat` calls and no file reads. A
+/// broken or half-present directory falls back to the compiled copy rather than
+/// serving a page missing its styles, which is the failure this must never
+/// produce.
+fn page() -> String {
+    use std::sync::Mutex;
+    // (newest source mtime seen, the page assembled from it). A restart of the
+    // mtime clock (a file restored to an older timestamp) still invalidates,
+    // because only equality hits the cache.
+    static CACHE: OnceLock<Mutex<Option<(std::time::SystemTime, String)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+
+    let Some(dir) = crate::config::webui_site_dir() else {
+        return PAGE.to_string();
+    };
+
+    let newest = newest_mtime(&dir);
+    if let (Some(stamp), Ok(guard)) = (newest, cache.lock()) {
+        if let Some((cached_at, page)) = guard.as_ref() {
+            if *cached_at == stamp {
+                return page.clone();
+            }
+        }
+    }
+
+    let assembled = match crate::webui_site::assemble(&dir) {
+        Ok(page) => {
+            crate::log::info(&format!(
+                "WebUI 使用磁盘源码（改后刷新即生效）: {}",
+                dir.display()
+            ));
+            page
+        }
+        Err(e) => {
+            crate::log::warn(&format!(
+                "WebUI 磁盘源码不可用（{e}）；回退到内置副本: {}",
+                dir.display()
+            ));
+            PAGE.to_string()
+        }
+    };
+
+    if let (Some(stamp), Ok(mut guard)) = (newest, cache.lock()) {
+        *guard = Some((stamp, assembled.clone()));
+    }
+    assembled
+}
+
+/// The newest modification time among the sources, or `None` when the tree
+/// cannot be walked (in which case the caller assembles without caching).
+///
+/// Walking is what makes an edit to *any* file — a stylesheet, a script, or the
+/// `index.html` that ties them together — invalidate the cache.
+fn newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime> {
+    fn walk(dir: &std::path::Path, newest: &mut Option<std::time::SystemTime>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, newest);
+            } else if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
+                if newest.is_none_or(|n| modified > n) {
+                    *newest = Some(modified);
+                }
+            }
+        }
+    }
+    let mut newest = None;
+    walk(root, &mut newest);
+    newest
+}
 
 /// How many ledger rows the detail screen shows by default.
 const DEFAULT_LIMIT: i64 = 200;
@@ -156,7 +239,7 @@ pub fn handle_page(state: &SharedState, req: Request, _ctx: &RequestId) {
         }
         None => "{}".into(),
     };
-    let body = PAGE.replace(
+    let body = page().replace(
         "</head>",
         &format!(
             "<script>window.__INIT__={};</script></head>",

@@ -91,6 +91,11 @@ mkdir "%PKG%\service" 2>nul
 
 copy /y "%PROXY%" "%PKG%\service" >nul || goto :pack_fail
 copy /y "%TRAY%" "%PKG%" >nul || goto :pack_fail
+rem Ship the WebUI sources next to the proxy so a stylesheet can be edited and
+rem the page reloaded without a rebuild. The proxy prefers this loose copy and
+rem falls back to the one compiled in, so deleting this directory is also a
+rem valid choice for a smaller package.
+xcopy /e /i /y /q "%ROOT%crates\ccproxy\webui" "%PKG%\service\webui" >nul || goto :pack_fail
 rem The outbound-proxy policy lives in this file so a person can read and edit
 rem it; without a shipped copy, setting it would mean an environment variable
 rem nobody can see. Written rather than copied, so a local edit never leaks
