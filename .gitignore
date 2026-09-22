@@ -1,11 +1,24 @@
-node_modules/
-dist/
-coverage/
-.env
-*.log
-.DS_Store
-release/
-logs/
-tray/CCProxyTray.exe
+# Build output
 /target/
+release/
+
+# Runtime state (never committed: logs, ledgers, request dumps live here)
+logs/
+*.log
+
+# Local environment / config
+.env
+.env.local
+
+# The outbound-proxy policy is per-install: a real service/ccproxy.json
+# reflects one machine's proxy and must not be committed. The annotated
+# template is ccproxy.example.json.
+service/ccproxy.json
+
+# Editors / OS
+.DS_Store
 __pycache__/
+
+# Tool session state (not project content)
+.zcode/
+_shots/

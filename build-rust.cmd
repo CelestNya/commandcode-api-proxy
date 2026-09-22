@@ -93,8 +93,9 @@ copy /y "%PROXY%" "%PKG%\service" >nul || goto :pack_fail
 copy /y "%TRAY%" "%PKG%" >nul || goto :pack_fail
 rem The outbound-proxy policy lives in this file so a person can read and edit
 rem it; without a shipped copy, setting it would mean an environment variable
-rem nobody can see. Written rather than copied from the repo root, so a local
-rem edit never leaks into a release.
+rem nobody can see. Written rather than copied, so a local edit never leaks
+rem into a release. The annotated field reference is ccproxy.example.json at
+rem the repo root; this ships the minimal equivalent.
 > "%PKG%\service\ccproxy.json" echo {
 >> "%PKG%\service\ccproxy.json" echo   "proxy": "default",
 >> "%PKG%\service\ccproxy.json" echo   "noProxy": "localhost,127.0.0.1"
