@@ -25,7 +25,10 @@ impl LogFile {
     pub fn new(dir: &Path) -> Self {
         let _ = std::fs::create_dir_all(dir);
         Self {
-            path: dir.join("proxy.log"),
+            // The tray's lifecycle lines and the proxy's own lines are two
+            // different streams; the proxy now writes `proxy.log` itself, so
+            // the tray keeps its own file and they no longer interleave.
+            path: dir.join("tray.log"),
             max_bytes: Self::MAX_BYTES,
         }
     }
@@ -144,15 +147,18 @@ impl ProxyProcess {
 
         match cmd.spawn() {
             Ok(mut child) => {
-                // The child's output is forwarded to the rotating log: a winexe
-                // has no console, so this file is the only diagnostic channel.
-                if let (Some(out), Some(err), Some(log)) = (
-                    child.stdout.take(),
-                    child.stderr.take(),
-                    Some(std::sync::Arc::clone(&self.log)),
-                ) {
-                    forward(out, std::sync::Arc::clone(&log));
-                    forward(err, log);
+                // The child writes its own `proxy.log`, so its stdout/stderr are
+                // NOT forwarded line-by-line — that would duplicate every line
+                // into tray.log. Only the process-level facts belong here: the
+                // tray's file records when the proxy started, died, or failed
+                // to start, which is what makes a crash's timeline readable
+                // next to the proxy's own account of the same window.
+                //
+                // The pipes are still taken and drained so a chatty child
+                // cannot fill its pipe buffer and block.
+                if let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) {
+                    drain(out);
+                    drain(err);
                 }
                 if let Some(job) = job {
                     // SAFETY: `as_raw_handle` is safe but returns a pointer
@@ -210,16 +216,16 @@ impl ProxyProcess {
 }
 
 /// Pump a child stream into the log on its own thread.
-fn forward<R: std::io::Read + Send + 'static>(reader: R, log: std::sync::Arc<LogFile>) {
+/// Consume a child's output stream and discard it.
+///
+/// The child writes its own log file, so these lines are already recorded; the
+/// thread exists only so the pipe is read instead of filling up and blocking
+/// the child.
+fn drain<R: std::io::Read + Send + 'static>(reader: R) {
     std::thread::spawn(move || {
-        use std::io::BufRead;
-        let buffered = std::io::BufReader::new(reader);
-        for line in buffered.lines() {
-            match line {
-                Ok(text) => log.append(&text),
-                Err(_) => break,
-            }
-        }
+        let mut reader = reader;
+        let mut buf = [0u8; 4096];
+        while matches!(std::io::Read::read(&mut reader, &mut buf), Ok(n) if n > 0) {}
     });
 }
 

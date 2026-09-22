@@ -1,6 +1,8 @@
 //! Config loading: CLI flags > env vars > defaults, with the same
 //! per-field fallbacks as the Node `loadConfig()` (src/config.ts).
 
+use std::path::Path;
+
 /// Hardcoded CLI version fallback. The real CLI ships frequent releases;
 /// CC's server actively blocks requests whose version looks stale or absent,
 /// so this must stay at or above the server's `minVersion`. It is only used
@@ -139,6 +141,34 @@ fn parse_cli_args(args: &[String]) -> CliArgs {
 
 fn non_empty(raw: Option<&str>) -> Option<String> {
     raw.filter(|v| !v.is_empty()).map(str::to_owned)
+}
+
+/// Where the proxy writes its own log: `logs/proxy.log` beside the binary,
+/// under a `test-<ns>` subdirectory for a namespaced (isolated) instance.
+///
+/// Mirrors the tray's layout so both files land in the same directory, and
+/// takes its inputs as parameters so the decision is testable without touching
+/// the process environment or the filesystem.
+#[must_use]
+pub fn log_path_from(exe_dir: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
+    let base = exe_dir.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+    let logs = base.join("logs");
+    let dir = match ns.filter(|v| !v.trim().is_empty()) {
+        Some(ns) => logs.join(format!("test-{ns}")),
+        None => logs,
+    };
+    dir.join("proxy.log")
+}
+
+/// The proxy log path for this process: next to `current_exe`, namespaced when
+/// `CC_TRAY_NS` is set (same variable the ledger uses).
+#[must_use]
+pub fn log_path() -> std::path::PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let ns = std::env::var("CC_TRAY_NS").ok();
+    log_path_from(exe_dir.as_deref(), ns.as_deref())
 }
 
 /// JS `Number()` for the subset of strings these env vars realistically carry.

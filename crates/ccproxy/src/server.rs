@@ -7,6 +7,7 @@
 use crate::billing;
 use crate::catalog::CatalogStore;
 use crate::config::Config;
+use crate::dump;
 use crate::generate;
 use crate::json_error;
 use crate::log;
@@ -611,6 +612,9 @@ fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, c
         Ok(s) => s,
         Err(err) => {
             record_attempt_failure(&ledger, &err);
+            // The failure dump is the only place the request that CC refused is
+            // recorded in full; the log line carries just the reason.
+            dump_failed_request(state, ctx, &encoder_model, D::wire(), &err, &build_body);
             return respond_upstream_error(req, &err, D::dialect(), state, ctx);
         }
     };
@@ -708,6 +712,43 @@ fn upstream_options<'a>(
 /// something without consuming tokens.
 fn record_attempt_failure(ledger: &billing::RequestLedger, err: &UpstreamError) {
     ledger.end_attempt(billing::AttemptStatus::Error, None, Some(&err.error_tag()));
+}
+
+/// Persist the request that failed, in full, for diagnosis.
+///
+/// The body is rebuilt from the catalog as it stands now — the same builder the
+/// failed send used — so what lands on disk is the request CC actually saw. The
+/// log line alone cannot answer "why did CC refuse this", because the answer
+/// lives in the translated messages/tools/system prompt.
+fn dump_failed_request(
+    state: &SharedState,
+    ctx: &RequestId,
+    model: &str,
+    wire: billing::Wire,
+    err: &UpstreamError,
+    build_body: &dyn Fn(&Catalog) -> Value,
+) {
+    let body = build_body(&state.catalog.current());
+    let wire = match wire {
+        billing::Wire::Openai => "openai",
+        billing::Wire::Anthropic => "anthropic",
+    };
+    let meta = vec![
+        ("request_id", ctx.id.clone()),
+        ("wire", wire.to_string()),
+        ("model", model.to_string()),
+        ("error_tag", err.error_tag()),
+        ("status_code", err.status_code.to_string()),
+        ("message", err.message.clone()),
+    ];
+    let pretty = serde_json::to_string_pretty(&body)
+        .unwrap_or_else(|_| serde_json::to_string(&body).unwrap_or_default());
+    dump::write(
+        &dump::dump_dir_for(&crate::config::log_path()),
+        &ctx.id,
+        &meta,
+        &pretty,
+    );
 }
 
 /// The per-request tool summary the Node handler logs. Two facts only — the

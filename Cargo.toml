@@ -4,7 +4,7 @@ members = ["crates/ccproxy", "crates/ccproxy-tray"]
 
 [workspace.package]
 edition = "2021"
-version = "0.6.0"
+version = "0.6.1"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

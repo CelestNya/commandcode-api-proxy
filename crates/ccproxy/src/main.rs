@@ -18,6 +18,10 @@ fn main() {
     let mut config = ccproxy::config::load(&argv, &env);
 
     ccproxy::log::init(&config.log_level);
+    // The proxy keeps its own file so a hand-started run has a log too; the
+    // tray's lifecycle lines go to a separate file, so the two never
+    // interleave in one stream.
+    ccproxy::log::init_file(&ccproxy::config::log_path());
 
     // CC's server blocks a stale `x-command-code-version`, so the published
     // version is consulted once before the listener opens. An explicit
