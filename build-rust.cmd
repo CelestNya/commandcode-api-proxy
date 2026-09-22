@@ -164,8 +164,27 @@ set SWAP=%DESK%\CCProxy-Release
 if not exist "%SWAP%" mkdir "%SWAP%"
 
 set TARGET=%SWAP%\CCProxy-v%VER%-rust
-if exist "%TARGET%" rmdir /s /q "%TARGET%"
+
+rem Refuse to clobber a directory a running instance is serving from.
+rem A running exe stays mapped, so deleting its folder does not fail — it
+rem silently guts the live instance (its open log file is truncated to 0 and
+rem its logs/ tree disappears). That happened here: a plain `build-rust.cmd`
+rem targets the version already running, and wiped the running proxy's logs.
+set "INUSE="
+for /f "delims=" %%P in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '%TARGET%\*' } | Select-Object -ExpandProperty ProcessId) -join ','" 2^>nul') do set "INUSE=%%P"
+if defined INUSE (
+  echo ERROR: %TARGET% is in use by running process^(es^): %INUSE%
+  echo Refusing to publish over a live instance. Stop it first, or build a
+  echo different version:  build-rust.cmd 0.6.5
+  exit /b 1
+)
+
+rem Replace the destination without a window where neither exists: move the old
+rem one aside, copy, then drop the aside copy. An interrupted run leaves a
+rem recoverable `-previous` folder instead of a half-written target.
+if exist "%TARGET%" move "%TARGET%" "%TARGET%-previous" >nul || goto :pack_fail
 xcopy /e /i /y "%PKG%" "%TARGET%" >nul || goto :pack_fail
+if exist "%TARGET%-previous" rmdir /s /q "%TARGET%-previous"
 
 if not defined PROMOTE goto :no_promote
 echo.
