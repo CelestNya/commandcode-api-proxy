@@ -605,12 +605,11 @@ fn attempt_send(
     // configured deadlines are enforced there, by accumulating the elapsed
     // silence across successive timed-out reads.
     let tick_ms = read_tick_ms(idle_timeout_ms, no_output_timeout_ms, timeout_ms);
-    let mut agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(timeout_ms))
-        .timeout_write(Duration::from_millis(timeout_ms))
-        .timeout_read(Duration::from_millis(tick_ms));
-    let _ = &mut agent;
-    let agent = agent.build();
+    // The agent carries both the egress decision (proxy or direct, made once at
+    // startup — see `proxy.rs`) and the per-request timeouts above, which ureq
+    // only accepts at build time. Building a bare `AgentBuilder` here is what
+    // made the Rust build ignore the system proxy entirely.
+    let agent = crate::proxy::agent_with_timeouts(url, timeout_ms, timeout_ms, tick_ms);
 
     let mut request = agent.post(url).set("Content-Type", "application/json");
     // ureq's own default is `gzip`, which would hide the framing this client

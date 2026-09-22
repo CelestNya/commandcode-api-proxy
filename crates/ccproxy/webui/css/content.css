@@ -1,0 +1,28 @@
+/* 内容区外壳
+ *
+ * 滚动容器、视图切换动画，以及 prefers-reduced-motion 的降级。
+ */
+
+/* ── content ── */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* The scroll container carries no padding: a sticky header measures `top: 0`
+   against the *padding box*, so padding here pushed the header up under the
+   topbar and let row data surface through the seam. The spacing lives on the
+   inner wrapper instead, leaving the scroll origin flush with the topbar. */
+.content { flex: 1; overflow: auto; }
+.content-inner { padding: 20px 24px 40px; max-width: 1280px; width: 100%; margin: 0 auto; }
+.view { display: none; }
+.view.active { display: block; animation: viewIn .22s ease; }
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .view.active { animation: none; }
+  .nav-item { transition: none; }
+  /* The chart draw-in is decorative; honour the preference by rendering the
+     final state immediately. */
+  .trend-animate .trend-line,
+  .trend-animate .trend-dot { animation: none; stroke-dashoffset: 0; opacity: 1; }
+  .mcard, .mini-card, .panel, tr td { transition: none; }
+}

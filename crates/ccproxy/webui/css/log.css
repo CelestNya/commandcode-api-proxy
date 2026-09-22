@@ -1,0 +1,38 @@
+/* 日志屏
+ *
+ * 日志路径栏与等宽字体日志面板，按级别着色。
+ */
+
+/* ── log screen ── */
+.logbar {
+  display: flex; align-items: center; gap: 10px; margin: 10px 0 8px;
+  color: var(--muted); font-size: 12px; min-width: 0;
+}
+.logbar .logpath {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.logbar .logmeta { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; }
+/* The pane is its own scroll container with a fixed height so the tail sits
+   at the bottom and the surrounding page does not stretch to 500 lines. */
+.logpane {
+  background: #0B0E13; border: 1px solid var(--outline-variant); border-radius: 16px;
+  padding: 12px 14px; height: calc(100vh - 260px); min-height: 240px; overflow: auto;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px; line-height: 1.6; white-space: pre; tab-size: 4;
+  box-shadow: var(--shadow);
+}
+.logpane .ln { display: block; }
+/* Level colouring keys off the `[TAG]` the logger stamps — the same tokens a
+   grep uses, so what reads as an error here is what a search finds. */
+.logpane .lv-error { color: var(--error); }
+.logpane .lv-warn { color: var(--aborted); }
+.logpane .lv-info { color: var(--text); }
+.logpane .lv-debug { color: var(--muted); }
+.logpane .lv-other { color: var(--muted); }
+.logpane .ts { color: var(--muted); }
+@media (max-width: 700px) {
+  .logbar { flex-wrap: wrap; }
+  .logbar .logmeta { margin-left: 0; }
+  .logpane { height: calc(100vh - 300px); font-size: 11.5px; }
+}

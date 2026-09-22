@@ -196,6 +196,7 @@ fn start_proxy(mock: u16, dir: &Path) -> u16 {
         no_output_timeout_ms: 0,
         no_output_retries: 0,
         max_body_bytes: 50 * 1024 * 1024,
+        ..ccproxy::config::Config::default()
     };
     let ledger = ccproxy::billing::Ledger::open(dir).expect("open a test ledger");
     ccproxy::billing::use_ledger_for_tests(ledger);
@@ -539,6 +540,7 @@ fn start_proxy_without_ledger(mock: u16) -> u16 {
         no_output_timeout_ms: 0,
         no_output_retries: 0,
         max_body_bytes: 50 * 1024 * 1024,
+        ..ccproxy::config::Config::default()
     };
     let state = ccproxy::server::new_state(config);
     let (port, _handle) = ccproxy::server::serve_on_ephemeral_port(state).expect("listen");

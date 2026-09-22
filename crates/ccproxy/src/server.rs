@@ -294,7 +294,9 @@ pub fn handle(state: &SharedState, req: Request) {
         ("GET", "/webui/api/sysinfo") => crate::webui::handle_sysinfo(state, req, &ctx),
         ("GET", "/webui/api/stats") => crate::webui::handle_stats(state, req, &ctx),
         ("GET", "/webui/api/attempts") => crate::webui::handle_attempts(state, req, &ctx),
+        ("GET", "/webui/api/logs") => crate::webui::handle_logs(state, req, &ctx),
         ("GET", "/webui/events") => crate::webui::handle_events(state, req, &ctx),
+        ("GET", "/webui/logs/stream") => crate::webui::handle_log_stream(state, req, &ctx),
         ("POST", "/v1/chat/completions") => handle_chat(state, req, &ctx),
         ("POST", "/v1/messages") => handle_messages(state, req, &ctx),
         ("POST", "/v1/messages/count_tokens") => handle_count_tokens(state, req, &ctx),
@@ -317,7 +319,9 @@ fn handle_preflight(state: &SharedState, req: Request, path: &str) {
             | "/webui/api/sysinfo"
             | "/webui/api/stats"
             | "/webui/api/attempts"
+            | "/webui/api/logs"
             | "/webui/events"
+            | "/webui/logs/stream"
             | "/v1/chat/completions"
             | "/v1/messages"
             | "/v1/messages/count_tokens"

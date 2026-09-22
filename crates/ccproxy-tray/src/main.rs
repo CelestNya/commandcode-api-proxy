@@ -222,7 +222,8 @@ fn dispatch(
                 p.stop();
             }
         }
-        tray::Action::OpenLog => open_log(log),
+        tray::Action::OpenLog => open_log(root, log),
+        tray::Action::OpenTrayLog => open_tray_log(log),
         tray::Action::OpenWebUi => open_webui(port, log),
         tray::Action::ToggleAutostart => settings::toggle_autostart(root, log),
         tray::Action::Quit => {}
@@ -237,8 +238,23 @@ pub fn webui_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/webui")
 }
 
-/// Open the log in Notepad. Creating it first means an empty log still opens.
-fn open_log(log: &process::LogFile) {
+/// Open the proxy's log in Notepad. Creating it first means an empty log still
+/// opens.
+///
+/// This is the file the *proxy* writes (`<proxy dir>/logs/proxy.log`), not the
+/// tray's own `logs/tray.log`: the tray file holds only two lifecycle lines,
+/// and a user who opens it sees no errors while the real ones sit next door.
+/// The path comes from the proxy's own resolver so the two cannot drift.
+fn open_log(root: &std::path::Path, log: &process::LogFile) {
+    let path = settings::proxy_log_path(root, &settings::namespace());
+    if !path.exists() {
+        let _ = std::fs::File::create(&path);
+    }
+    shell_open(&win::Wide::new(path.as_os_str()), log);
+}
+
+/// Open the tray's own log in Notepad — the lifecycle file, not the proxy's.
+fn open_tray_log(log: &process::LogFile) {
     let path = log.path().to_path_buf();
     if !path.exists() {
         let _ = std::fs::File::create(&path);
@@ -385,7 +401,11 @@ fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
             "proxy_binary_present={}\n",
             settings::proxy_binary(root).is_some()
         ));
-        out.push_str(&format!("log={}\n", log.path().display()));
+        out.push_str(&format!("tray_log={}\n", log.path().display()));
+        out.push_str(&format!(
+            "proxy_log={}\n",
+            settings::proxy_log_path(root, &settings::namespace()).display()
+        ));
         out.push_str(&format!("egress={:?}\n", settings::resolve_proxy_url()));
         out.push_str(&format!("no_proxy={}\n", settings::build_no_proxy()));
         out.push_str(&format!("autostart={}\n", settings::autostart_enabled()));

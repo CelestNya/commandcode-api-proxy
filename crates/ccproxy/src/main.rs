@@ -23,6 +23,15 @@ fn main() {
     // interleave in one stream.
     ccproxy::log::init_file(&ccproxy::config::log_path());
 
+    // Resolve the outbound proxy before anything dials out. This is where the
+    // Rust build previously diverged from the Node one: it went direct while
+    // the tray's HTTPS_PROXY was set, which surfaced as a flood of connection
+    // timeouts against an upstream that was in fact reachable. The decision and
+    // its reason are logged, so "did it use the proxy?" is answerable from the
+    // log rather than inferred from the environment.
+    let egress = ccproxy::proxy::init(&config);
+    ccproxy::log::info(&egress.note);
+
     // CC's server blocks a stale `x-command-code-version`, so the published
     // version is consulted once before the listener opens. An explicit
     // CC_CLI_VERSION pins it and skips the lookup, so offline runs never wait

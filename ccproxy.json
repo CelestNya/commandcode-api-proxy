@@ -1,0 +1,19 @@
+{
+  "_comment": "cc-proxy 配置文件。放在 ccproxy.exe 同目录（打包版为 service\\ccproxy.json）。所有字段都可省略；省略即用默认值。CLI 参数 > 环境变量 > 本文件 > 内置默认。",
+
+  "proxy": "default",
+  "_proxy": "出站代理策略。default=探测系统代理，通了才用、不通自动回退直连；direct=始终直连；也可以直接写代理地址（如 \"http://127.0.0.1:7897\"），此时始终走该代理、不回退。",
+
+  "noProxy": "localhost,127.0.0.1",
+  "_noProxy": "即使启用了代理也不走代理的主机（逗号或分号分隔）。回环地址始终豁免。",
+
+  "_host": "监听地址，默认 127.0.0.1",
+  "_port": "监听端口，默认 8787",
+  "_logLevel": "debug / info / warn / error，默认 info",
+  "_ccApiBase": "上游地址，默认 https://api.commandcode.ai",
+  "_upstreamTimeoutMs": "单次尝试的整体超时（毫秒）",
+  "_idleTimeoutMs": "已开始出字后，两个数据块之间的最大间隔（毫秒）",
+  "_noOutputTimeoutMs": "完全无字节超过该毫秒数即丢弃重发，默认 30000",
+  "_noOutputRetries": "丢弃重发的最多次数，默认 3",
+  "_maxBodyBytes": "请求体上限（字节）"
+}

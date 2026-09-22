@@ -272,6 +272,43 @@ upstream API does **not** report it — `/provider/v1/models` returns only
 id/name/context for every model — so the table is vendored once and pinned by the
 unit tests in `crates/ccproxy/src/translate/models.rs`, which fail when the two drift.
 
+## WebUI
+
+The proxy serves a live control panel at **`http://127.0.0.1:8787/webui`** (also
+reachable from the tray's 「打开 WebUI」). Three screens — overview, request details,
+and live logs — all updated in place over Server-Sent Events; there is no refresh
+button. The ledger is read-only from the page, so a viewer can never block the writer.
+
+The page is served as **one self-contained document** (inline CSS/JS, no sibling
+requests) so it works while offline and behind any client. It is *authored* as
+separate files, though, and `build.rs` inlines them at compile time:
+
+```
+crates/ccproxy/webui/
+├── index.html       ← the whole composition: which CSS/JS and in what order
+├── css/
+│   ├── tokens.css       design tokens (colors, radii) — the file to edit for a theme
+│   ├── layout.css       shell: sidebar + topbar
+│   ├── content.css      scroll container, view transitions
+│   ├── overview.css     metric cards, model table, trend chart
+│   ├── detail.css       filter bar, pager, request table, badges
+│   ├── log.css          log pane and level colors
+│   └── responsive.css   narrow-screen overrides (must stay last)
+└── js/
+    ├── core.js       state + formatting helpers
+    ├── router.js     hash routing between the three views
+    ├── stats.js      overview rendering (incl. PCHIP trend smoothing)
+    ├── attempts.js   details table, paging, filters
+    ├── api.js        fetch wrappers
+    ├── logs.js       log rendering + SSE follow
+    └── app.js        wires everything on DOMContentLoaded
+```
+
+Editing a style means editing the one file that owns it; adding a file means adding
+one line to `index.html` and nothing else (the build script discovers it from there).
+A referenced file that does not exist fails the build rather than shipping a page
+quietly missing a stylesheet.
+
 ## Windows tray & hot-swap
 
 The personal build ships a tray manager (`CCProxyTray.exe`) that runs the proxy as a
@@ -282,10 +319,11 @@ child process and supervises it. It is Windows-only and optional.
 - Starting the tray starts the proxy. A crash is restarted after 3s.
 - The tray holds the proxy in a **Job Object**, so if the tray dies (even hard-killed)
   the child is reaped too — no orphan holding the port.
-- Egress follows the **Windows system proxy** by default
-  (`HKCU\...\Internet Settings`), injected into the child as
-  `HTTPS_PROXY`/`HTTP_PROXY` + `NODE_USE_ENV_PROXY=1`. `CC_PROXY=off` forces a direct
-  connection; `CC_PROXY=<url>` overrides the URL.
+- Egress policy is set in **`service/ccproxy.json`** (`proxy` field): `"default"`
+  probes the Windows system proxy at startup and uses it only if a real request
+  succeeds, falling back to direct; `"direct"` never proxies; a URL (e.g.
+  `"http://127.0.0.1:7897"`) always proxies, with no fallback. `CC_PROXY` overrides
+  the file. The startup log states which route was taken (`出站代理: …`).
 - The port is a fixed contract (`8787`). If another program holds it the tray
   **refuses to start** rather than taking it over; if one of our own stale processes
   holds it, that process is reaped first.

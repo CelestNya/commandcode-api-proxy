@@ -1,0 +1,81 @@
+/* 概览屏
+ *
+ * 指标卡、面板容器、模型分布表、Token 趋势图与入场动画。
+ */
+
+.metric-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.mcard {
+  background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 16px;
+  padding: 14px 16px 12px; box-shadow: var(--shadow);
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.mcard:hover { border-color: var(--outline); transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.mcard .mlabel { color: var(--muted); font-size: 12px; }
+.mcard .mvalue { font-size: 23px; font-weight: 650; margin-top: 5px; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.mcard .msub { color: var(--muted); font-size: 12px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.mcard .msub em { font-style: normal; color: var(--text); }
+.mcard.accent .mvalue { color: var(--primary); }
+.mcard.ok .mvalue { color: var(--ok); }
+.mcard.err .mvalue { color: var(--error); }
+.mcard.warn .mvalue { color: var(--aborted); }
+
+.ov-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.panel {
+  background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 16px;
+  padding: 14px 16px; box-shadow: var(--shadow);
+}
+.panel h2 { font-size: 12.5px; font-weight: 600; color: var(--muted); letter-spacing: .4px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+.panel h2 .extra { margin-left: auto; color: var(--muted); font-weight: 400; }
+.panel h2 .extra a {
+  color: var(--muted); text-decoration: none; cursor: pointer; margin-left: 4px;
+  border-radius: 999px; padding: 4px 10px; font-size: 12px;
+  border: 1px solid var(--outline-variant);
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.panel h2 .extra a:hover { color: var(--text); background: var(--surface-variant); border-color: var(--outline); }
+.panel h2 .extra a.active {
+  color: var(--on-primary-container); background: var(--primary-container);
+  border-color: transparent; font-weight: 600;
+}
+
+
+.model-layout { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: center; }
+.model-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--outline-variant); font-size: 11.5px; letter-spacing: .2px; }
+.model-table th:first-child { text-align: left; }
+.model-table td { padding: 6px 6px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--outline-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.model-table th:nth-child(1), .model-table td:nth-child(1) { width: 40%; }
+.model-table th:nth-child(2), .model-table td:nth-child(2) { width: 18%; }
+.model-table th:nth-child(3), .model-table td:nth-child(3) { width: 22%; }
+.model-table th:nth-child(4), .model-table td:nth-child(4) { width: 20%; }
+.model-table td:first-child { text-align: left; }
+.model-table tr:last-child td { border-bottom: none; }
+
+.trend-chart svg { width: 100%; height: auto; display: block; }
+/* Chart entrance: each line draws itself (stroke-dashoffset), staggered by
+   its `--i` index, then the data points fade in behind it. The dash length
+   is generous (4000) so a full-width path is covered; the geometry is not
+   measured because the redraw happens on the same frame. */
+.trend-animate .trend-line {
+  stroke-dasharray: 4000;
+  stroke-dashoffset: 4000;
+  animation: trendDraw .9s cubic-bezier(.4, 0, .2, 1) forwards;
+  animation-delay: calc(var(--i) * 110ms);
+}
+.trend-animate .trend-dot {
+  opacity: 0;
+  animation: trendDot .35s ease forwards;
+  animation-delay: calc(500ms + var(--i) * 110ms);
+}
+@keyframes trendDraw { to { stroke-dashoffset: 0; } }
+@keyframes trendDot { from { opacity: 0; } to { opacity: 1; } }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; cursor: default; transition: color .15s ease; }
+.legend i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+
+.status-bar-row { margin-bottom: 10px; }
+.status-bar-row .sbr-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+.status-bar-row .sbr-head b { font-weight: 600; }
+.status-bar-row .sbr-head span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sbr-track { height: 8px; background: var(--surface-variant); border-radius: 999px; overflow: hidden; }
+.sbr-fill { height: 100%; border-radius: 999px; }

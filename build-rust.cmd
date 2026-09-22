@@ -91,6 +91,14 @@ mkdir "%PKG%\service" 2>nul
 
 copy /y "%PROXY%" "%PKG%\service" >nul || goto :pack_fail
 copy /y "%TRAY%" "%PKG%" >nul || goto :pack_fail
+rem The outbound-proxy policy lives in this file so a person can read and edit
+rem it; without a shipped copy, setting it would mean an environment variable
+rem nobody can see. Written rather than copied from the repo root, so a local
+rem edit never leaks into a release.
+> "%PKG%\service\ccproxy.json" echo {
+>> "%PKG%\service\ccproxy.json" echo   "proxy": "default",
+>> "%PKG%\service\ccproxy.json" echo   "noProxy": "localhost,127.0.0.1"
+>> "%PKG%\service\ccproxy.json" echo }
 rem The tray and the proxy both read the version from this file (tray tooltip,
 rem /health is compiled in). Written rather than copied so the package carries
 rem the workspace version even though it ships no package.json of its own.

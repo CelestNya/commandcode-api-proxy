@@ -1,0 +1,23 @@
+/* 设计令牌（Design tokens）
+ *
+ * 颜色、圆角、阴影等 CSS 变量。其余样式只引用这些变量，改主题只动这一个文件。
+ */
+
+/* Material 3 dark tonal palette, distilled from the Shirone reference */
+:root {
+  --bg: #0F1115; --surface: #161A21; --surface-variant: #1D222B; --surface-high: #232A36;
+  --outline: #2A3140; --outline-variant: #232A36;
+  --primary: #8AB4F8; --primary-container: #1E3A5F; --on-primary-container: #D3E3FD;
+  --text: #E3E7EC; --muted: #8B94A3;
+  --ok: #81C995; --error: #F28B82; --aborted: #FDD663; --interrupted: #8AB4F8;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.22);
+  --shadow-hover: 0 2px 4px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.3);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { height: 100%; }
+body {
+  background: var(--bg); color: var(--text); height: 100%;
+  font: 13.5px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.shell { display: flex; height: 100%; }

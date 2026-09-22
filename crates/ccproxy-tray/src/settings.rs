@@ -85,6 +85,21 @@ pub fn log_dir(root: &Path, ns: &str) -> PathBuf {
     }
 }
 
+/// The file the proxy writes its own log to: `logs/proxy.log` beside the proxy
+/// binary, namespaced for a test instance.
+///
+/// The tray's own `logs/tray.log` is a different stream — lifecycle lines only —
+/// and opening that from the menu is how a user ends up staring at a two-line
+/// file while the real errors sit next door under `service/`. This reuses the
+/// proxy's own path function so the two can never drift apart again.
+#[must_use]
+pub fn proxy_log_path(root: &Path, ns: &str) -> PathBuf {
+    let proxy_dir = proxy_binary(root)
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| root.to_path_buf());
+    ccproxy::config::log_path_from(Some(&proxy_dir), Some(ns))
+}
+
 /// The outbound proxy to inject, following the Windows system setting.
 ///
 /// `CC_PROXY=off` forces direct; any other non-empty value overrides. A
@@ -314,5 +329,27 @@ mod tests {
             log_dir(Path::new("C:\\pkg"), ""),
             Path::new("C:\\pkg").join("logs")
         );
+    }
+
+    #[test]
+    fn the_proxy_log_sits_beside_the_proxy_binary_not_the_tray() {
+        let dir = std::env::temp_dir().join("ccproxy-tray-logpath-test");
+        let service = dir.join("service");
+        std::fs::create_dir_all(&service).unwrap();
+        std::fs::write(service.join("ccproxy.exe"), b"").unwrap();
+
+        // The proxy lives in `service/`, so that is where its own resolver
+        // puts `logs/proxy.log` — the tray must agree, or "打开日志" shows the
+        // user an almost-empty file while the errors sit next door.
+        assert_eq!(
+            proxy_log_path(&dir, ""),
+            service.join("logs").join("proxy.log")
+        );
+        assert_eq!(
+            proxy_log_path(&dir, "abc"),
+            service.join("logs").join("test-abc").join("proxy.log")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

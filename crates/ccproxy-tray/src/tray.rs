@@ -31,6 +31,7 @@ pub mod cmd {
     pub const AUTOSTART: usize = 4;
     pub const QUIT: usize = 5;
     pub const OPEN_WEBUI: usize = 6;
+    pub const OPEN_TRAY_LOG: usize = 7;
     /// A read-only line, drawn greyed and never chosen.
     pub const LABEL: usize = 0;
     /// A separator.
@@ -43,6 +44,7 @@ pub enum Action {
     Start,
     Stop,
     OpenLog,
+    OpenTrayLog,
     OpenWebUi,
     ToggleAutostart,
     Quit,
@@ -54,6 +56,7 @@ fn action_from_id(id: usize) -> Action {
         cmd::START => Action::Start,
         cmd::STOP => Action::Stop,
         cmd::OPEN_LOG => Action::OpenLog,
+        cmd::OPEN_TRAY_LOG => Action::OpenTrayLog,
         cmd::OPEN_WEBUI => Action::OpenWebUi,
         cmd::AUTOSTART => Action::ToggleAutostart,
         cmd::QUIT => Action::Quit,
@@ -171,6 +174,7 @@ impl UiState {
             Action::Start => cmd::START,
             Action::Stop => cmd::STOP,
             Action::OpenLog => cmd::OPEN_LOG,
+            Action::OpenTrayLog => cmd::OPEN_TRAY_LOG,
             Action::OpenWebUi => cmd::OPEN_WEBUI,
             Action::ToggleAutostart => cmd::AUTOSTART,
             Action::Quit => cmd::QUIT,
@@ -345,7 +349,8 @@ pub fn menu_entries(
         // while it is stopped — greyed rather than hidden, so the option stays
         // discoverable.
         (cmd::OPEN_WEBUI, "打开 WebUI".into(), running),
-        (cmd::OPEN_LOG, "打开日志".into(), true),
+        (cmd::OPEN_LOG, "打开代理日志".into(), true),
+        (cmd::OPEN_TRAY_LOG, "打开托盘日志".into(), true),
         (cmd::AUTOSTART, autostart_line, true),
         (cmd::SEPARATOR, String::new(), false),
         (cmd::QUIT, "退出（同时停止代理）".into(), true),
@@ -545,6 +550,8 @@ mod tests {
         assert_eq!(action_from_id(cmd::QUIT), Action::Quit);
         assert_eq!(action_from_id(cmd::START), Action::Start);
         assert_eq!(action_from_id(cmd::OPEN_WEBUI), Action::OpenWebUi);
+        assert_eq!(action_from_id(cmd::OPEN_LOG), Action::OpenLog);
+        assert_eq!(action_from_id(cmd::OPEN_TRAY_LOG), Action::OpenTrayLog);
         assert_eq!(action_from_id(cmd::LABEL), Action::None);
         assert_eq!(action_from_id(cmd::SEPARATOR), Action::None);
     }
@@ -587,6 +594,7 @@ mod tests {
                 cmd::START,
                 cmd::STOP,
                 cmd::OPEN_LOG,
+                cmd::OPEN_TRAY_LOG,
                 cmd::OPEN_WEBUI,
                 cmd::AUTOSTART,
                 cmd::QUIT,
@@ -598,5 +606,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_two_log_entries_are_distinct_and_both_present() {
+        // The proxy log and the tray log live in different directories; the
+        // whole point of splitting them is that a user can open either. If a
+        // later edit collapses them, this names the regression.
+        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
+        let entries = menu_entries(true, false, &cache, "0.6.2");
+        let label = |id: usize| {
+            entries
+                .iter()
+                .find(|(i, ..)| *i == id)
+                .map(|(_, text, _)| text.clone())
+        };
+        assert_eq!(label(cmd::OPEN_LOG).as_deref(), Some("打开代理日志"));
+        assert_eq!(label(cmd::OPEN_TRAY_LOG).as_deref(), Some("打开托盘日志"));
+        assert_ne!(cmd::OPEN_LOG, cmd::OPEN_TRAY_LOG);
     }
 }

@@ -1,0 +1,110 @@
+/* 明细屏
+ *
+ * 迷你指标行、筛选栏、分页器、请求表格、状态徽章。
+ */
+
+/* ── detail screen ── */
+.mini-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 12px; }
+.mini-card {
+  background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 14px;
+  padding: 10px 14px; box-shadow: var(--shadow);
+  transition: border-color .18s ease, transform .18s ease;
+}
+.mini-card:hover { border-color: var(--outline); transform: translateY(-2px); }
+.mini-card .mc-label { color: var(--muted); font-size: 12px; }
+.mini-card .mc-value { font-size: 23px; font-weight: 650; margin-top: 4px; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.mini-card .mc-sub { color: var(--muted); font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+.filterbar {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 14px;
+  padding: 12px 14px; margin-bottom: 12px; box-shadow: var(--shadow);
+}
+.filterbar select, .filterbar button {
+  background: var(--surface-variant); color: var(--text); border: 1px solid var(--outline-variant);
+  border-radius: 999px; padding: 7px 14px; font-size: 12.5px; font-family: inherit;
+  min-height: 34px;
+}
+/* Native selects render a system arrow and system popup, which read as a
+   different design language next to the pill buttons. The arrow is drawn as
+   a background SVG; the popup itself stays native (styling the option list
+   is not portable), which is the same trade NewAPI makes. */
+.filterbar select, .pager select {
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B94A3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  cursor: pointer;
+  transition: border-color .16s ease, background-color .16s ease;
+}
+.filterbar select:hover, .pager select:hover { border-color: var(--outline); }
+.filterbar select:focus-visible, .pager select:focus-visible,
+.filterbar button:focus-visible, .pager .pg-btn:focus-visible {
+  outline: 2px solid var(--primary); outline-offset: 1px;
+}
+.filterbar select:focus { outline: 1px solid var(--primary); }
+.filterbar button { cursor: pointer; color: var(--muted); }
+.filterbar button:hover { color: var(--text); border-color: var(--primary); }
+.filterbar button.active {
+  color: var(--on-primary-container); background: var(--primary-container);
+  border-color: transparent; font-weight: 600;
+}
+.filterbar .fgrow { flex: 1; }
+.filterbar label { color: var(--muted); font-size: 12px; }
+* { scrollbar-width: thin; scrollbar-color: var(--outline) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--outline); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+.table-wrap {
+  background: var(--surface); border: 1px solid var(--outline-variant); border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.pager {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 10px 14px; border-top: 1px solid var(--outline-variant);
+  font-size: 12.5px; color: var(--muted);
+}
+.pager .pg-btn, .pager select {
+  background-color: var(--surface-variant); color: var(--text);
+  border: 1px solid var(--outline-variant); border-radius: 8px;
+  padding: 6px 12px; font-size: 12.5px; font-family: inherit; min-height: 34px;
+  cursor: pointer;
+}
+.pager select { border-radius: 999px; }
+.pager .pg-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--text); }
+.pager .pg-btn:disabled { opacity: .45; cursor: default; }
+.pager .pg-btn.active { background: var(--primary-container); color: var(--on-primary-container); border-color: transparent; }
+.pager .pg-ellipsis { padding: 0 4px; color: var(--muted); }
+.pager .pg-count { margin-right: auto; }
+.pager .pg-size { display: inline-flex; align-items: center; gap: 6px; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
+th, td { padding: 9px 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Sticky within `.content` (the only scroller). `top: 0` now meets the topbar
+   flush because `.content` carries no padding, so rows never surface above
+   the header. The background must be opaque and the z-index above the rows. */
+th {
+  position: sticky; top: 0; background: var(--surface-variant); color: var(--muted);
+  font-weight: 500; font-size: 11.5px; letter-spacing: .2px; z-index: 2;
+  box-shadow: inset 0 -1px 0 var(--outline-variant);
+}
+thead tr:first-child th:first-child { border-top-left-radius: 13px; }
+thead tr:first-child th:last-child { border-top-right-radius: 13px; }
+td { border-top: 1px solid var(--outline-variant); font-variant-numeric: tabular-nums; }
+tr:hover td { background: var(--surface-variant); }
+td { transition: background .13s ease; }
+.tokens-cell b { font-weight: 600; }
+.tokens-cell .up { color: var(--ok); }
+.tokens-cell .down { color: var(--primary); }
+.tokens-cell small { display: block; color: var(--muted); font-size: 11.5px; }
+.lat-cell { line-height: 1.45; }
+.lat-cell small { color: var(--muted); display: block; font-size: 11.5px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid transparent; }
+.badge.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.badge.error { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, transparent); background: color-mix(in srgb, var(--error) 12%, transparent); }
+.badge.aborted { color: var(--aborted); border-color: color-mix(in srgb, var(--aborted) 45%, transparent); background: color-mix(in srgb, var(--aborted) 12%, transparent); }
+.badge.interrupted { color: var(--interrupted); border-color: color-mix(in srgb, var(--interrupted) 45%, transparent); background: color-mix(in srgb, var(--interrupted) 12%, transparent); }
+.muted { color: var(--muted); }
+.empty { padding: 40px; text-align: center; color: var(--muted); }

@@ -35,6 +35,7 @@ pub mod log;
 pub mod models;
 pub mod ndjson;
 pub mod pricing;
+pub mod proxy;
 pub mod server;
 pub mod sse;
 pub mod stream_body;

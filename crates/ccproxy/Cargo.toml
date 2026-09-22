@@ -21,3 +21,10 @@ ureq = { workspace = true }
 uuid = { workspace = true }
 sysinfo = { version = "0.35", default-features = false, features = ["system"] }
 
+[target.'cfg(windows)'.dependencies]
+# Reading the Windows system proxy for `proxy = "default"`. A safe wrapper over
+# the registry API, which matters because this crate forbids `unsafe_code` —
+# the tray reads the same key through windows-sys, but that escape hatch is not
+# available here.
+winreg = "0.52"
+

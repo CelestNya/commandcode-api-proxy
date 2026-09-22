@@ -1,0 +1,49 @@
+/* 外壳：侧边栏 + 顶栏
+ *
+ * 页面骨架。左栏导航、顶部状态条（连接/消耗/内存/运行）。
+ */
+
+/* ── sidebar ── */
+.sidebar {
+  width: 208px; flex: none; background: var(--surface);
+  border-right: 1px solid var(--outline-variant);
+  display: flex; flex-direction: column; padding: 18px 12px;
+  /* The sidebar is its own scroll context so the footer stays pinned to the
+     bottom when the nav outgrows the viewport instead of being pushed out of
+     sight. Height comes from the flex row (stretch), not a fixed value. */
+  min-height: 0; overflow-y: auto;
+}
+.side-logo { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; }
+.side-logo svg { width: 26px; height: 26px; flex: none; }
+.side-nav { display: flex; flex-direction: column; gap: 4px; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--muted); text-decoration: none; font-size: 13.5px;
+  padding: 10px 14px; border-radius: 999px; min-height: 44px;
+  transition: background .18s ease, color .18s ease, transform .18s ease;
+}
+.nav-item svg { width: 18px; height: 18px; flex: none; transition: transform .18s ease; }
+.nav-item:hover { color: var(--text); background: var(--surface-variant); transform: translateX(3px); }
+.nav-item:hover svg { transform: scale(1.08); }
+.nav-item.active { color: var(--on-primary-container); background: var(--primary-container); }
+.side-foot { margin-top: auto; color: var(--muted); font-size: 12px; padding: 12px 10px 0; border-top: 1px solid var(--outline-variant); line-height: 1.7; }
+
+/* ── topbar ── */
+.topbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 24px; background: var(--surface);
+  border-bottom: 1px solid var(--outline-variant);
+}
+.topbar .app-name { font-size: 15px; font-weight: 650; letter-spacing: .2px; }
+.topbar .app-name small { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 8px; }
+.topbar .spacer { flex: 1; } /* deliberate whitespace, per the requirement */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+  background: var(--surface-variant); border: 1px solid var(--outline-variant);
+  border-radius: 999px; padding: 5px 12px; white-space: nowrap;
+}
+.chip b { color: var(--text); font-weight: 600; }
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--aborted); }
+.chip.on .dot { background: var(--ok); }
+.chip.on b { color: var(--ok); }

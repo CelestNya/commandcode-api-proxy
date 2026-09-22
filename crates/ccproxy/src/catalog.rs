@@ -250,9 +250,16 @@ fn read_cache(path: &Path) -> Option<Catalog> {
 /// `None` means "nothing usable came back" — the caller keeps what it has.
 fn fetch_and_merge(api_base: &str, api_key: &str) -> Option<Vec<ModelMeta>> {
     let url = format!("{}/provider/v1/models", api_base.trim_end_matches('/'));
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_millis(MODELS_FETCH_TIMEOUT_MS))
-        .build();
+    // Same egress decision as the generation path, so a proxy that carries
+    // requests also carries model discovery — a catalog fetched direct while
+    // generation goes through Clash would fail in exactly the case the proxy
+    // exists to fix.
+    let agent = crate::proxy::agent_with_timeouts(
+        &url,
+        MODELS_FETCH_TIMEOUT_MS,
+        MODELS_FETCH_TIMEOUT_MS,
+        MODELS_FETCH_TIMEOUT_MS,
+    );
     let response = agent
         .get(&url)
         .set("Authorization", &format!("Bearer {api_key}"))

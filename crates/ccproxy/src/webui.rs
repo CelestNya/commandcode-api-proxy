@@ -24,9 +24,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tiny_http::{Header, Request, Response, StatusCode};
 
-/// The two-screen page, embedded at compile time — one self-contained file
+/// The page, assembled from `webui/` at build time — one self-contained file
 /// with inline CSS/JS, no external assets, so it works with the proxy offline.
-const PAGE: &str = include_str!("webui.html");
+///
+/// The sources live in `crates/ccproxy/webui/`: `index.html` lists the
+/// stylesheets and scripts, and `build.rs` inlines them in that order. Edit
+/// the file you care about, not this constant.
+const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/webui.html"));
 
 /// How many ledger rows the detail screen shows by default.
 const DEFAULT_LIMIT: i64 = 200;
@@ -37,6 +41,59 @@ const MAX_LIMIT: i64 = 1000;
 const SSE_POLL_MS: u64 = 1000;
 /// Emit a keepalive comment every N idle polls (~10 s).
 const SSE_KEEPALIVE_EVERY: u32 = 10;
+
+/// How many trailing lines of each log the log screen shows and tails.
+const LOG_TAIL_LINES: usize = 500;
+/// Largest log file we will read through the tail. A log far bigger than this
+/// is one that rotation has not yet truncated; reading the whole thing on
+/// every poll would stall the WebUI to no benefit, since only the tail shows.
+const LOG_READ_CAP_BYTES: u64 = 8 * 1024 * 1024;
+/// Log-file poll interval; faster than the ledger poll because a log line is
+/// something the user is actively watching for.
+const LOG_POLL_MS: u64 = 700;
+
+/// Which log a log-screen request refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogKind {
+    Proxy,
+    Tray,
+}
+
+impl LogKind {
+    fn parse(raw: &str) -> Self {
+        if raw.eq_ignore_ascii_case("tray") {
+            Self::Tray
+        } else {
+            Self::Proxy
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Proxy => "proxy",
+            Self::Tray => "tray",
+        }
+    }
+
+    fn path(self) -> PathBuf {
+        match self {
+            Self::Proxy => crate::config::log_path(),
+            Self::Tray => crate::config::tray_log_path(),
+        }
+    }
+}
+
+/// Parse `?which=tray` (anything else, including absent, means the proxy log).
+fn log_kind(url: &str) -> LogKind {
+    let query = url.split('?').nth(1).unwrap_or("");
+    for pair in query.split('&') {
+        let mut it = pair.split('=');
+        if it.next() == Some("which") {
+            return LogKind::parse(it.next().unwrap_or(""));
+        }
+    }
+    LogKind::Proxy
+}
 
 /// Builds response headers, skipping any pair that fails to parse (the
 /// constant strings used here never do).
@@ -183,6 +240,87 @@ pub fn handle_events(state: &SharedState, req: Request, _ctx: &RequestId) {
         pos: 0,
     };
     let _ = req.respond(Response::new(StatusCode(200), hdrs, reader, None, None));
+}
+
+/// `GET /webui/api/logs?which=proxy|tray` — the tail of one log file.
+///
+/// A single snapshot of the last `LOG_TAIL_LINES` lines, for the initial paint
+/// and for the refresh button; the live follow is `handle_log_stream`.
+pub fn handle_logs(state: &SharedState, req: Request, _ctx: &RequestId) {
+    let _ = state;
+    let kind = log_kind(req.url());
+    respond_json(req, &log_snapshot(kind));
+}
+
+/// `GET /webui/logs/stream?which=proxy|tray` — SSE follow of one log file.
+///
+/// Emits an `event: log` frame with the whole tail whenever the file's size
+/// changes (the same shape the page already renders), and a keepalive comment
+/// while idle. Following the tail wholesale rather than streaming appended
+/// bytes keeps truncation-on-rotation correct for free: a shrink is just
+/// another size change, and the next frame carries the new, shorter tail.
+pub fn handle_log_stream(state: &SharedState, req: Request, _ctx: &RequestId) {
+    let _ = state;
+    let kind = log_kind(req.url());
+    let hdrs = headers(&[
+        ("Content-Type", "text/event-stream"),
+        ("Cache-Control", "no-cache"),
+        ("Connection", "keep-alive"),
+    ]);
+    let reader = LogSseReader {
+        kind,
+        last_len: None,
+        first: true,
+        pings: 0,
+        buf: Vec::new(),
+        pos: 0,
+    };
+    let _ = req.respond(Response::new(StatusCode(200), hdrs, reader, None, None));
+}
+
+/// Read the tail of `kind`'s log file: at most `LOG_TAIL_LINES` lines from the
+/// end, without ever reading more than `LOG_READ_CAP_BYTES`.
+///
+/// Returns `None` when the file cannot be read (absent, permission), which the
+/// page renders as "日志不可用" rather than an empty pane that looks live.
+fn read_log_tail(kind: LogKind) -> Option<String> {
+    let path = kind.path();
+    let meta = std::fs::metadata(&path).ok()?;
+    let len = meta.len();
+    let mut file = std::fs::File::open(&path).ok()?;
+    if len > LOG_READ_CAP_BYTES {
+        use std::io::Seek;
+        let offset = len.saturating_sub(LOG_READ_CAP_BYTES);
+        file.seek(io::SeekFrom::Start(offset)).ok()?;
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text).ok()?;
+    Some(tail_lines(&text, LOG_TAIL_LINES))
+}
+
+/// The last `limit` lines of `text`, joined without a trailing newline. The
+/// first line is dropped when the read began mid-file (over-cap seek), since
+/// it is a fragment rather than a line.
+fn tail_lines(text: &str, limit: usize) -> String {
+    let mut lines: Vec<&str> = text.lines().collect();
+    if lines.len() > limit {
+        lines = lines.split_off(lines.len().saturating_sub(limit));
+    }
+    lines.join("\n")
+}
+
+/// The log screen's payload: the tail plus the facts the header shows.
+fn log_snapshot(kind: LogKind) -> Value {
+    let path = kind.path();
+    let tail = read_log_tail(kind);
+    let size = std::fs::metadata(&path).ok().map(|m| m.len());
+    json!({
+        "which": kind.name(),
+        "path": path.display().to_string(),
+        "sizeBytes": size,
+        "available": tail.is_some(),
+        "lines": tail.unwrap_or_default(),
+    })
 }
 
 fn with_ledger<F: FnOnce(&Connection) -> Value>(f: F) -> Value {
@@ -684,8 +822,63 @@ impl Read for SseReader {
     }
 }
 
-// ── tests ──────────────────────────────────────────────────────
+/// Follows one log file, emitting the whole tail whenever its size changes.
+///
+/// Same contract as [`SseReader`]: a `read` returning 0 would close the
+/// connection, so every poll yields either a frame or a keepalive. The file
+/// needs no lock — it is the proxy's own `proxy.log` or the tray's `tray.log`,
+/// and a concurrent append only makes the next read return a longer tail.
+struct LogSseReader {
+    kind: LogKind,
+    /// File size at the last frame; `None` until the first read. A change in
+    /// either direction (append or truncate-on-rotate) triggers a frame.
+    last_len: Option<u64>,
+    first: bool,
+    pings: u32,
+    buf: Vec<u8>,
+    pos: usize,
+}
 
+impl Read for LogSseReader {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if out.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if self.pos < self.buf.len() {
+                let n = self.buf.len().saturating_sub(self.pos).min(out.len());
+                let end = self.pos.saturating_add(n);
+                if let (Some(dst), Some(src)) = (out.get_mut(..n), self.buf.get(self.pos..end)) {
+                    dst.copy_from_slice(src);
+                    self.pos = end;
+                    return Ok(n);
+                }
+            }
+            if !self.first {
+                std::thread::sleep(Duration::from_millis(LOG_POLL_MS));
+            }
+            self.first = false;
+            self.buf.clear();
+            self.pos = 0;
+
+            let len = std::fs::metadata(self.kind.path()).ok().map(|m| m.len());
+            if len != self.last_len {
+                self.last_len = len;
+                let snap = log_snapshot(self.kind);
+                self.buf = format!("event: log\ndata: {}\n\n", snap).into_bytes();
+            }
+            if self.buf.is_empty() {
+                self.pings = self.pings.saturating_add(1);
+                if self.pings >= SSE_KEEPALIVE_EVERY {
+                    self.pings = 0;
+                    self.buf = b": keepalive\n\n".to_vec();
+                }
+            }
+        }
+    }
+}
+
+// ── tests ──────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1031,6 +1224,41 @@ mod tests {
         assert_eq!(parse_limit("/webui/api/attempts?limit=50"), 50);
         assert_eq!(parse_limit("/webui/api/attempts?limit=999999"), MAX_LIMIT);
         assert_eq!(parse_limit("/webui/api/attempts?limit=abc"), DEFAULT_LIMIT);
+    }
+
+    #[test]
+    fn log_kind_reads_the_which_parameter() {
+        // Absent or unknown means the proxy log, which is the one a user wants
+        // by default; only an explicit `tray` selects the other.
+        assert_eq!(log_kind("/webui/api/logs"), LogKind::Proxy);
+        assert_eq!(log_kind("/webui/api/logs?which=proxy"), LogKind::Proxy);
+        assert_eq!(log_kind("/webui/api/logs?which=tray"), LogKind::Tray);
+        assert_eq!(log_kind("/webui/logs/stream?which=TRay"), LogKind::Tray);
+        assert_eq!(log_kind("/webui/logs/stream?which=other"), LogKind::Proxy);
+        assert_eq!(log_kind("/webui/logs/stream?a=1&which=tray"), LogKind::Tray);
+    }
+
+    #[test]
+    fn the_log_tail_keeps_only_the_last_lines() {
+        let body: String = (0..(LOG_TAIL_LINES + 50))
+            .map(|i| format!("line {i}\n"))
+            .collect();
+        let tail = tail_lines(&body, LOG_TAIL_LINES);
+        let lines: Vec<&str> = tail.lines().collect();
+        assert_eq!(lines.len(), LOG_TAIL_LINES);
+        assert_eq!(lines[0], "line 50");
+        assert_eq!(
+            lines[LOG_TAIL_LINES - 1],
+            format!("line {}", LOG_TAIL_LINES + 49)
+        );
+    }
+
+    #[test]
+    fn a_short_log_is_kept_whole() {
+        // Fewer lines than the window must not be trimmed, and a trailing
+        // newline must not produce a phantom empty last line.
+        assert_eq!(tail_lines("a\nb\nc\n", LOG_TAIL_LINES), "a\nb\nc");
+        assert_eq!(tail_lines("", LOG_TAIL_LINES), "");
     }
 
     #[test]
