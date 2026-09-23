@@ -40,6 +40,18 @@ jobs:
           Copy-Item target/release/CCProxyTray.exe pkg/
           Copy-Item target/release/ccproxy.exe pkg/service/
           Set-Content -Path pkg/package.json -Value ('{"version":"' + $ver + '"}') -Encoding utf8
+          # The same two extra pieces build-rust.cmd stages, so a downloaded
+          # release behaves like a local build: the proxy prefers these loose
+          # panel sources over the copy compiled into the binary, so a style or
+          # script can be edited on an installed copy and picked up by a reload
+          # (no rebuild), and the config beside the exe is where the egress
+          # policy is set. Keep this list in step with build-rust.cmd.
+          Copy-Item crates/ccproxy/webui pkg/service/webui -Recurse
+          # Written through WriteAllText rather than Set-Content: `-Encoding
+          # utf8` means "with a BOM" on Windows PowerShell, and the parser
+          # rejects a BOM, which would silently discard the whole file.
+          $cfg = @('{', '  "proxy": "default",', '  "noProxy": "localhost,127.0.0.1"', '}') -join "`n"
+          [System.IO.File]::WriteAllText("$PWD/pkg/service/ccproxy.json", $cfg)
           Write-Output "staged version $ver"
       - name: Zip the package
         shell: pwsh
