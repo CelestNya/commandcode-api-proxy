@@ -264,6 +264,12 @@ fn registry_proxy() -> Option<String> {
 
 /// Choose the `https` entry out of `https=a:1;http=b:2`, else `http`, else a
 /// bare `host:port`.
+///
+/// Only the registry reader calls this, so on a platform without one the
+/// function is compiled out — otherwise `-D warnings` fails non-Windows builds
+/// with `pick_https is never used`. The unit test below covers the parsing
+/// everywhere, which is why `test` keeps it alive too.
+#[cfg(any(windows, test))]
 fn pick_https(server: &str) -> Option<String> {
     let mut http = None;
     for part in server.split(';') {
@@ -351,5 +357,28 @@ mod tests {
         // A suffix must fall on a label boundary, not mid-name.
         assert!(!e.bypasses("https://notexample.com/x"));
         assert!(!e.bypasses("https://example.com.evil.test/x"));
+    }
+
+    #[test]
+    fn the_registry_proxy_list_prefers_https_then_http_then_a_bare_host() {
+        // Windows stores per-scheme entries as `https=a:1;http=b:2`, and the
+        // order in the string is the user's, not a priority — so an `http`
+        // entry that comes first must still lose to a later `https` one.
+        assert_eq!(
+            pick_https("http=10.0.0.1:8080;https=10.0.0.1:8443"),
+            Some("https://10.0.0.1:8443".to_string())
+        );
+        assert_eq!(
+            pick_https("http=10.0.0.1:8080;ftp=10.0.0.1:21"),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+        // A bare `host:port` applies to every scheme.
+        assert_eq!(
+            pick_https("10.0.0.1:7897"),
+            Some("http://10.0.0.1:7897".to_string())
+        );
+        // Nothing usable: a blank value, and a list of only other schemes.
+        assert_eq!(pick_https("   "), None);
+        assert_eq!(pick_https("ftp=10.0.0.1:21"), None);
     }
 }
