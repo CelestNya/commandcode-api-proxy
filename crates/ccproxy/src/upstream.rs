@@ -404,18 +404,30 @@ fn is_timeout(err: &std::io::Error) -> bool {
 /// Fallback tick when neither deadline is configured.
 const DEFAULT_TICK_MS: u64 = 2_000;
 
-/// The socket read timeout, which doubles as the silence-accounting unit.
+/// The socket read timeout, which does double duty — and that is the whole
+/// subtlety here.
 ///
-/// Both application deadlines are checked only when a read returns, so the tick
-/// must be short enough that the check happens before a deadline is due: at
-/// most half the smallest configured deadline. Capped at 2 s so a slow check
-/// never delays the no-output decision by more than that. Zero deadlines are
-/// ignored (they disable a check rather than setting a target).
+/// `ureq` applies one read timeout for a connection's whole life, so this value
+/// bounds *two* different waits:
+///
+/// 1. The wait for the response **headers**. No application-level check can run
+///    before headers arrive, so this is a real deadline, not a tick.
+/// 2. Each subsequent read during the body, where the timeout is what lets
+///    `UpstreamStream` wake up and account for silence.
+///
+/// It is therefore the smallest configured deadline and nothing smaller. It must
+/// not be shortened: a "tick" of a second or two that looks harmless for (2)
+/// silently becomes a two-second cap on (1), and a real `/alpha/generate` takes
+/// **2.7–4.3 s** to produce headers (measured — the request carries a ~750 KB
+/// prompt that has to upload and be accepted first), so every real request would
+/// fail with "Error encountered in the status line". That was a live outage.
+///
+/// Zero deadlines are ignored: they disable a check rather than setting a target.
 fn read_tick_ms(idle_timeout_ms: u64, no_output_timeout_ms: u64, fallback: u64) -> u64 {
     let mut tick = u64::MAX;
     for deadline in [idle_timeout_ms, no_output_timeout_ms] {
         if deadline > 0 {
-            tick = tick.min((deadline / 2).max(1));
+            tick = tick.min(deadline);
         }
     }
     if tick == u64::MAX {
@@ -423,7 +435,7 @@ fn read_tick_ms(idle_timeout_ms: u64, no_output_timeout_ms: u64, fallback: u64) 
         // timeout in practice), so behaviour is unchanged from before.
         return fallback.max(1);
     }
-    tick.clamp(1, DEFAULT_TICK_MS)
+    tick.max(1)
 }
 
 /// Classify an I/O error from the upstream body.
@@ -591,19 +603,19 @@ fn attempt_send(
         .unwrap_or("");
     let payload = serde_json::to_string(body).unwrap_or_default();
 
-    // `timeout_connect` bounds the TCP+TLS handshake. `timeout_read` bounds a
-    // single read, which is what detects a stalled stream — note this also
-    // bounds the wait for the response headers, so the header deadline is the
-    // idle deadline rather than the (usually larger) upstream timeout. ureq
-    // applies one socket read timeout for the connection's whole life and does
-    // not expose it for adjustment after the headers arrive, and the alternative
-    // (an overall `.timeout()`) would cap the generation, which is forbidden.
+    // `timeout_connect` bounds the TCP+TLS handshake. `timeout_read` bounds one
+    // socket read, and because ureq applies it for the connection's whole life —
+    // with no way to adjust it once the headers are in — it is also the deadline
+    // for the wait for those headers. That dual role is why `read_tick_ms`
+    // returns the smallest configured deadline rather than a fraction of it: the
+    // wait for headers cannot be answered by any application-level check, so a
+    // short value there is not a tighter tick, it is a hard cap on how long
+    // upstream may take to answer. The alternative, an overall `.timeout()`,
+    // would cap the generation itself, which is forbidden.
     //
-    // The read timeout is therefore a *tick*, not a deadline: it must be short
-    // enough that a read returns and the application-level silence check in
-    // `UpstreamStream` gets to run before the no-output deadline passes. Both
-    // configured deadlines are enforced there, by accumulating the elapsed
-    // silence across successive timed-out reads.
+    // During the body the same value serves as the tick that lets
+    // `UpstreamStream` wake up and account for silence: both deadlines are
+    // enforced there, by accumulating elapsed silence across timed-out reads.
     let tick_ms = read_tick_ms(idle_timeout_ms, no_output_timeout_ms, timeout_ms);
     // The agent carries both the egress decision (proxy or direct, made once at
     // startup — see `proxy.rs`) and the per-request timeouts above, which ureq
@@ -1014,14 +1026,28 @@ mod tests {
     }
 
     #[test]
-    fn the_read_tick_is_at_most_half_the_smallest_deadline() {
-        // The application checks the deadlines only when a read returns, so the
-        // tick must be short enough to check before one is due — at most half
-        // the smallest configured window, and never more than the 2 s cap.
-        assert_eq!(read_tick_ms(5_000, 30_000, 1), 2_000); // min(2500,15000) → capped
-        assert_eq!(read_tick_ms(600, 30_000, 1), 300);
-        assert_eq!(read_tick_ms(0, 30_000, 1), 2_000); // 15000 → capped
+    fn the_read_tick_is_the_smallest_deadline_not_a_fraction_of_it() {
+        // This value is also `ureq`'s timeout for reading the response *headers*,
+        // so shortening it caps how long upstream may take to answer at all.
+        // Halving or capping it at 2 s (both tried) made every real request fail:
+        // `/alpha/generate` needs 2.7–4.3 s to emit headers for a ~750 KB prompt.
+        assert_eq!(read_tick_ms(120_000, 30_000, 1), 30_000); // the shipped default
+        assert_eq!(read_tick_ms(5_000, 30_000, 1), 5_000);
+        assert_eq!(read_tick_ms(600, 30_000, 1), 600);
+        assert_eq!(read_tick_ms(0, 30_000, 1), 30_000);
         assert_eq!(read_tick_ms(0, 0, 600_000), 600_000); // neither set: unchanged
-        assert_eq!(read_tick_ms(0, 1, 1), 1); // 1/2 = 0 → floored to 1
+        assert_eq!(read_tick_ms(0, 1, 1), 1);
+    }
+
+    #[test]
+    fn the_shipped_defaults_leave_room_for_a_real_request_to_answer() {
+        // Guards the outage directly: with the default 30 s no-output deadline
+        // (config's `NO_OUTPUT_TIMEOUT_DEFAULT_MS`) and a 120 s idle window, the
+        // header wait must be measured in seconds, not in one or two.
+        let tick = read_tick_ms(120_000, 30_000, 600_000);
+        assert!(
+            tick >= 10_000,
+            "a header wait of {tick}ms cannot accommodate a real /alpha/generate (2.7–4.3 s)"
+        );
     }
 }
