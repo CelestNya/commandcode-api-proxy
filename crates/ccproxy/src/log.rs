@@ -126,8 +126,14 @@ fn emit(tag: &str, msg: &str, to_stderr: bool) {
 mod tests {
     use super::*;
 
+    /// Serialises the tests that touch the process-global `LEVEL`. Without it
+    /// they race: one test's mid-flight `store(WARN)` can land inside another's
+    /// `init`-then-assert window and the suite flakes (observed 2026-09-26).
+    static LEVEL_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn the_level_gate_admits_everything_at_or_above_it() {
+        let _guard = LEVEL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let previous = LEVEL.load(Ordering::Relaxed);
         LEVEL.store(WARN, Ordering::Relaxed);
         assert!(!enabled(DEBUG));
@@ -139,6 +145,7 @@ mod tests {
 
     #[test]
     fn an_unknown_level_falls_back_to_info() {
+        let _guard = LEVEL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let previous = LEVEL.load(Ordering::Relaxed);
         init("nonsense");
         assert_eq!(LEVEL.load(Ordering::Relaxed), INFO);
