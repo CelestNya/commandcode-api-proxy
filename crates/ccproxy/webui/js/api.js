@@ -12,8 +12,11 @@
 function attemptsLimit() { return Math.max(state.pageSize, 200); }
 function fetchStats(animate) {
   return fetch("/webui/api/stats?days=" + state.days).then(function (r) { return r.json(); })
-    .then(function (s) { renderStats(s, animate === true); })
-    .catch(function () { /* next poll retries */ });
+    .then(function (s) {
+      renderStats(s, animate === true);
+      setLiveChip(true);
+    })
+    .catch(function () { setLiveChip(false); /* next poll retries */ });
 }
 function fetchAttempts() {
   return fetch("/webui/api/attempts?limit=" + attemptsLimit()).then(function (r) { return r.json(); })
@@ -27,7 +30,14 @@ function fetchSysinfo() {
   fetch("/webui/api/sysinfo").then(function (r) { return r.json(); }).then(function (s) {
     el("chip-mem").textContent = (s.memMb == null ? "—" : s.memMb.toFixed(1) + " MB");
     el("chip-uptime").textContent = fmtUptime(s.uptimeSecs);
+    if (s.version) el("ver").textContent = " v" + s.version;
   }).catch(function () { /* transient; next tick retries */ });
+}
+
+/* 顶栏的实时 chip:数据轮询成功即点亮(与日志页的跟随 chip 相互独立)。 */
+function setLiveChip(on) {
+  el("chip-live").classList.toggle("on", on);
+  el("chip-live-text").textContent = on ? "实时" : "重连中";
 }
 
 /* 日志：since=0 拉全量尾巴（进入日志页 / 切换文件 / 轮转重置后），

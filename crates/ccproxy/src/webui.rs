@@ -264,12 +264,14 @@ fn page_response(etag: &str, if_none_match: Option<&str>) -> Option<u16> {
     }
 }
 
-/// `GET /webui/api/sysinfo` — process working set and uptime for the top bar.
+/// `GET /webui/api/sysinfo` — process working set, uptime and version for the
+/// top bar.
 pub fn handle_sysinfo(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
     let body = json!({
         "memMb": process_working_set_mb(),
         "uptimeSecs": process_uptime_secs(),
+        "version": crate::server::PROXY_VERSION,
     });
     respond_json(req, &body);
 }
