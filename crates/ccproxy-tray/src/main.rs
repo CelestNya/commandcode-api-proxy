@@ -226,7 +226,13 @@ fn dispatch(
         tray::Action::OpenTrayLog => open_tray_log(log),
         tray::Action::OpenWebUi => open_webui(port, log),
         tray::Action::ToggleAutostart => settings::toggle_autostart(root, log),
-        tray::Action::Quit => {}
+        tray::Action::Quit => {
+            // The last line the tray ever writes: the UI loop breaks right
+            // after this action, so without it a manual quit and a silent
+            // crash look identical in tray.log (which is how the 2026-09-26
+            // disappearance stayed ambiguous).
+            log.append("[tray] 手动退出（停止代理并释放端口）");
+        }
         tray::Action::None => {}
     }
 }
@@ -440,5 +446,32 @@ mod tests {
         // namespaced instance (8890) must not be sent to the production 8787.
         assert_eq!(webui_url(8787), "http://127.0.0.1:8787/webui");
         assert_eq!(webui_url(8890), "http://127.0.0.1:8890/webui");
+    }
+
+    #[test]
+    fn a_manual_quit_leaves_a_log_line_behind() {
+        // The quit path never returns to the UI loop, so without a line here a
+        // vanished tray is indistinguishable from a silent crash — exactly the
+        // ambiguity of the 2026-09-26 disappearance (a LiveKernelEvent and a
+        // manual quit look identical in a tray.log that ends mid-stream).
+        let dir =
+            std::env::temp_dir().join(format!("ccproxy-tray-quit-log-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let log = std::sync::Arc::new(process::LogFile::new(&dir));
+        let proxy = process::shared(process::ProxyProcess::new(
+            std::path::PathBuf::from("ccproxy.exe"),
+            dir.join("root"),
+            8787,
+            std::sync::Arc::clone(&log),
+        ));
+
+        dispatch(tray::Action::Quit, &proxy, &log, &dir, 8787, None);
+
+        let text = std::fs::read_to_string(dir.join("tray.log")).expect("tray.log written");
+        assert!(
+            text.contains("[tray] 手动退出"),
+            "a manual quit must be recorded, got: {text}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
