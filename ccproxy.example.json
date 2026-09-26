@@ -13,7 +13,7 @@
   "_ccApiBase": "上游地址，默认 https://api.commandcode.ai",
   "_upstreamTimeoutMs": "单次尝试的整体超时（毫秒）",
   "_idleTimeoutMs": "已开始出字后，两个数据块之间的最大间隔（毫秒）",
-  "_noOutputTimeoutMs": "完全无字节超过该毫秒数即丢弃重发，默认 30000",
+  "_noOutputTimeoutMs": "完全无字节超过该毫秒数即丢弃重发，默认 30000。注意：它与 idleTimeoutMs 共用同一个 socket 读超时，因此等待响应头的实际上限是两者中较小的那个——不要指望调小它能更快发现故障，低于真实请求所需会打死所有请求（见 docs/adr/0001）",
   "_noOutputRetries": "丢弃重发的最多次数，默认 3",
   "_maxBodyBytes": "请求体上限（字节）"
 }
