@@ -327,8 +327,23 @@ fn handover_loop(
             log.append("交接成功：端口已有代理应答 /health，通知现任退出");
             win::event::set(Which::Commit);
         } else {
-            log.append("交接失败：未能在期限内提供可应答的 /health，通知现任回滚");
+            // Roll back FOR REAL: the incumbent can only resume if it can
+            // re-acquire the ownership lock and re-bind the port, and neither
+            // is possible while this instance keeps holding the lock with a
+            // proxy child on it. (This exact gap fired once: the gate expired
+            // while the child was still starting; it bound seconds later and
+            // kept serving, so "rollback" left two trays believing opposite
+            // things about the port.) Stand down the same way a commit does —
+            // stop the child, hand back the lock, let the UI loop end this
+            // process — and the incumbent's rollback resumes cleanly.
+            log.append(
+                "交接失败：未能在期限内提供可应答的 /health —— 回滚：停止本方代理，交还现任",
+            );
+            if let Ok(mut p) = proxy.lock() {
+                p.stop();
+            }
             win::event::set(Which::Abort);
+            stood_down.store(true, std::sync::atomic::Ordering::Relaxed);
             return;
         }
         // This instance is the new incumbent and must keep watching, or the
@@ -373,15 +388,24 @@ fn handover_loop(
                 }
                 Some(owner::Verdict::Abort) | Some(owner::Verdict::TimedOut) => {
                     log.append("交接回滚：重新取得所有权并恢复服务");
-                    if !win::mutex::try_acquire(Duration::from_secs(15)) {
-                        log.append("交接回滚：未能重新取得所有权（另一实例已接管）");
+                    if win::mutex::try_acquire(Duration::from_secs(15)) {
+                        win::event::reset(Which::Commit);
+                        win::event::reset(Which::Standby);
+                        if let Ok(mut p) = proxy.lock() {
+                            let _ = p.start(None);
+                        }
+                        break;
                     }
+                    // The successor still holds the lock. With the successor-side
+                    // fix it is standing down and will release it within moments;
+                    // starting this instance's proxy now would only crash-loop
+                    // against the port it still holds (that exact loop fired once,
+                    // two proxies restarting every 3s). Retry the acquisition
+                    // instead; the events are reset so the next verdict is fresh.
+                    log.append("交接回滚：所有权仍在继任者手中，待其退出后重试接管");
                     win::event::reset(Which::Commit);
                     win::event::reset(Which::Standby);
-                    if let Ok(mut p) = proxy.lock() {
-                        let _ = p.start(None);
-                    }
-                    break;
+                    std::thread::sleep(Duration::from_millis(500));
                 }
                 None => std::thread::sleep(Duration::from_millis(50)),
             }

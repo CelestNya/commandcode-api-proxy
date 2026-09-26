@@ -92,6 +92,50 @@ pub fn resolve_cli_version(
     }
 }
 
+/// How long the startup lookup may delay the listener from binding.
+///
+/// The lookup runs on the listener's startup path, and the tray's handover gate
+/// gives the whole proxy 30s to come up and answer `/health`. A slow lookup —
+/// two 10s attempts, on top of DNS resolution that ureq does not bound at all —
+/// once took 35.8s and blew the gate: the tray declared the handover failed
+/// while the proxy went on to bind seconds later, leaving both sides with
+/// opposite beliefs about who owned the port. Four seconds keeps the whole
+/// startup comfortably inside the gate; the fallback version is a working
+/// value, and the next startup tries the lookup again.
+pub const STARTUP_LOOKUP_BUDGET: Duration = Duration::from_millis(4_000);
+
+/// [`resolve_cli_version`] with a hard wall-clock budget for the lookup.
+///
+/// The fetch runs on a worker thread — the retries and the fallback inside
+/// [`resolve_cli_version`] keep their meaning — and when the budget expires the
+/// thread is left to finish on its own (its result is discarded) while the
+/// fallback wins immediately. A pinned version skips the network entirely and
+/// never spawns the worker.
+pub fn resolve_within_budget(
+    configured: Option<&str>,
+    fallback: &str,
+    fetch: impl FnOnce() -> Option<String> + Send + 'static,
+    budget: Duration,
+) -> String {
+    match configured.filter(|v| !v.is_empty()) {
+        Some(pinned) => pinned.to_owned(),
+        None => {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let fallback_owned = fallback.to_owned();
+            std::thread::Builder::new()
+                .name("ccproxy-cli-version".into())
+                .spawn(move || {
+                    let _ = tx.send(resolve_cli_version(None, &fallback_owned, fetch));
+                })
+                .ok();
+            match rx.recv_timeout(budget) {
+                Ok(version) => version,
+                _ => fallback.to_owned(),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +218,64 @@ mod tests {
     fn a_missing_version_field_parses_as_none() {
         let parsed: NpmPackage = serde_json::from_str("{}").expect("parses");
         assert!(parsed.version.is_none());
+    }
+
+    #[test]
+    fn a_slow_lookup_misses_the_budget_and_falls_back() {
+        // The handover-gate incident: a lookup that takes longer than the
+        // budget must not delay the listener past the tray's 30s deadline.
+        // The worker thread keeps running; its result is simply discarded.
+        let v = resolve_within_budget(
+            None,
+            "1.54.1",
+            || {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                Some("2.0.0".into())
+            },
+            std::time::Duration::from_millis(60),
+        );
+        assert_eq!(v, "1.54.1");
+    }
+
+    #[test]
+    fn a_fast_lookup_still_wins() {
+        let v = resolve_within_budget(
+            None,
+            "1.54.1",
+            || Some("2.0.0".into()),
+            std::time::Duration::from_millis(2000),
+        );
+        assert_eq!(v, "2.0.0");
+    }
+
+    #[test]
+    fn a_pinned_version_never_spawns_the_worker() {
+        // The fetch would set this flag if it ever ran; a pinned version must
+        // answer without touching the network at all, on or off the budget.
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let reached = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&reached);
+        let v = resolve_within_budget(
+            Some("9.9.9"),
+            "1.54.1",
+            move || {
+                flag.store(true, Ordering::Relaxed);
+                Some("2.0.0".into())
+            },
+            std::time::Duration::from_millis(10),
+        );
+        assert_eq!(v, "9.9.9");
+        assert!(!reached.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_lookup_that_returns_nothing_within_the_budget_falls_back() {
+        let v = resolve_within_budget(
+            None,
+            "1.54.1",
+            || None,
+            std::time::Duration::from_millis(2000),
+        );
+        assert_eq!(v, "1.54.1");
     }
 }

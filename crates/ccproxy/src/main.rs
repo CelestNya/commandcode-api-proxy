@@ -33,15 +33,19 @@ fn main() {
     ccproxy::log::info(&egress.note);
 
     // CC's server blocks a stale `x-command-code-version`, so the published
-    // version is consulted once before the listener opens. An explicit
-    // CC_CLI_VERSION pins it and skips the lookup, so offline runs never wait
-    // on DNS.
+    // version is consulted before the listener opens — within a hard budget.
+    // The lookup once took 35.8s (two 10s attempts on top of DNS resolution
+    // that ureq does not bound) and blew the tray's 30s handover gate, so the
+    // budget is the load-bearing wall: past it the fallback wins and the next
+    // startup retries. An explicit CC_CLI_VERSION pins it and skips the
+    // lookup, so offline runs never wait on DNS.
     let pinned = env("CC_CLI_VERSION");
     let before = config.cc_version.clone();
-    config.cc_version = ccproxy::cli_version::resolve_cli_version(
+    config.cc_version = ccproxy::cli_version::resolve_within_budget(
         pinned.as_deref(),
         &config.cc_version,
         ccproxy::cli_version::fetch_latest_cli_version,
+        ccproxy::cli_version::STARTUP_LOOKUP_BUDGET,
     );
     if config.cc_version != before {
         ccproxy::log::debug(&format!(
