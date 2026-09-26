@@ -22,7 +22,6 @@ use serde_json::{json, Value};
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::time::Duration;
 use tiny_http::{Header, Request, Response, StatusCode};
 
 /// The page compiled into the binary — the fallback, and the whole story when
@@ -120,20 +119,17 @@ const DEFAULT_LIMIT: i64 = 200;
 /// Default trend window (days) for the overview screen.
 const DEFAULT_TREND_DAYS: i64 = 14;
 const MAX_LIMIT: i64 = 1000;
-/// Poll interval of the live stream.
-const SSE_POLL_MS: u64 = 1000;
-/// Emit a keepalive comment every N idle polls (~10 s).
-const SSE_KEEPALIVE_EVERY: u32 = 10;
-
-/// How many trailing lines of each log the log screen shows and tails.
+/// How many trailing lines of each log the log screen shows on first paint.
 const LOG_TAIL_LINES: usize = 500;
 /// Largest log file we will read through the tail. A log far bigger than this
 /// is one that rotation has not yet truncated; reading the whole thing on
 /// every poll would stall the WebUI to no benefit, since only the tail shows.
 const LOG_READ_CAP_BYTES: u64 = 8 * 1024 * 1024;
-/// Log-file poll interval; faster than the ledger poll because a log line is
-/// something the user is actively watching for.
-const LOG_POLL_MS: u64 = 700;
+/// Upper bound on one log-increment poll. The client re-polls immediately, so
+/// the cap bounds per-poll latency, not throughput: a log that suddenly grows
+/// by megabytes streams to the page over consecutive polls instead of one
+/// giant frame.
+const LOG_INCREMENT_CAP_BYTES: usize = 256 * 1024;
 
 /// Which log a log-screen request refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,44 +205,63 @@ fn respond_json(req: Request, body: &Value) {
 
 // ── routes ─────────────────────────────────────────────────────
 
-/// `GET /webui` — the page itself, with the first snapshot inlined.
+/// `GET /webui` — the panel, as a static document.
 ///
-/// Astro-style static-first: the first screenful is already in the HTML
-/// (`window.__INIT__`), so the page paints without a network round-trip and
-/// the JS only wires the live stream. When the ledger cannot be opened the
-/// page still renders, just without the initial payload.
-/// Makes a JSON document safe to embed inside a `<script>` element.
-///
-/// `serde_json` escapes quotes and control characters but never `<`, `>`, or
-/// `&`, so a ledger string — a model name arrives straight from the request
-/// body — could close the script tag from within the data. `\uXXXX` escapes
-/// are invisible to `JSON.parse` and end that hazard.
-fn inline_json(json: &str) -> String {
-    json.replace('<', "\\u003c")
-        .replace('>', "\\u003e")
-        .replace('&', "\\u0026")
-}
-
+/// The page carries no per-request snapshot: the client hydrates from the JSON
+/// APIs in parallel right after parse, which on loopback costs milliseconds and
+/// buys the thing the snapshot made impossible — a **stable body**, and with it
+/// a stable `ETag`, so a reload is a zero-byte 304 instead of re-shipping
+/// (formerly) ~130 KB of HTML of which two thirds was an inline snapshot.
 pub fn handle_page(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
-    let init = match billing::open_database(&billing::billing_dir()) {
-        Some(conn) => {
-            let snap = json!({
-                "stats": stats_json(&conn, DEFAULT_TREND_DAYS),
-                "attempts": attempts_json(&conn, DEFAULT_LIMIT),
-            });
-            serde_json::to_string(&snap).unwrap_or_else(|_| "{}".into())
+    let body = page();
+    let etag = etag_of(&body);
+    let if_none_match = req
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("If-None-Match"))
+        .and_then(|h| h.value.as_str().to_string().into());
+    if page_response(&etag, if_none_match.as_deref()).is_none() {
+        let mut resp = Response::empty(304);
+        for h in headers(&[("Cache-Control", "no-cache"), ("ETag", etag.as_str())]) {
+            resp = resp.with_header(h);
         }
-        None => "{}".into(),
-    };
-    let body = page().replace(
-        "</head>",
-        &format!(
-            "<script>window.__INIT__={};</script></head>",
-            inline_json(&init)
-        ),
-    );
-    respond(req, 200, body, "text/html; charset=utf-8");
+        let _ = req.respond(resp);
+        return;
+    }
+    let hdrs = headers(&[
+        ("Content-Type", "text/html; charset=utf-8"),
+        ("Cache-Control", "no-cache"),
+        ("ETag", etag.as_str()),
+    ]);
+    let mut resp = Response::from_string(body).with_status_code(StatusCode(200));
+    for h in hdrs {
+        resp = resp.with_header(h);
+    }
+    let _ = req.respond(resp);
+}
+
+/// The page's ETag: a quoted hash of the exact bytes served. Deterministic
+/// within a binary, which is the lifetime a revalidation cache cares about.
+fn etag_of(page: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    page.hash(&mut hasher);
+    format!("\"{:016x}\"", hasher.finish())
+}
+
+/// `None` means "not modified" — the client's tag matches and a 304 is due.
+/// `Some(200)` means serve the full page. Tag comparison ignores the weak
+/// prefix and the quotes.
+fn page_response(etag: &str, if_none_match: Option<&str>) -> Option<u16> {
+    let matches = if_none_match
+        .map(|v| v.trim().trim_start_matches("W/").trim_matches('"') == etag.trim_matches('"'))
+        .unwrap_or(false);
+    if matches {
+        None
+    } else {
+        Some(200)
+    }
 }
 
 /// `GET /webui/api/sysinfo` — process working set and uptime for the top bar.
@@ -307,58 +322,122 @@ pub fn handle_attempts(state: &SharedState, req: Request, _ctx: &RequestId) {
 }
 
 /// `GET /webui/events` — the Server-Sent Events live stream.
-pub fn handle_events(state: &SharedState, req: Request, _ctx: &RequestId) {
-    let _ = state;
-    let hdrs = headers(&[
-        ("Content-Type", "text/event-stream"),
-        ("Cache-Control", "no-cache"),
-        ("Connection", "keep-alive"),
-    ]);
-    let reader = SseReader {
-        dir: billing::billing_dir(),
-        last_max_id: 0,
-        first: true,
-        pings: 0,
-        buf: Vec::new(),
-        pos: 0,
-    };
-    let _ = req.respond(Response::new(StatusCode(200), hdrs, reader, None, None));
-}
-
-/// `GET /webui/api/logs?which=proxy|tray` — the tail of one log file.
+/// `GET /webui/api/logs?which=proxy|tray&since=<byte-len>` — log follow, as
+/// plain polling of complete responses.
 ///
-/// A single snapshot of the last `LOG_TAIL_LINES` lines, for the initial paint
-/// and for the refresh button; the live follow is `handle_log_stream`.
+/// The previous design streamed the tail over SSE, and it was architecturally
+/// broken on this stack: tiny_http buffers a streamed response and only
+/// flushes at its end — which for an endless SSE stream is never — so the
+/// response headers and early frames sat in an 8 KiB buffer for as long as the
+/// page stayed open (the follow chip never lit and the pane stayed blank). A
+/// complete response, by contrast, is flushed by tiny_http when it finishes,
+/// so polling is the reliable primitive here.
+///
+/// `since` is the byte length the client already holds. The reply carries only
+/// the complete lines after that offset plus the new length, which keeps both
+/// the payload and the page's render incremental. A `since` beyond the file's
+/// length means the log shrank underneath the client (rotation truncates), so
+/// the reply is the full tail plus `reset`, which the page repaints from.
 pub fn handle_logs(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
     let kind = log_kind(req.url());
-    respond_json(req, &log_snapshot(kind));
+    let since = parse_since(req.url());
+    respond_json(req, &log_increment(kind, since));
 }
 
-/// `GET /webui/logs/stream?which=proxy|tray` — SSE follow of one log file.
-///
-/// Emits an `event: log` frame with the whole tail whenever the file's size
-/// changes (the same shape the page already renders), and a keepalive comment
-/// while idle. Following the tail wholesale rather than streaming appended
-/// bytes keeps truncation-on-rotation correct for free: a shrink is just
-/// another size change, and the next frame carries the new, shorter tail.
-pub fn handle_log_stream(state: &SharedState, req: Request, _ctx: &RequestId) {
-    let _ = state;
-    let kind = log_kind(req.url());
-    let hdrs = headers(&[
-        ("Content-Type", "text/event-stream"),
-        ("Cache-Control", "no-cache"),
-        ("Connection", "keep-alive"),
-    ]);
-    let reader = LogSseReader {
-        kind,
-        last_len: None,
-        first: true,
-        pings: 0,
-        buf: Vec::new(),
-        pos: 0,
+/// The increment payload for one log poll. `since` is a byte offset the client
+/// holds; see [`handle_logs`] for the contract.
+fn log_increment(kind: LogKind, since: usize) -> Value {
+    let path = kind.path();
+    let len = std::fs::metadata(&path).ok().map(|m| m.len());
+    let Some(len) = len else {
+        return json!({
+            "which": kind.name(),
+            "path": path.display().to_string(),
+            "sizeBytes": null,
+            "available": false,
+            "reset": true,
+            "lines": "",
+            "len": 0,
+        });
     };
-    let _ = req.respond(Response::new(StatusCode(200), hdrs, reader, None, None));
+    if since > len as usize {
+        // Rotation shrank the file: hand back the whole tail and let the page
+        // repaint from scratch.
+        let tail = read_log_tail(kind).unwrap_or_default();
+        return json!({
+            "which": kind.name(),
+            "path": path.display().to_string(),
+            "sizeBytes": len,
+            "available": true,
+            "reset": true,
+            "lines": tail,
+            "len": len,
+        });
+    }
+    let read = read_from(kind, since as u64);
+    let (reset, lines, new_len) = increment_body(&read, since);
+    json!({
+        "which": kind.name(),
+        "path": path.display().to_string(),
+        "sizeBytes": len,
+        "available": true,
+        "reset": reset,
+        "lines": lines,
+        "len": new_len,
+    })
+}
+
+/// The increment decision over the bytes read from `since`: `(reset, lines,
+/// new_len)`.
+///
+/// The reset flag is **never** set here. A shrink can only be detected against
+/// the file's real length, which the caller does before reading; this function
+/// sees only the slice, where an empty read means "nothing new" — treating it
+/// as a rotation would zero the client's offset and loop the page between full
+/// repaints forever. That bug shipped for one round: the poll reset on every
+/// quiet tick, the page repainted 41 KB each time, and the pane flickered.
+///
+/// `new_len` is `since` plus the bytes of the *complete* lines returned, which
+/// is always a safe resumable offset: a trailing fragment still being written
+/// is held back and picked up on the next poll.
+fn increment_body(read: &str, since: usize) -> (bool, String, usize) {
+    let kept = increment_lines(read);
+    if kept.is_empty() {
+        return (false, String::new(), since);
+    }
+    (false, kept.clone(), since.saturating_add(kept.len()))
+}
+
+/// Read at most [`LOG_INCREMENT_CAP_BYTES`] of the log from `offset`, lossily.
+fn read_from(kind: LogKind, offset: u64) -> String {
+    use std::io::{Read, Seek};
+    let Ok(mut file) = std::fs::File::open(kind.path()) else {
+        return String::new();
+    };
+    if file.seek(io::SeekFrom::Start(offset)).is_err() {
+        return String::new();
+    }
+    let mut buf = Vec::new();
+    let mut limit = file.take(LOG_INCREMENT_CAP_BYTES as u64);
+    if limit.read_to_end(&mut buf).is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Parse `?since=<bytes>` (absent or junk means 0 — a full tail).
+fn parse_since(url: &str) -> usize {
+    let query = url.split('?').nth(1).unwrap_or("");
+    for pair in query.split('&') {
+        let mut it = pair.split('=');
+        if it.next() == Some("since") {
+            if let Ok(n) = it.next().unwrap_or("").parse::<usize>() {
+                return n;
+            }
+        }
+    }
+    0
 }
 
 /// Read the tail of `kind`'s log file: at most `LOG_TAIL_LINES` lines from the
@@ -381,6 +460,25 @@ fn read_log_tail(kind: LogKind) -> Option<String> {
     Some(tail_lines(&text, LOG_TAIL_LINES))
 }
 
+/// The complete lines of `rest`, capped at [`LOG_INCREMENT_CAP_BYTES`] so a
+/// burst streams over consecutive polls instead of one giant frame.
+fn increment_lines(rest: &str) -> String {
+    let mut end = match rest.rfind('\n') {
+        Some(i) => i.saturating_add(1),
+        None => return String::new(),
+    };
+    // Shrink to the last complete line that still fits the cap. A single line
+    // over the cap is dropped entirely rather than split (the next poll cannot
+    // resume mid-line); an enormous line is pathological, not a design case.
+    while end > LOG_INCREMENT_CAP_BYTES {
+        match rest[..end.saturating_sub(1)].rfind('\n') {
+            Some(i) => end = i.saturating_add(1),
+            None => return String::new(),
+        }
+    }
+    rest[..end].to_string()
+}
+
 /// The last `limit` lines of `text`, joined without a trailing newline. The
 /// first line is dropped when the read began mid-file (over-cap seek), since
 /// it is a fragment rather than a line.
@@ -390,20 +488,6 @@ fn tail_lines(text: &str, limit: usize) -> String {
         lines = lines.split_off(lines.len().saturating_sub(limit));
     }
     lines.join("\n")
-}
-
-/// The log screen's payload: the tail plus the facts the header shows.
-fn log_snapshot(kind: LogKind) -> Value {
-    let path = kind.path();
-    let tail = read_log_tail(kind);
-    let size = std::fs::metadata(&path).ok().map(|m| m.len());
-    json!({
-        "which": kind.name(),
-        "path": path.display().to_string(),
-        "sizeBytes": size,
-        "available": tail.is_some(),
-        "lines": tail.unwrap_or_default(),
-    })
 }
 
 fn with_ledger<F: FnOnce(&Connection) -> Value>(f: F) -> Value {
@@ -835,136 +919,82 @@ fn attempts_json(conn: &Connection, limit: i64) -> Value {
     json!(out)
 }
 
-/// A snapshot of both screens, pushed over the event stream.
-fn snapshot_json(conn: &Connection) -> Value {
-    json!({
-        "stats": stats_json(conn, DEFAULT_TREND_DAYS),
-        "attempts": attempts_json(conn, DEFAULT_LIMIT),
-    })
-}
-
-// ── the live stream ────────────────────────────────────────────
-
-/// Blocks inside `Read` until the ledger changes, then yields an SSE frame.
-///
-/// tiny_http reads this as the response body; a read returning 0 would close
-/// the connection, so every poll either produces a `snapshot` event (when
-/// `max(id)` moved) or a keepalive comment, and never an empty read.
-struct SseReader {
-    dir: PathBuf,
-    last_max_id: i64,
-    first: bool,
-    pings: u32,
-    buf: Vec<u8>,
-    pos: usize,
-}
-
-impl Read for SseReader {
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        if out.is_empty() {
-            return Ok(0);
-        }
-        loop {
-            if self.pos < self.buf.len() {
-                let n = self.buf.len().saturating_sub(self.pos).min(out.len());
-                let end = self.pos.saturating_add(n);
-                if let (Some(dst), Some(src)) = (out.get_mut(..n), self.buf.get(self.pos..end)) {
-                    dst.copy_from_slice(src);
-                    self.pos = end;
-                    return Ok(n);
-                }
-            }
-            if !self.first {
-                std::thread::sleep(Duration::from_millis(SSE_POLL_MS));
-            }
-            self.first = false;
-            self.buf.clear();
-            self.pos = 0;
-
-            if let Some(conn) = billing::open_database(&self.dir) {
-                if let Ok(max_id) =
-                    conn.query_row("select coalesce(max(id), 0) from billing", [], |r| {
-                        r.get::<_, i64>(0)
-                    })
-                {
-                    if max_id != self.last_max_id {
-                        self.last_max_id = max_id;
-                        let snap = snapshot_json(&conn);
-                        self.buf = format!("event: snapshot\ndata: {}\n\n", snap).into_bytes();
-                    }
-                }
-            }
-            if self.buf.is_empty() {
-                self.pings = self.pings.saturating_add(1);
-                if self.pings >= SSE_KEEPALIVE_EVERY {
-                    self.pings = 0;
-                    self.buf = b": keepalive\n\n".to_vec();
-                }
-            }
-        }
-    }
-}
-
-/// Follows one log file, emitting the whole tail whenever its size changes.
-///
-/// Same contract as [`SseReader`]: a `read` returning 0 would close the
-/// connection, so every poll yields either a frame or a keepalive. The file
-/// needs no lock — it is the proxy's own `proxy.log` or the tray's `tray.log`,
-/// and a concurrent append only makes the next read return a longer tail.
-struct LogSseReader {
-    kind: LogKind,
-    /// File size at the last frame; `None` until the first read. A change in
-    /// either direction (append or truncate-on-rotate) triggers a frame.
-    last_len: Option<u64>,
-    first: bool,
-    pings: u32,
-    buf: Vec<u8>,
-    pos: usize,
-}
-
-impl Read for LogSseReader {
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        if out.is_empty() {
-            return Ok(0);
-        }
-        loop {
-            if self.pos < self.buf.len() {
-                let n = self.buf.len().saturating_sub(self.pos).min(out.len());
-                let end = self.pos.saturating_add(n);
-                if let (Some(dst), Some(src)) = (out.get_mut(..n), self.buf.get(self.pos..end)) {
-                    dst.copy_from_slice(src);
-                    self.pos = end;
-                    return Ok(n);
-                }
-            }
-            if !self.first {
-                std::thread::sleep(Duration::from_millis(LOG_POLL_MS));
-            }
-            self.first = false;
-            self.buf.clear();
-            self.pos = 0;
-
-            let len = std::fs::metadata(self.kind.path()).ok().map(|m| m.len());
-            if len != self.last_len {
-                self.last_len = len;
-                let snap = log_snapshot(self.kind);
-                self.buf = format!("event: log\ndata: {}\n\n", snap).into_bytes();
-            }
-            if self.buf.is_empty() {
-                self.pings = self.pings.saturating_add(1);
-                if self.pings >= SSE_KEEPALIVE_EVERY {
-                    self.pings = 0;
-                    self.buf = b": keepalive\n\n".to_vec();
-                }
-            }
-        }
-    }
-}
-
 // ── tests ──────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_read_means_nothing_new_and_never_resets() {
+        // THE regression: the poll used to treat an empty read as a rotation,
+        // zeroing the client offset and looping the page between full repaints
+        // forever. Nothing new = stay put, same offset, empty lines.
+        assert_eq!(increment_body("", 40250), (false, String::new(), 40250));
+    }
+
+    #[test]
+    fn an_increment_returns_its_complete_lines_and_the_advanced_offset() {
+        let read = "line-2\nline-3\n";
+        assert_eq!(
+            increment_body(read, 40250),
+            (false, "line-2\nline-3\n".to_string(), 40250 + read.len())
+        );
+    }
+
+    #[test]
+    fn a_trailing_fragment_is_held_back_so_the_offset_stays_resumable() {
+        // A line still being written has no newline yet; returning it would
+        // both render a half line and make the next poll re-read it.
+        assert_eq!(
+            increment_body("partial line without a terminator", 100),
+            (false, String::new(), 100)
+        );
+        // The completed prefix of a burst is taken; the fragment stays.
+        let read = "a\nb\nc still writing";
+        assert_eq!(increment_body(read, 0), (false, "a\nb\n".to_string(), 4));
+    }
+
+    #[test]
+    fn an_increment_read_is_capped_so_a_huge_burst_cannot_stall_the_poll() {
+        // A quiet log that suddenly grows by megabytes must not ship the whole
+        // burst in one poll: the client re-polls immediately, so the cap bounds
+        // per-poll latency, not throughput.
+        let line = "x".repeat(1000);
+        let read = format!("{}\n", line.repeat(1000)); // ~1 MB
+        let (_, lines, len) = increment_body(&read, 0);
+        assert!(
+            lines.len() <= LOG_INCREMENT_CAP_BYTES,
+            "increment of {} bytes exceeds the {} cap",
+            lines.len(),
+            LOG_INCREMENT_CAP_BYTES
+        );
+        assert_eq!(
+            len,
+            lines.len(),
+            "the offset advances by exactly the lines shipped"
+        );
+    }
+    #[test]
+    fn the_page_etag_is_stable_and_the_304_path_is_exhausting() {
+        // Astro-style static page: same assembly, same ETag, so a reload with
+        // If-None-Match costs zero bytes.
+        let page = "<html>static</html>";
+        let etag = etag_of(page);
+        assert_eq!(etag_of(page), etag, "the hash must be deterministic");
+        assert!(etag.starts_with('"'), "an HTTP ETag is quoted: {etag}");
+
+        assert_eq!(
+            page_response(&etag, Some(&etag)),
+            None,
+            "matching tag = 304"
+        );
+        assert_eq!(
+            page_response(&etag, Some("different")),
+            Some(200),
+            "a stale tag gets the full page"
+        );
+        assert_eq!(page_response(&etag, None), Some(200), "no tag = full page");
+    }
 
     /// A throwaway ledger with the same schema the writer creates, so query
     /// aggregation is exercised against the real column layout.
@@ -1342,19 +1372,6 @@ mod tests {
         // newline must not produce a phantom empty last line.
         assert_eq!(tail_lines("a\nb\nc\n", LOG_TAIL_LINES), "a\nb\nc");
         assert_eq!(tail_lines("", LOG_TAIL_LINES), "");
-    }
-
-    #[test]
-    fn inline_json_never_breaks_out_of_the_script_tag() {
-        let raw = r#"{"model":"</script><script>alert(1)</script>","n":"a&b<c>d"}"#;
-        let out = inline_json(raw);
-        assert!(!out.contains('<'), "raw `<` must not survive: {out}");
-        assert!(!out.contains('>'), "raw `>` must not survive: {out}");
-        // The escapes are plain JSON \uXXXX, so the document still parses and
-        // yields the original strings — the data survives, the hazard does not.
-        let parsed: Value = serde_json::from_str(&out).expect("still valid JSON");
-        assert_eq!(parsed["model"], "</script><script>alert(1)</script>");
-        assert_eq!(parsed["n"], "a&b<c>d");
     }
 
     #[test]

@@ -1,9 +1,30 @@
 /* 装配
  *
- * DOMContentLoaded 时接上所有事件、首次取数并建立实时连接。
+ * DOMContentLoaded 时接上所有事件、首次取数，并按视图开关各自的轮询。
+ *
+ * "实时"是视图级的完整响应轮询（概览 1s、明细 2s、日志 0.7s），且只在
+ * 对应视图可见、页面处于前台时运行——后台标签页一个请求都不发。
  */
 
 /* ── wiring ── */
+function currentView() {
+  var h = location.hash || "#/stats";
+  return h.indexOf("logs") >= 0 ? "logs"
+       : h.indexOf("attempts") >= 0 ? "attempts" : "stats";
+}
+
+/* 概览/明细的轮询走同一定时器：一个 tick 按当前视图取对应的数。 */
+var statsTimer = null;
+function startDataPolling() {
+  if (statsTimer) return;
+  statsTimer = setInterval(function () {
+    if (document.hidden) return;
+    var view = currentView();
+    if (view === "stats") fetchStats(false);
+    else if (view === "attempts") fetchAttempts();
+  }, 1000);
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   route();
   el("days-7").addEventListener("click", function () { setDays(7); });
@@ -12,7 +33,7 @@ document.addEventListener("DOMContentLoaded", function () {
   function setDays(n) {
     state.days = n;
     [7, 14, 30].forEach(function (d) { el("days-" + d).classList.toggle("active", d === n); });
-    // A deliberate window change is worth the draw-in; the live stream's
+    // A deliberate window change is worth the draw-in; the live poll's
     // once-a-second refresh is not (see renderTrend).
     fetchStats(true);
   }
@@ -31,22 +52,17 @@ document.addEventListener("DOMContentLoaded", function () {
   });
   el("btn-refresh").addEventListener("click", function () { fetchAttempts(); fetchStats(); });
 
-  /* Log screen: switching file re-points the follow stream; a manual scroll
-     away from the bottom suspends auto-scroll, scrolling back re-arms it. */
+  /* Log screen: switching file restarts the follow loop; a manual scroll away
+     from the bottom suspends auto-scroll, scrolling back re-arms it. */
   el("log-which").addEventListener("change", function () {
     logState.which = el("log-which").value;
-    logState.lastSig = "";
-    fetchLog();
-    connectLogStream();
+    startLogPolling();
   });
-  el("log-refresh").addEventListener("click", function () { fetchLog(); });
+  el("log-refresh").addEventListener("click", function () { startLogPolling(); });
   el("log-autoscroll").addEventListener("click", function () {
     logState.autoScroll = !logState.autoScroll;
     el("log-autoscroll").classList.toggle("active", logState.autoScroll);
-    if (logState.autoScroll) {
-      var pane = el("log-pane");
-      pane.scrollTop = pane.scrollHeight;
-    }
+    if (logState.autoScroll) scrollLogToBottom();
   });
   el("log-pane").addEventListener("scroll", function () {
     var pane = el("log-pane");
@@ -59,14 +75,18 @@ document.addEventListener("DOMContentLoaded", function () {
     el("log-autoscroll").classList.toggle("active", atBottom);
   });
 
-  /* Astro-style static first: the snapshot shipped inside the HTML wins,
-     no network round-trip before first paint; fetch only when absent. */
-  var INIT = window.__INIT__;
-  if (INIT && INIT.stats) { renderStats(INIT.stats, true); }
-  else { fetchStats(true); }
-  if (INIT && INIT.attempts) { state.attempts = INIT.attempts; renderAttempts(INIT.attempts); }
-  else { fetchAttempts(); }
+  /* Astro-style static first: the page itself carries no data (which is what
+     makes its ETag stable), so hydrate from the JSON APIs in parallel — the
+     round-trip is loopback-scale. */
+  fetchStats(true);
+  fetchAttempts();
   fetchSysinfo();
+  if (currentView() === "logs") startLogPolling();
   setInterval(fetchSysinfo, 5000);
-  connect();
+  startDataPolling();
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { stopLogPolling(); }
+    else if (currentView() === "logs") { startLogPolling(); }
+  });
 });

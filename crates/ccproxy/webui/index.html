@@ -148,7 +148,7 @@
             <option value="proxy">代理日志 proxy.log</option>
             <option value="tray">托盘日志 tray.log</option>
           </select>
-          <span class="chip" id="log-follow-chip"><span class="dot"></span><b id="log-follow-text">跟随中</b></span>
+          <span class="chip" id="log-follow-chip"><span class="dot"></span><b id="log-follow-text">连接中</b></span>
           <span class="fgrow"></span>
           <button id="log-autoscroll" class="active">自动滚动</button>
           <button id="log-refresh">刷新</button>
@@ -167,7 +167,9 @@
 <!-- Scripts, in load order. These are classic scripts (no modules): they share
      one global scope, and app.js wires everything up on DOMContentLoaded, so
      order is what makes the earlier files' functions visible to the later
-     ones. build.rs concatenates them in exactly this order. -->
+     ones. build.rs concatenates them in exactly this order. The page itself is
+     static (no inline snapshot): its body is cache-stable, so a reload is a
+     304, and the first paint hydrates from the JSON APIs in parallel. -->
 <script src="js/core.js"></script>
 <script src="js/router.js"></script>
 <script src="js/stats.js"></script>

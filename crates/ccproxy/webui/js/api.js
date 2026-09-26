@@ -1,6 +1,9 @@
 /* 数据获取
  *
- * stats / attempts / sysinfo 的 fetch 封装。
+ * stats / attempts / sysinfo / logs 的 fetch 封装。
+ * 面板的"实时"全部建立在完整响应的轮询之上：tiny_http 只会在响应结束时
+ * 刷缓冲，SSE 这类不结束的流在这里永远不会把数据送到浏览器——轮询是
+ * 这个后端唯一可靠的推送原语。
  */
 
 /* ── data ── */
@@ -25,4 +28,19 @@ function fetchSysinfo() {
     el("chip-mem").textContent = (s.memMb == null ? "—" : s.memMb.toFixed(1) + " MB");
     el("chip-uptime").textContent = fmtUptime(s.uptimeSecs);
   }).catch(function () { /* transient; next tick retries */ });
+}
+
+/* 日志：since=0 拉全量尾巴（进入日志页 / 切换文件 / 轮转重置后），
+   之后带着服务端返回的 len 做增量轮询。 */
+function fetchLogFull() {
+  return fetch("/webui/api/logs?which=" + encodeURIComponent(logState.which))
+    .then(function (r) { return r.json(); })
+    .then(function (d) { renderLog(d, true); })
+    .catch(function () { setFollowChip(false, "重连中"); });
+}
+function fetchLogSince(since) {
+  return fetch("/webui/api/logs?which=" + encodeURIComponent(logState.which) + "&since=" + since)
+    .then(function (r) { return r.json(); })
+    .then(function (d) { renderLog(d, false); })
+    .catch(function () { setFollowChip(false, "重连中"); });
 }
