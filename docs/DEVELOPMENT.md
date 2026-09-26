@@ -6,8 +6,8 @@
 >
 > The Rust rewrite is complete and is the only implementation. The Node sources
 > and the conformance golden that pinned behaviour against them are gone; the
-> behaviour contract lives in `RUST-REWRITE-SPEC.md` + `ADEVIATIONS.md`, and the
-> test suite in this workspace is the acceptance gate.
+> behaviour contract lives in `docs/RUST-REWRITE-SPEC.md` + `docs/ADEVIATIONS.md`,
+> and the test suite in this workspace is the acceptance gate.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@
 
 ```bash
 cargo build --release --locked   # Both binaries: ccproxy + CCProxyTray
-cargo test                       # Unit + fixture + ledger + tray tests (224)
+cargo test                       # Unit + fixture + ledger + tray tests (303)
 cargo clippy --all-targets --all-features --locked -- -D warnings   # The lint gate
 cargo fmt --check
 build-rust.cmd                   # Package + publish to the hot-swap folder
@@ -26,10 +26,7 @@ build-rust.cmd                   # Package + publish to the hot-swap folder
 ## Windows tray (Rust, `crates/ccproxy-tray`)
 
 The tray is a second Rust binary in the same workspace, not a separate artifact.
-`build-rust.cmd` builds both binaries, runs `cargo test --locked` as the publish
-gate (the conformance harness is gone), and publishes to
-`%Desktop%\CCProxy-Release\CCProxy-v<version>-rust\`.
-Pass `--promote` to switch `CCProxy-current` (a decision, not a side effect of building).
+It is Windows-only and optional: the proxy runs fine on its own.
 
 Test a build against an isolated namespace so a running production instance is
 untouched:
@@ -44,30 +41,101 @@ CCProxyTray.exe --selfcheck
 refuses to take over when a tray is already running. `chaos/handover-test.py`
 exercises the two-phase handover on an isolated port; it is the M6 acceptance.
 
+### Behaviour the tray contract fixes
+
+These are guarantees, not current implementation details — changing one is a
+behaviour change, not a refactor.
+
+- Starting the tray starts the proxy; a crash is restarted after 3s.
+- The tray holds the child in a **Job Object**, so a hard-killed tray never
+  orphans the proxy (see §8 for the API sequence).
+- **The port is a fixed contract (`8787`).** If another program holds it the tray
+  refuses to start rather than taking it over; a stale process of ours holding it
+  is reaped first.
+- **The service is never left in a vacuum.** The two-phase handover only exits the
+  incumbent on commit; if the newcomer cannot serve within 30s it aborts and the
+  incumbent resumes. The incumbent is never force-killed.
+- Egress policy lives in `service/ccproxy.json` (`proxy` field): `"default"`
+  probes the system proxy at startup and keeps it only if a real request
+  succeeds, `"direct"` never proxies, a URL always proxies with no fallback.
+  `CC_PROXY` overrides the file. Selection logic is in `src/proxy.rs`.
+
+### Packaging and rollback
+
+`build-rust.cmd` (no args) builds both binaries in release mode, runs
+`cargo test --locked` against the package, and publishes to
+`%Desktop%\CCProxy-Release\CCProxy-v<version>-rust\`. `--promote` additionally
+switches `CCProxy-current` — moving the old pointer aside first, so an interrupted
+copy leaves `CCProxy-current-previous` recoverable. Without `--promote` the
+running instance is untouched, which is why building a candidate and switching
+production are separate acts.
+
+Older version folders are kept on purpose: rolling back is renaming the older
+folder to `CCProxy-current` and launching its tray, no rebuild.
+
+**The no-arg build must never target a live instance's directory.** It once did
+(reading the version from Cargo.toml, which equalled the running folder) and
+`rmdir /s /q` deleted a running install's directory; the process survived on the
+mapped image with an orphaned log handle. The script now refuses when a process
+is running from the target path, and swaps via a `-previous` rename.
+
+### WebUI assembly (build-time inlining)
+
+The panel is served as **one self-contained document** (inline CSS/JS, no sibling
+requests) so it works offline and behind any client — but it is *authored* as
+separate files. `build.rs` includes `src/webui_site.rs` via `#[path]` and inlines
+`crates/ccproxy/webui/` into `$OUT_DIR/webui.html` at compile time:
+
+```
+crates/ccproxy/webui/
+├── index.html       the composition: which CSS/JS, in what order (the only list)
+├── css/             tokens, layout, content, overview, detail, log, responsive
+└── js/              core, router, stats, attempts, api, logs, app
+```
+
+Editing a style means editing the one file that owns it; adding a file means
+adding one line to `index.html` and nothing else. A referenced file that does not
+exist fails the build rather than shipping a page quietly missing a stylesheet.
+
+At run time the proxy prefers loose sources at `service/webui/` over the compiled
+copy (`webui.rs::page`, invalidated by walking the directory's newest mtime), so
+an installed copy can be edited and picked up by a reload. The startup log names
+which copy is in use. Delete `service/webui/` for a smaller install; the page
+keeps working from the compiled copy.
+
 ## Project structure
 
 ```
 crates/
 ├── ccproxy/               # The proxy binary — #![forbid(unsafe_code)]
-│   └── src/
-│       ├── main.rs          # Entry: config, server startup, signal handling
-│       ├── config.rs        # Config loader (env + CLI, validation and clamping)
-│       ├── log.rs           # Level-filtered logger
-│       ├── server.rs        # HTTP server, routing, CORS, body limits, lifecycle logs
-│       ├── stream_body.rs   # Downstream SSE loop, splice retry, terminal records
-│       ├── upstream.rs      # CC /alpha/generate client (retries, idle timeout)
-│       ├── ndjson.rs        # CC NDJSON line parsing
-│       ├── sse.rs           # SSE framing, StreamFailure classification
-│       ├── billing.rs       # Per-attempt SQLite ledger (M7) + writer thread
-│       ├── cli_version.rs   # Startup CLI-version lookup (with retry)
-│       ├── models.rs        # Model resolution, aliasing, reasoning effort
-│       ├── catalog.rs       # Dynamic model catalog (provider API + static merge)
-│       ├── validation.rs    # Request validation (OpenAI + Anthropic)
-│       ├── tool_arguments.rs
-│       ├── usage.rs         # /health cache stats
-│       ├── models.json      # Vendored model table (aliases, efforts, context)
-│       └── translate/       # openai.rs, anthropic_stream.rs, openai_stream.rs,
-│                            #   models.rs, catalog.rs, validation.rs, util.rs
+│   ├── src/
+│   │   ├── main.rs          # Entry: config, server startup, signal handling
+│   │   ├── lib.rs           # The library surface the binary and tests share
+│   │   ├── config.rs        # Config loader (env + CLI + ccproxy.json, clamping)
+│   │   ├── proxy.rs         # Outbound egress: proxy policy, probe, per-URL agent
+│   │   ├── log.rs           # Level-filtered logger
+│   │   ├── dump.rs          # Failed-request dumps
+│   │   ├── server.rs        # HTTP server, routing, CORS, body limits, reject log
+│   │   ├── generate.rs      # Request lifecycle: model discovery + retry layers
+│   │   ├── stream_body.rs   # Downstream SSE loop, splice retry, terminal records
+│   │   ├── upstream.rs      # CC /alpha/generate client, TransportFault classes
+│   │   ├── ndjson.rs        # CC NDJSON line parsing
+│   │   ├── sse.rs           # SSE framing, StreamFailure classification
+│   │   ├── billing.rs       # Per-attempt SQLite ledger + writer thread
+│   │   ├── pricing.rs       # Cost table (crawled rates, embedded RSC JSON)
+│   │   ├── webui.rs         # WebUI routes, stats/attempts/log APIs, SSE stream
+│   │   ├── webui_site.rs    # Page assembly (shared by build.rs and run time)
+│   │   ├── cli_version.rs   # Startup CLI-version lookup (with retry)
+│   │   ├── models.rs        # Model resolution, aliasing, reasoning effort
+│   │   ├── catalog.rs       # Dynamic model catalog (provider API + static merge)
+│   │   ├── time.rs          # Clock helpers (testable)
+│   │   ├── validation.rs    # Request validation (OpenAI + Anthropic)
+│   │   ├── tool_arguments.rs
+│   │   ├── usage.rs         # /health cache stats
+│   │   ├── models.json      # Vendored model table (aliases, efforts, context)
+│   │   └── translate/       # openai.rs, anthropic_stream.rs, openai_stream.rs,
+│   │                        #   nonstream.rs, models.rs, terminal.rs, util.rs
+│   └── webui/               # Panel sources, inlined at build time (css/, js/, index.html)
 └── ccproxy-tray/          # The tray binary — #![deny(unsafe_code)], FFI sites expect()
     └── src/
         ├── main.rs          # Role determination + handover loop
@@ -78,10 +146,14 @@ crates/
         ├── process.rs       # Child supervision, log rotation, egress env
         ├── tray.rs          # Menu, icon, UI state
         └── health.rs        # /health probe for the handover gate
-build-rust.cmd            # Packaging + hot-swap publish (root; the release gate)
+build-rust.cmd             # Packaging + hot-swap publish (root; the release gate)
 chaos/                     # Handover and soak scripts (manual, Python)
-RUST-REWRITE-SPEC.md       # Behaviour contract (historical spec + deviations)
-ADEVIATIONS.md             # Recorded intentional deviations from the Node version
+docs/
+├── DEVELOPMENT.md               # This file
+├── RUST-REWRITE-SPEC.md         # Behaviour contract (historical spec)
+├── ADEVIATIONS.md               # Intentional deviations from the Node version
+├── adr/                         # Architecture decision records (start here for "why")
+└── archive/                     # Superseded working documents
 ```
 
 ## Tech stack
@@ -95,7 +167,7 @@ ADEVIATIONS.md             # Recorded intentional deviations from the Node versi
 # Rust rewrite — engineering rules
 
 Target: port this proxy to Rust, keeping the behaviour recorded in
-`RUST-REWRITE-SPEC.md` + `ADEVIATIONS.md` (the Node version and its golden are
+`docs/RUST-REWRITE-SPEC.md` + `docs/ADEVIATIONS.md` (the Node version and its golden are
 gone; the Rust test suite is the acceptance gate). These rules are the project's
 Rust standard; they are normative for every crate in the workspace. Sources are
 the Rust API Guidelines, the
@@ -161,24 +233,42 @@ off by default:
 
 A proxy is both a library and a binary, so both idioms apply to different parts.
 
-- **`ccproxy-core` exposes typed errors** with `thiserror`. One enum per domain
-  (`TranslateError`, `UpstreamError`), each variant carrying `#[source]` so the
-  chain survives. Include the data needed to build a response — a bare
-  `UpstreamStatus(StatusCode)` loses the body that CC sends with the reason.
-- **The binary composes with `anyhow`** and `.context()`. `anyhow` must not
-  appear in a module that returns a typed error.
-- **One `IntoResponse` impl decides every status code.** This is the single
-  place HTTP semantics live, and the place to diff against the `failure/*`
-  samples in the fixture suite.
+- **Errors are typed enums, defined in the module that produces them.**
+  `UpstreamError` (with `TransportFault`) and `TranslateError` live beside the
+  code that raises them. There is no `thiserror` dependency and no separate
+  `ccproxy-core` crate: the workspace is `ccproxy` + `ccproxy-tray`, and the
+  error types are hand-written. (An earlier plan called for `thiserror` and a
+  `-core` split; neither shipped, and this section claimed otherwise until
+  2026-09-23.)
+- **Errors carry the data needed to build a response.** A bare
+  `UpstreamStatus(code)` loses the body CC sends with the reason; a bare
+  `status_code: 0` loses which transport failure happened. The second case is
+  why `UpstreamError` carries `fault: Option<TransportFault>`.
+- **Classify by structure, never by message text.** `ureq` appends the OS error
+  verbatim and the OS localises it, so matching English words in a message is
+  silently wrong on a non-English machine — it filed every timeout as a network
+  error for the ledger's entire history. Read `ErrorKind` and the `source()`
+  chain instead. See `adr/0001-transport-failure-classification.md`.
+- **`anyhow` is not a dependency and errors are not `anyhow`-based.** The binary
+  unwraps its own typed errors at the boundary; nothing here needs dynamic error
+  packaging, and adding it would erase the classes above.
+- **One place decides the status code.** `UpstreamError::downstream_status` is
+  the single mapping (4xx passes through, everything else collapses to 502), and
+  the per-dialect envelope shape lives in `server.rs`. That is where HTTP
+  semantics live, and the place to diff against the `failure/*` fixtures.
 - **Never let an error type leak the API key.** CC's error bodies are echoed
   downstream; scrub `Bearer …` and control characters (pinned by tests).
 - Log at the boundary only — one `error!` where the request fails, not in the
   translation layer.
+- **Every upstream failure carries a class tag**, and the same spelling appears
+  in two places: bracketed in the log line, and as the ledger's `errorTag`. A
+  new failure path must attach a tag, or it becomes the one row nobody can
+  group. The vocabulary is in the README's *Failure classification*.
 
 ## 4. Concurrency: threads, not async
 
 **The project is blocking, thread-per-connection, with no tokio anywhere.** This
-is a deliberate decision (see `RUST-REWRITE-SPEC.md` §5.5), not an oversight —
+is a deliberate decision (see `docs/RUST-REWRITE-SPEC.md` §5.5), not an oversight —
 do not introduce an async runtime later without revisiting it.
 
 Rationale, measured: the proxy is a pure I/O forwarder with few, long-lived
@@ -260,6 +350,64 @@ linked in, against 88 MB for the bundled Node runtime):
   intermediary that closes idle connections. The Node version relies on the
   client's own timeout, and no intermediary has caused a problem so far.
 
+### Reasoning-effort resolution
+
+Some models support a `reasoning_effort` (`low` | `medium` | `high` | `xhigh` |
+`max`), and each accepts a **different subset**. The upstream validates the field
+as an enum and rejects anything else, so every request is resolved to a level the
+model actually accepts before it is sent. The resolution table is vendored in
+`src/models.json` (`include_str!`), mirroring the official CLI's embedded copy;
+`/provider/v1/models` does **not** report it, so the table cannot be discovered at
+run time. `translate/models.rs` pins it with tests that fail when the two drift.
+
+How a client expresses the level depends on the dialect:
+
+| Dialect | Field |
+| ------- | ----- |
+| OpenAI | `reasoning_effort` |
+| Anthropic | `output_config.effort`, falling back to `thinking.budget_tokens` (larger budget → higher effort) |
+
+Anthropic clients also signal "no extended thinking" with `thinking.type:
+"disabled"`, and some send an off-style marker (`off` / `none` / `disabled` /
+`minimal`) as the effort itself. The upstream has no such level — all of those are
+rejected upstream — so they resolve to the model's lowest supported level. That
+is the closest expressible intent, and it produces measurably less reasoning than
+omitting the field, which would hand the choice back to the model's default.
+
+```mermaid
+flowchart TD
+    A[Client request] --> B{dialect}
+    B -->|OpenAI| C["req.reasoning_effort"]
+    B -->|Anthropic| D{thinking.type == disabled<br/>or effort is off-style?}
+    D -->|yes| E["level = the model's lowest"]
+    D -->|no| F{output_config.effort set?}
+    F -->|yes| G[level = effort]
+    F -->|no| H{thinking.budget_tokens set?}
+    H -->|no| I[omit reasoning_effort<br/>let upstream decide]
+    H -->|yes| J[map budget to a level]
+    C --> K{model in effort table?}
+    G --> K
+    J --> K
+    E --> K
+
+    K -->|no| L{off-style marker?}
+    L -->|yes| M[level = low<br/>never forward the marker itself]
+    L -->|no| N[forward unchanged<br/>we cannot know better]
+
+    K -->|yes| O{off-style marker?}
+    O -->|yes| E2["level = the model's lowest"]
+    O -->|no| P{supported as-is?}
+    P -->|yes| Q[forward unchanged]
+    P -->|no| R[clip to the highest<br/>supported level not above it,<br/>else the lowest supported]
+
+    I --> Z[POST /alpha/generate]
+    M --> Z
+    N --> Z
+    Q --> Z
+    R --> Z
+    E2 --> Z
+```
+
 ## 6. Testing
 
 - **Plain `#[test]` everywhere** — there is no async runtime to bridge, so no
@@ -268,7 +416,7 @@ linked in, against 88 MB for the bundled Node runtime):
   dropped: `cargo test` covers everything they would, at none of their setup cost.
 - **The fixture-replay suites are the primary acceptance tests.** The recorded
   transcripts live in `crates/ccproxy/tests/fixtures/` (moved out of the retired
-  `conformance/` golden): `translate_golden.rs` replays all 52 translation
+  conformance golden): `translate_golden.rs` replays all 52 translation
   samples, `stream_golden.rs` replays every stream transcript against both
   encoders.
 - **Stream invariants the fixtures cannot see** are pinned by hand-rolled tests
@@ -279,9 +427,27 @@ linked in, against 88 MB for the bundled Node runtime):
   (numbering, NULL-vs-zero, backpressure drop, flush) and end-to-end fault
   injection driving real turns through the server with the ledger removed or
   broken (`crates/ccproxy/tests/billing_ledger.rs`).
+- **Transport classification has two layers of tests, by design.** The decision
+  itself is a pure function (`upstream.rs::fault_from` over `ureq::ErrorKind`,
+  `io::ErrorKind`, the egress `Route`), pinned by a table test covering every
+  branch — including shapes a real socket cannot reliably produce (a NAT gateway
+  answering a connect with RST). Around it, real-socket smoke tests stand up a
+  listener that accepts and then stalls, a dead port, and a reserved TLD, so a
+  change in ureq's own error structure cannot go unnoticed: a hand-built error
+  would encode whatever the test expects, which is exactly how the old
+  message-matching classifier looked correct in review. Locale-independence is
+  pinned structurally — a chain walk test whose fixture carries the
+  Chinese-locale timeout text (no English word to match) and asserts the kind
+  is still recovered. Network-dependent tests are not acceptable in this suite:
+  the `10.255.255.1` connect-timeout test existed for one round and was replaced
+  by the table.
 - **The regression gate for every commit:** `cargo fmt --check` +
-  `cargo clippy --all-targets -D warnings` + `cargo test`; behaviour commits
-  additionally run `record.mjs --check`.
+  `cargo clippy --all-targets -D warnings` + `cargo test`. (The conformance
+  harness and its `record.mjs --check` step are gone with the Node sources; the
+  fixture-replay suites above are the acceptance gate now.) Note the CI quality
+  job also runs `clippy --all-features` on **ubuntu**, which catches Windows-only
+  helpers that are dead code on Linux — `-D warnings` then fails the build, and
+  a local Windows-only clippy pass is not evidence about that half of the gate.
 
 ## 7. Naming and API shape
 

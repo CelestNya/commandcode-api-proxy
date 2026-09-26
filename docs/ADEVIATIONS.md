@@ -42,7 +42,7 @@ spec §5.5.1 明确要求这个行为。
 
 ---
 
-## 3. 响应头等待期由 idle 超时（而非 upstream 超时）把守（已知差异）
+## 3. 响应头等待期由两个静默超时中较小者把守（已知差异）
 
 **Node 行为**：`setTimeout(abort, CC_UPSTREAM_TIMEOUT_MS)` 在 fetch 之前起表，
 **拿到响应头后 clearTimeout**。所以"等响应头"这一段由
@@ -50,30 +50,54 @@ spec §5.5.1 明确要求这个行为。
 
 **Rust 行为**：ureq 的 `timeout_read` 是**整条连接唯一**的 socket 读超时，
 无法在响应头到达后调整。因此"等响应头"这一段实际由
-`CC_IDLE_TIMEOUT_MS`（默认 120s）把守。
+`min(CC_IDLE_TIMEOUT_MS, CC_NO_OUTPUT_TIMEOUT_MS)`（默认 `min(120s, 30s)` = **30s**）
+把守 —— 即两个静默窗口中较小的那个（`read_tick_ms`）。
 
-**实测**（`conformance/probe-slow-headers.mjs`，mock 延迟 2s 发响应头，
-idle=500ms，upstream=10000ms）：
+**实测**（mock 延迟 2s 发响应头，idle=500ms）：Node 存活；Rust 在该配置下失败，
+因为 500ms 的 idle 同时也是响应头上限。
 
-| 实现 | 结果 |
-| --- | --- |
-| Node | 200，2016ms，**存活** |
-| Rust | 502，`Upstream request failed: ... timed out`，**失败并重试 3 次** |
-
-**影响**：**上游在最多 `CC_IDLE_TIMEOUT_MS` 内没吐出响应头时，Rust 会误判失败。**
-CC 的 `/alpha/generate` 通常几百毫秒内回响应头，所以日常不触发；但**排队/过载
-时上游可能迟迟不发头**，此时 Rust 会重试（最多 3 次请求 = 3 倍计费风险），
-而 Node 会一直等。
+**影响**：**上游在 30s（默认）内没吐出响应头时，Rust 会判失败并重试**，而 Node 会
+等到 600s。真实 `/alpha/generate` 实测 **2.7–4.3s** 回响应头（约 750KB 的 prompt
+要先上传并被接受），距 30s 有充足余量，所以日常不触发；但**上游严重排队/过载**时
+会，此时 Rust 会重试（最多 2 次 = 最多 3 倍计费风险），而 Node 继续等。
 
 **为什么不修**：
 - ureq **没有**在响应头到达后调整读超时的 API（`Response::into_reader()` 返回的
   reader 继承连接级 socket 超时；`.timeout()` 是总时长上限，会掐断长生成，**禁止**）。
 - 自建 socket 层（直接 `TcpStream` + 自己算 deadline）能修，但要重写 TLS 与
   chunked 解码，成本远超收益。
-- 缓解方向（未做）：把 idle 超时调大、或对"尚未收到响应头"的阶段单独放宽。
+
+**[已更新 2026-09-23]** 0.6.3 曾把这条变成生产事故：当时 `read_tick_ms` 对配置值
+**折半**再 `clamp` 到 2s，于是响应头上限变成 2s —— 低于真实请求所需的 2.7–4.3s，
+每个真实请求都死在状态行（`Error encountered in the status line`，Windows
+`os error 10060`）。0.6.4 改为"取最小非零截止时间，不折半、不封顶"，默认回到 30s。
+**任何缩短这个值的改动都会重现该事故**，`upstream.rs` 有两条单测钉住。
 
 **golden 看不见**：mock 总是立刻回应，golden 里 `CC_UPSTREAM_TIMEOUT_MS=1200`
-且没有任何"延迟发头"的用例。**这是 M5 真 key 验证时要留意的一条。**
+且没有任何"延迟发头"的用例。
+
+---
+
+## 3b. 传输层失败按**结构**分类，而非消息文本（改进）
+
+**Node 行为**：按 `err.name` / `err.code` / 消息文本的优先级分类。
+
+**Rust 行为**：`TransportFault` 从 `ureq::Error` 的 `kind()` 加 `source()` 链上的
+`io::ErrorKind` 判定，与 locale 无关。日志里的 `[transport-*]` 与账本 `errorTag`
+是同一个词表。
+
+**为什么改**：旧的 `timeout_tag()` 用 `message.contains("timeout")` 判断，而 ureq 把
+OS 错误原文拼进消息，Windows 中文 locale 下超时文本是
+"由于连接方在一段时间后没有正确答复…"，**没有英文 timeout**。后果经生产账本实测：
+2611 条 `http-network`、**0 条 `http-timeout`** —— 该分类从未生效过。同时把
+"连接超时 / 响应头超时 / 连接被拒 / DNS 失败"四类混成一个桶，正是 0.6.3 事故难定位的原因。
+
+**有意保留的合并**（不造分不开的区分）：设了 connect 超时时，ureq 把"连接被拒"也报成
+`connection timed out`，故 `ConnectRefused` 仅在未设 connect 超时时可达；请求**写出**
+超时与响应头读超时在 ureq 里同形（`ErrorKind::Io` + `TimedOut`，无消息），故不设
+`WriteTimeout` 变体，并入 `HeaderTimeout`。详见 `docs/adr/0001`。
+
+**golden 看不见**：golden 只有流中途的四种失败，没有传输层分类用例。
 
 ---
 
@@ -142,8 +166,9 @@ spec §6.5 / M7 验收写的是：「**统计写入失败不影响转发**：写
 
 ## 6. golden 里被归一化的运行时工件（不是偏离，是"允许差异"清单）
 
-以下差异**存在但不构成行为回退**，golden 已按 spec §1 归一化，
-详见 `conformance/record.mjs::normaliseHeaders` 的注释：
+以下差异**存在但不构成行为回退**，golden 录制时就已按 spec §1 归一化
+（归一化逻辑原在 `conformance/record.mjs::normaliseHeaders`，随 Node 源一并删除；
+下表是它当时归一化的清单，保留作为"允许差异"的权威列表）：
 
 | 项 | Node | Rust |
 | --- | --- | --- |
