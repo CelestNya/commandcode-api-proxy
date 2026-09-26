@@ -10,11 +10,20 @@
 /* The live snapshot ships a fixed 200-row window; the pager may ask for
    more, so direct fetches always cover the chosen page size. */
 function attemptsLimit() { return Math.max(state.pageSize, 200); }
+
+/* 每秒的轮询只在数据真的变化时才重建 DOM:指标卡/状态条/图表每秒重灌,
+   CSS 入场动画就会跟着每秒重播(主页动效反复播放就是这个)。签名取自
+   响应本身;animate=true 是刻意的动作(切窗口/首帧/刷新),总是重画。 */
+var statsSig = "", attemptsSig = "";
+
 function fetchStats(animate) {
   return fetch("/webui/api/stats?days=" + state.days).then(function (r) { return r.json(); })
     .then(function (s) {
-      renderStats(s, animate === true);
       setLiveChip(true);
+      var sig = JSON.stringify(s);
+      if (animate !== true && sig === statsSig) return s;
+      statsSig = sig;
+      renderStats(s, animate === true);
     })
     .catch(function () { setLiveChip(false); /* next poll retries */ });
 }
@@ -22,6 +31,9 @@ function fetchAttempts() {
   return fetch("/webui/api/attempts?limit=" + attemptsLimit()).then(function (r) { return r.json(); })
     .then(function (list) {
       state.attempts = Array.isArray(list) ? list : [];
+      var sig = JSON.stringify(list);
+      if (sig === attemptsSig) return;
+      attemptsSig = sig;
       renderAttempts(state.attempts);
     })
     .catch(function () { /* next poll retries */ });

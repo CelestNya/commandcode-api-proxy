@@ -239,12 +239,17 @@ function renderTrend(raw, animate) {
     });
   });
   svg.innerHTML = out;
-  /* Only animate when asked: the live stream re-renders every second, and
-     replaying the draw-in on each push would make the chart twitch. */
+  /* Only animate when asked, and always say so explicitly on the class: the
+     poll re-renders every second, and a rebuild under a stale `trend-animate`
+     class replays the draw-in on fresh paths every single time (the chart
+     twitched nonstop until this became an if/else). Removing the class on the
+     quiet path renders the final state immediately; the forced reflow on the
+     animated path restarts it from scratch. */
   if (animate) {
-    svg.classList.remove("trend-animate");
-    void svg.getBoundingClientRect(); // restart the animation
     svg.classList.add("trend-animate");
+    void svg.getBoundingClientRect(); // restart the animation
+  } else {
+    svg.classList.remove("trend-animate");
   }
 }
 
