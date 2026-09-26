@@ -158,6 +158,7 @@ mod tests {
             message: message.to_string(),
             status_code: status,
             retryable: false,
+            fault: None,
         }
     }
 

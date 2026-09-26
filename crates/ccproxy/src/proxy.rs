@@ -48,6 +48,20 @@ pub struct Egress {
     pub note: String,
 }
 
+/// The egress route one request takes, as a type rather than a bool.
+///
+/// The transport classifier consumes this, and a bare `bool` there was flagged
+/// in review as violating the repo's own rule that arguments carry meaning
+/// through types. It also reads better at the call site: `Route::ViaProxy`
+/// states what happened; `true` does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// Straight to the target host.
+    Direct,
+    /// Through the configured egress proxy.
+    ViaProxy,
+}
+
 impl Egress {
     /// Whether `url`'s host is exempt from the proxy.
     fn bypasses(&self, url: &str) -> bool {
@@ -74,6 +88,19 @@ impl Egress {
             None
         } else {
             self.proxy.clone()
+        }
+    }
+
+    /// The route a request to `url` takes under this plan.
+    ///
+    /// Per-URL on purpose: loopback and `noProxy` hosts bypass the proxy, so
+    /// their failures are the upstream's even when a proxy is configured.
+    #[must_use]
+    pub fn route_for(&self, url: &str) -> Route {
+        if self.proxy_for(url).is_some() {
+            Route::ViaProxy
+        } else {
+            Route::Direct
         }
     }
 }
@@ -128,6 +155,16 @@ fn installed() -> &'static Egress {
 #[must_use]
 pub fn note() -> &'static str {
     installed().note.as_str()
+}
+
+/// The route a request to `url` takes under the installed egress plan.
+///
+/// Used by the transport classifier to tell a dead proxy from a dead upstream:
+/// the connect-timeout symptom is identical, but which thing to check first is
+/// not. Per-URL because the plan exempts loopback and `noProxy` hosts.
+#[must_use]
+pub fn route_for(url: &str) -> Route {
+    installed().route_for(url)
 }
 
 fn fallback_config() -> Config {
@@ -322,6 +359,15 @@ mod tests {
         }
     }
 
+    fn direct_egress() -> Egress {
+        Egress {
+            proxy: None,
+            using_proxy: false,
+            no_proxy: Vec::new(),
+            note: String::new(),
+        }
+    }
+
     #[test]
     fn host_is_extracted_from_every_url_shape() {
         assert_eq!(
@@ -357,6 +403,31 @@ mod tests {
         // A suffix must fall on a label boundary, not mid-name.
         assert!(!e.bypasses("https://notexample.com/x"));
         assert!(!e.bypasses("https://example.com.evil.test/x"));
+    }
+
+    #[test]
+    fn route_follows_the_per_url_bypass_not_the_global_flag() {
+        // The classifier's `proxied` input must be per-URL: with a proxy
+        // configured, a loopback or noProxy-listed host still goes direct, and
+        // blaming the proxy for its failures would send the operator to Clash
+        // for a fault the proxy never touched.
+        let proxied = egress_with(&[]);
+        assert_eq!(
+            proxied.route_for("https://api.commandcode.ai/x"),
+            Route::ViaProxy
+        );
+        assert_eq!(
+            proxied.route_for("http://127.0.0.1:8787/webui"),
+            Route::Direct
+        );
+        assert_eq!(
+            egress_with(&["example.com"]).route_for("https://example.com/x"),
+            Route::Direct
+        );
+        assert_eq!(
+            direct_egress().route_for("https://api.commandcode.ai/x"),
+            Route::Direct
+        );
     }
 
     #[test]

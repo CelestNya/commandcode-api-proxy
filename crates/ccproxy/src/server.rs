@@ -649,9 +649,16 @@ fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, c
             Err(f) => {
                 ledger.end_attempt(billing::AttemptStatus::Error, None, Some(f.tag()));
                 let err = UpstreamError {
-                    message: f.detail(),
+                    // Tagged, matching what the streaming path already sends —
+                    // the behaviour fixtures pin `[idle-timeout]`/`[connection-reset]`
+                    // in the downstream records (behaviour.json, the "hang after
+                    // start" cases). Authorized in adr/0001 under Consequences:
+                    // one wording serves the client envelope, the `[reject]` log
+                    // line and the ledger row.
+                    message: f.tagged(),
                     status_code: 0,
                     retryable: false,
+                    fault: None,
                 };
                 respond_upstream_error(req, &err, D::dialect(), state, ctx);
             }

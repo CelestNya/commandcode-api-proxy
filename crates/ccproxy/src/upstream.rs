@@ -53,19 +53,24 @@ pub struct UpstreamError {
     /// 0 when there was no HTTP response at all (transport failure or timeout).
     pub status_code: u16,
     pub retryable: bool,
+    /// Which transport failure this was, when `status_code` is 0.
+    ///
+    /// Carried as a type rather than parsed back out of `message`: the message
+    /// contains the OS error text, which is localised, so classifying by text
+    /// silently collapses to one bucket on a non-English Windows (see
+    /// [`TransportFault`]). `None` when CC answered with a status.
+    pub fault: Option<TransportFault>,
 }
 
 impl UpstreamError {
-    /// The ledger tag for this failure, in the vocabulary the upstream layer
-    /// already uses for its own rows: `http-<status>` when CC answered, and
-    /// `http-timeout` / `http-network` for the transport classes (see
-    /// `timeout_tag`). Living here keeps the tag vocabulary next to the code
-    /// that produces the statuses it names.
+    /// The ledger tag for this failure: `http-<status>` when CC answered, and
+    /// the transport class otherwise. Living here keeps the tag vocabulary next
+    /// to the code that produces the statuses it names.
     pub fn error_tag(&self) -> String {
-        if self.status_code == 0 {
-            timeout_tag(self).to_string()
-        } else {
-            format!("http-{}", self.status_code)
+        match (self.status_code, self.fault.as_ref()) {
+            (0, Some(fault)) => fault.tag().to_string(),
+            (0, None) => TRANSPORT_OTHER_TAG.to_string(),
+            (code, _) => format!("http-{code}"),
         }
     }
 
@@ -76,6 +81,230 @@ impl UpstreamError {
         match self.status_code {
             400..=499 => self.status_code,
             _ => 502,
+        }
+    }
+}
+
+/// A transport-level failure, in the phase it happened.
+///
+/// The classes exist because "upstream unreachable" is not one problem: a
+/// connect timeout, a header wait that never ends, a stalled body and a refused
+/// socket have different causes and different fixes, and the whole point of the
+/// tag is that a reader can tell them apart by grepping the log.
+///
+/// **Why not classify from the message.** ureq builds its `Display` from the
+/// OS error text, which is localised — on a Chinese Windows the timeout text
+/// contains no English "timeout", so the old `contains("timeout")` test filed
+/// every timeout as a network error (2611 `http-network` rows, zero
+/// `http-timeout`, in the production ledger). Classification therefore reads the
+/// error *structure* — `ureq::ErrorKind` plus an `io::ErrorKind` down the
+/// `source` chain — which is locale-independent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransportFault {
+    /// Could not establish TCP/TLS within the connect budget.
+    ///
+    /// Indistinguishable from [`Self::ConnectRefused`] when a connect timeout is
+    /// set: ureq uses `connect_timeout` for the dial, and a refused socket
+    /// surfaces as "... connection timed out" on Windows. An honest merge —
+    /// see [`Self::ConnectRefused`].
+    ConnectTimeout,
+    /// Waited for the response headers past the read deadline. This is the class
+    /// the 0.6.3 outage produced: a read tick shorter than a real
+    /// `/alpha/generate` needs to answer.
+    ///
+    /// A timed-out *request write* also lands here, and deliberately: ureq
+    /// reports both as `ErrorKind::Io` over an `io::ErrorKind::TimedOut` with no
+    /// message, so the two are not separable from the error alone (probed — see
+    /// the ADR). Inventing a second label would be a distinction the code
+    /// cannot actually make. A write timeout is the rarer of the two by far,
+    /// since the connect succeeded and this client writes one bounded body.
+    HeaderTimeout,
+    /// The socket was refused. Reported distinctly only when no connect timeout
+    /// is configured (then the OS keeps the `ConnectionRefused` kind); with a
+    /// connect timeout it becomes [`Self::ConnectTimeout`], because ureq routes
+    /// the dial through `connect_timeout` and loses the distinction.
+    ConnectRefused,
+    /// DNS resolution failed.
+    Dns,
+    /// The connection was closed under us (reset, aborted, broken pipe, or a
+    /// body that ended before its framing said it should).
+    Reset,
+    /// The proxy in front of the request could not be reached or did not carry
+    /// it. Separate from the connect classes because the fix is different: a
+    /// dead Clash is not a dead upstream.
+    ProxyFailed,
+    /// Anything else, with ureq's own wording preserved.
+    Other(String),
+}
+
+/// Tag for a transport failure that could not be classified.
+const TRANSPORT_OTHER_TAG: &str = "transport-other";
+
+impl TransportFault {
+    /// The bracket tag used in logs, e.g. `[header-timeout]`.
+    ///
+    /// The same strings, without the brackets, are the ledger's `errorTag`, so a
+    /// log line and a ledger row name the same class identically.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Self::ConnectTimeout => "transport-connect-timeout",
+            Self::HeaderTimeout => "transport-header-timeout",
+            Self::ConnectRefused => "transport-refused",
+            Self::Dns => "transport-dns",
+            Self::Reset => "transport-reset",
+            Self::ProxyFailed => "transport-proxy",
+            Self::Other(_) => TRANSPORT_OTHER_TAG,
+        }
+    }
+
+    /// A short phrase for the retry log line, e.g. `connect timeout`.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::ConnectTimeout => "connect timeout",
+            Self::HeaderTimeout => "header timeout",
+            Self::ConnectRefused => "connection refused",
+            Self::Dns => "dns failure",
+            Self::Reset => "connection reset",
+            Self::ProxyFailed => "proxy failure",
+            Self::Other(_) => "transport error",
+        }
+    }
+}
+
+/// Walk an error's `source` chain looking for an `io::Error`, returning its kind
+/// and raw OS code.
+///
+/// ureq wraps the real socket error one or more levels down (a `Transport`
+/// carrying an `ErrorKind::Io` wrapper carrying the io error), so the kind that
+/// matters is not the one on the outermost error.
+fn io_error_in_chain<'a>(err: &'a (dyn std::error::Error + 'static)) -> Option<&'a std::io::Error> {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    let mut depth = 0u32;
+    while let Some(e) = current {
+        if let Some(io) = e.downcast_ref::<std::io::Error>() {
+            return Some(io);
+        }
+        current = e.source();
+        depth = depth.saturating_add(1);
+        // A self-referential or cyclic chain is not expected, but walking one
+        // would hang the request thread, so the walk is bounded.
+        if depth > 8 {
+            return None;
+        }
+    }
+    None
+}
+
+/// Classify a ureq error for a request that went to `url`.
+///
+/// Exposed so the model-catalog fetch classifies its failures the same way the
+/// generation path does: one vocabulary for "the upstream did not answer",
+/// whichever caller hit it. The route is resolved per-URL, because the egress
+/// plan exempts loopback and `noProxy` hosts — a global "are we proxied" flag
+/// would blame the proxy for faults it never carried (flagged in review).
+#[must_use]
+pub fn classify_for_url(err: &ureq::Error, url: &str) -> TransportFault {
+    match err {
+        ureq::Error::Transport(_) => classify_transport(err, crate::proxy::route_for(url)),
+        // A status error has no transport fault in it; the caller (the catalog)
+        // reports those by status instead of asking for a class.
+        ureq::Error::Status(..) => TransportFault::Other(err.to_string()),
+    }
+}
+
+/// Classify a ureq transport error into a [`TransportFault`].
+///
+/// Thin on purpose: it extracts what ureq offers (`ErrorKind`, the io error
+/// down the source chain) and delegates to [`fault_from`], which is the whole
+/// decision as a pure function and is pinned by a table test — the shapes a
+/// real socket cannot be made to produce reliably (a NAT gateway answering a
+/// connect with RST) are covered there instead of by a network-dependent test.
+fn classify_transport(err: &ureq::Error, route: crate::proxy::Route) -> TransportFault {
+    let ureq::Error::Transport(t) = err else {
+        // A status error is handled by the caller; reaching here means a call
+        // site misrouted one, which is still better than a panic.
+        return TransportFault::Other(err.to_string());
+    };
+    fault_from(
+        t.kind(),
+        io_error_in_chain(t).map(std::io::Error::kind),
+        route,
+        t.to_string(),
+    )
+}
+
+/// The whole transport classification as a pure, total function.
+///
+/// `unclassified` is the text carried verbatim into
+/// [`TransportFault::Other`] when no structure matches — the caller passes the
+/// error's Display so the raw detail survives.
+///
+/// The order of the checks is the design: the proxy/DNS kinds are
+/// unambiguous, then the io kind refines the timeout families, and only
+/// whatever remains falls through to `Other`. Probed on real sockets (see the
+/// ADR): a header wait surfaces as `ErrorKind::Io` over `TimedOut`, a connect
+/// failure as `ConnectionFailed` over `TimedOut` (with a connect timeout set)
+/// or `ConnectionRefused` (without), DNS as `Dns`.
+fn fault_from(
+    ureq_kind: ureq::ErrorKind,
+    io_kind: Option<std::io::ErrorKind>,
+    route: crate::proxy::Route,
+    unclassified: String,
+) -> TransportFault {
+    use std::io::ErrorKind;
+    let via_proxy = route == crate::proxy::Route::ViaProxy;
+
+    match ureq_kind {
+        ureq::ErrorKind::Dns => {
+            return if via_proxy {
+                TransportFault::ProxyFailed
+            } else {
+                TransportFault::Dns
+            };
+        }
+        ureq::ErrorKind::ProxyConnect | ureq::ErrorKind::ProxyUnauthorized => {
+            return TransportFault::ProxyFailed;
+        }
+        _ => {}
+    }
+
+    match io_kind {
+        Some(ErrorKind::TimedOut | ErrorKind::WouldBlock) => match ureq_kind {
+            // The dial is what timed out, so it is either the proxy or the
+            // upstream that would not accept a connection. Which one to check
+            // first is exactly what the operator needs to know.
+            ureq::ErrorKind::ConnectionFailed => {
+                if via_proxy {
+                    TransportFault::ProxyFailed
+                } else {
+                    TransportFault::ConnectTimeout
+                }
+            }
+            // A timeout with no connect failure is a socket read: for this
+            // client that is the wait for the response headers, since the body
+            // is read through `UpstreamStream`, which classifies its own.
+            _ => TransportFault::HeaderTimeout,
+        },
+        Some(ErrorKind::ConnectionRefused) => {
+            if via_proxy {
+                TransportFault::ProxyFailed
+            } else {
+                TransportFault::ConnectRefused
+            }
+        }
+        Some(
+            ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::BrokenPipe
+            | ErrorKind::UnexpectedEof,
+        ) => TransportFault::Reset,
+        _ => {
+            // No io error to read, or an io kind with no better home: keep
+            // ureq's own class rather than inventing one.
+            match ureq_kind {
+                ureq::ErrorKind::ConnectionFailed => TransportFault::ConnectTimeout,
+                _ => TransportFault::Other(unclassified),
+            }
         }
     }
 }
@@ -531,14 +760,14 @@ pub fn send_to_cc(
             Ok(Attempt::Streaming(stream)) => return Ok(stream),
             Ok(Attempt::Failed(err)) => {
                 if err.retryable && attempt <= MAX_RETRIES {
-                    log::warn(&format!(
-                        "CC upstream {}, retrying {attempt}/{MAX_RETRIES}...",
-                        err.status_code
+                    log::warn(&retry_log_line(
+                        &format!("http-{}", err.status_code),
+                        attempt,
                     ));
                     // This attempt is abandoned in favour of the retry, so this
                     // layer records it; the final attempt is the caller's.
                     if let Some(sink) = attempts {
-                        sink.failed(&format!("http-{}", err.status_code));
+                        sink.failed(&err.error_tag());
                     }
                     last = Some(err);
                     sleep_ms(RETRY_BACKOFF_MS.saturating_mul(u64::from(attempt)));
@@ -548,13 +777,14 @@ pub fn send_to_cc(
             }
             Err(err) => {
                 if err.retryable && attempt <= MAX_RETRIES {
-                    log::warn(&format!(
-                        "CC upstream timeout/error, retrying {attempt}/{MAX_RETRIES}..."
-                    ));
+                    // The class is in the line, not just the raw error: an
+                    // operator scanning retries wants to see
+                    // `[transport-connect-timeout]` vs
+                    // `[transport-header-timeout]` without reading ureq's
+                    // wording. Bracketed, like every other log tag.
+                    log::warn(&retry_log_line(&err.error_tag(), attempt));
                     if let Some(sink) = attempts {
-                        // status_code 0 means no HTTP response at all, so the
-                        // distinction is transport failure vs. timeout.
-                        sink.failed(timeout_tag(&err));
+                        sink.failed(&err.error_tag());
                     }
                     last = Some(err);
                     sleep_ms(RETRY_BACKOFF_MS.saturating_mul(u64::from(attempt)));
@@ -569,21 +799,8 @@ pub fn send_to_cc(
         message: "Upstream request failed after retries".into(),
         status_code: 0,
         retryable: true,
+        fault: None,
     }))
-}
-
-/// Classify a transport failure for the ledger.
-///
-/// A read that exceeded the idle deadline and a connection that broke look the
-/// same from the outside but are different problems, so the tag keeps them
-/// apart: one is an upstream stall, the other a dropped socket.
-fn timeout_tag(err: &UpstreamError) -> &'static str {
-    let lowered = err.message.to_lowercase();
-    if lowered.contains("timed out") || lowered.contains("timeout") {
-        "http-timeout"
-    } else {
-        "http-network"
-    }
 }
 
 /// One attempt. `Err` is a transport-level failure, `Ok(Failed)` a non-2xx.
@@ -641,13 +858,22 @@ fn attempt_send(
                 message: format!("CC API {code}: {}", sanitize_error_text(&text, api_key)),
                 status_code: code,
                 retryable,
+                fault: None,
             }));
         }
-        Err(ureq::Error::Transport(t)) => {
+        Err(err @ ureq::Error::Transport(_)) => {
+            // Classified here, while the typed error still exists: parsing the
+            // class back out of the message later is what broke on a localised
+            // Windows (see `TransportFault`). The tag leads the message because
+            // this string is both the reject log line and what the client is
+            // told — `[transport-header-timeout]` is the part a reader greps
+            // for, and ureq's own text follows it for the raw detail.
+            let fault = classify_transport(&err, crate::proxy::route_for(url));
             return Err(UpstreamError {
-                message: format!("Upstream request failed: {t}"),
+                message: format!("[{}] upstream {}: {err}", fault.tag(), fault.label()),
                 status_code: 0,
                 retryable: true,
+                fault: Some(fault),
             });
         }
     };
@@ -691,9 +917,17 @@ fn sleep_ms(ms: u64) {
     std::thread::sleep(Duration::from_millis(ms));
 }
 
+/// One retry log line. A function so the shape is pinned by a test: the class
+/// must be bracketed like every other log tag, or a reader grepping
+/// `[transport-header-timeout]` will not find the retry lines at all.
+fn retry_log_line(tag: &str, attempt: u32) -> String {
+    format!("CC upstream [{tag}], retrying {attempt}/{MAX_RETRIES}...")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::Route;
 
     #[test]
     fn working_dir_becomes_a_slug() {
@@ -729,6 +963,7 @@ mod tests {
             message: String::new(),
             status_code: code,
             retryable: false,
+            fault: None,
         };
         assert_eq!(mk(401).downstream_status(), 401);
         assert_eq!(mk(403).downstream_status(), 403);
@@ -1049,5 +1284,311 @@ mod tests {
             tick >= 10_000,
             "a header wait of {tick}ms cannot accommodate a real /alpha/generate (2.7–4.3 s)"
         );
+    }
+
+    // ── transport classification ──────────────────────────
+    //
+    // These drive ureq against real sockets rather than a hand-built error, so
+    // they pin ureq's actual structure: the class is read from `ErrorKind` plus
+    // the io error down the source chain, and a hand-built error could encode
+    // the wrong shape and still pass.
+
+    use std::net::TcpListener;
+
+    /// Port that nothing listens on: bind, read the port, drop the listener.
+    fn dead_port() -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = l.local_addr().expect("addr").port();
+        drop(l);
+        port
+    }
+
+    /// A server that accepts the connection and then sends nothing at all.
+    fn accepts_then_silent() -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = l.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            for conn in l.incoming() {
+                let Ok(mut c) = conn else { continue };
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 4096];
+                    for _ in 0..8 {
+                        if c.read(&mut buf).unwrap_or(0) == 0 {
+                            break;
+                        }
+                        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_secs(30));
+                });
+            }
+        });
+        port
+    }
+
+    fn quick_agent() -> ureq::Agent {
+        ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(300))
+            .timeout_write(Duration::from_millis(300))
+            .timeout_read(Duration::from_millis(300))
+            .build()
+    }
+
+    #[test]
+    fn a_wait_for_headers_that_never_come_is_a_header_timeout() {
+        // The class the 0.6.3 outage produced. It must NOT be reported as a
+        // connect failure: the socket connected fine, the answer never came.
+        let port = accepts_then_silent();
+        let err = quick_agent()
+            .get(&format!("http://127.0.0.1:{port}/x"))
+            .call()
+            .expect_err("the server never answers");
+        assert_eq!(
+            classify_transport(&err, Route::Direct),
+            TransportFault::HeaderTimeout
+        );
+    }
+
+    #[test]
+    fn the_fault_table_covers_every_branch_deterministically() {
+        // `fault_from` is the whole classifier as a pure function, so the full
+        // mapping is pinned here — including the shapes a real socket cannot be
+        // made to produce reliably (a NAT gateway answering a connect with RST
+        // would be `ConnectionRefused` where the CI network usually times out;
+        // rows 10 and 11 pin both readings of that world).
+        use std::io::ErrorKind as Io;
+        use ureq::ErrorKind as Uk;
+        let unclassified = "ureq's own wording";
+        let cases: &[(Uk, Option<Io>, Route, TransportFault)] = &[
+            (Uk::Dns, None, Route::Direct, TransportFault::Dns),
+            (Uk::Dns, None, Route::ViaProxy, TransportFault::ProxyFailed),
+            (
+                Uk::ProxyConnect,
+                None,
+                Route::Direct,
+                TransportFault::ProxyFailed,
+            ),
+            (
+                Uk::ProxyUnauthorized,
+                Some(Io::ConnectionRefused),
+                Route::ViaProxy,
+                TransportFault::ProxyFailed,
+            ),
+            (
+                Uk::ConnectionFailed,
+                Some(Io::TimedOut),
+                Route::Direct,
+                TransportFault::ConnectTimeout,
+            ),
+            (
+                Uk::ConnectionFailed,
+                Some(Io::WouldBlock),
+                Route::Direct,
+                TransportFault::ConnectTimeout,
+            ),
+            (
+                Uk::ConnectionFailed,
+                Some(Io::TimedOut),
+                Route::ViaProxy,
+                TransportFault::ProxyFailed,
+            ),
+            (
+                Uk::Io,
+                Some(Io::TimedOut),
+                Route::Direct,
+                TransportFault::HeaderTimeout,
+            ),
+            (
+                Uk::BadStatus,
+                Some(Io::TimedOut),
+                Route::ViaProxy,
+                TransportFault::HeaderTimeout,
+            ),
+            (
+                Uk::ConnectionFailed,
+                Some(Io::ConnectionRefused),
+                Route::Direct,
+                TransportFault::ConnectRefused,
+            ),
+            (
+                Uk::Io,
+                Some(Io::ConnectionRefused),
+                Route::Direct,
+                TransportFault::ConnectRefused,
+            ),
+            (
+                Uk::ConnectionFailed,
+                Some(Io::ConnectionRefused),
+                Route::ViaProxy,
+                TransportFault::ProxyFailed,
+            ),
+            (
+                Uk::ConnectionFailed,
+                Some(Io::ConnectionReset),
+                Route::Direct,
+                TransportFault::Reset,
+            ),
+            (
+                Uk::Io,
+                Some(Io::BrokenPipe),
+                Route::ViaProxy,
+                TransportFault::Reset,
+            ),
+            (
+                Uk::ConnectionFailed,
+                None,
+                Route::Direct,
+                TransportFault::ConnectTimeout,
+            ),
+            (
+                Uk::Io,
+                None,
+                Route::Direct,
+                TransportFault::Other(unclassified.into()),
+            ),
+            (
+                Uk::BadHeader,
+                Some(Io::InvalidInput),
+                Route::Direct,
+                TransportFault::Other(unclassified.into()),
+            ),
+        ];
+        for (i, (ureq_kind, io_kind, route, want)) in cases.iter().enumerate() {
+            let got = fault_from(*ureq_kind, *io_kind, *route, unclassified.into());
+            assert_eq!(got, *want, "case {i}: {ureq_kind:?}/{io_kind:?}/{route:?}");
+        }
+    }
+
+    #[test]
+    fn classification_reads_structure_not_the_localised_wording() {
+        // The pin the old message-matching tag failed: a Chinese-locale Windows
+        // reports the timeout with no English word anywhere in the OS text. The
+        // chain is modelled as probed — a non-io layer (ureq's Transport, whose
+        // value cannot be built outside the crate, stands in as a custom error)
+        // whose source is the io error carrying the real kind and the localised
+        // OS text. The walk must skip the non-io layer and read the kind.
+        #[derive(Debug)]
+        struct TransportStandIn(std::io::Error);
+        impl std::fmt::Display for TransportStandIn {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "Network Error: Error encountered in the status line: {}",
+                    self.0
+                )
+            }
+        }
+        impl std::error::Error for TransportStandIn {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let os_text = "由于连接方在一段时间后没有正确答复或连接的主机没有反应，连接尝试失败。 (os error 10060)";
+        let wrapped = TransportStandIn(std::io::Error::new(std::io::ErrorKind::TimedOut, os_text));
+        let found = io_error_in_chain(&wrapped).expect("the io error sits one level down");
+        assert_eq!(found.kind(), std::io::ErrorKind::TimedOut);
+        assert!(
+            !found.to_string().to_lowercase().contains("timeout"),
+            "the fixture stopped being the localised text this test exists for"
+        );
+    }
+
+    #[test]
+    fn the_retry_line_carries_the_class_in_brackets() {
+        assert_eq!(
+            retry_log_line("transport-header-timeout", 1),
+            "CC upstream [transport-header-timeout], retrying 1/2..."
+        );
+    }
+
+    #[test]
+    fn a_refused_socket_is_distinguished_when_no_connect_timeout_is_set() {
+        // With no connect timeout the OS keeps the refused kind, so the split
+        // is real. (With one, ureq's dial reports a timeout instead — that
+        // merge is documented on `TransportFault`.)
+        let err = ureq::AgentBuilder::new()
+            .timeout_read(Duration::from_millis(2000))
+            .build()
+            .get(&format!("http://127.0.0.1:{}/x", dead_port()))
+            .call()
+            .expect_err("nothing listens there");
+        assert_eq!(
+            classify_transport(&err, Route::Direct),
+            TransportFault::ConnectRefused
+        );
+    }
+
+    #[test]
+    fn a_resolution_failure_is_dns_direct_and_proxy_failure_proxied() {
+        let err = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(2000))
+            .build()
+            .get("https://no-such-host.invalid/x")
+            .call()
+            .expect_err("the TLD is reserved");
+        assert_eq!(classify_transport(&err, Route::Direct), TransportFault::Dns);
+        // Proxied, the client resolves only the proxy's host, so a resolution
+        // failure is the proxy's fault — the thing to check is Clash, not the
+        // upstream.
+        assert_eq!(
+            classify_transport(&err, Route::ViaProxy),
+            TransportFault::ProxyFailed
+        );
+    }
+
+    #[test]
+    fn a_dead_proxy_is_not_reported_as_a_dead_upstream() {
+        let proxy_url = format!("http://127.0.0.1:{}", dead_port());
+        let err = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(400))
+            .proxy(ureq::Proxy::new(proxy_url).expect("proxy"))
+            .build()
+            .get("https://api.commandcode.ai/health")
+            .call()
+            .expect_err("the proxy is not listening");
+        assert_eq!(
+            classify_transport(&err, Route::ViaProxy),
+            TransportFault::ProxyFailed
+        );
+    }
+
+    #[test]
+    fn a_transport_failure_tags_the_ledger_and_never_collapses_to_one_bucket() {
+        let mut seen = std::collections::BTreeSet::new();
+        for fault in [
+            TransportFault::ConnectTimeout,
+            TransportFault::HeaderTimeout,
+            TransportFault::ConnectRefused,
+            TransportFault::Dns,
+            TransportFault::Reset,
+            TransportFault::ProxyFailed,
+            TransportFault::Other("x".into()),
+        ] {
+            let err = UpstreamError {
+                message: String::new(),
+                status_code: 0,
+                retryable: true,
+                fault: Some(fault.clone()),
+            };
+            assert_eq!(err.error_tag(), fault.tag());
+            assert!(!fault.tag().is_empty());
+            seen.insert(fault.tag());
+        }
+        // Every class has its own tag: a shared tag would be the collapse this
+        // change is meant to remove.
+        assert_eq!(seen.len(), 7, "classes must not share a tag: {seen:?}");
+    }
+
+    #[test]
+    fn an_answered_status_still_tags_by_status_not_by_transport() {
+        let err = UpstreamError {
+            message: String::new(),
+            status_code: 429,
+            retryable: true,
+            fault: None,
+        };
+        assert_eq!(err.error_tag(), "http-429");
     }
 }

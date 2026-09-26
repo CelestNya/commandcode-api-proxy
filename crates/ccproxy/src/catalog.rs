@@ -247,6 +247,22 @@ fn read_cache(path: &Path) -> Option<Catalog> {
 
 /// Fetch the API list and merge it with the static builtins.
 ///
+/// The tag for a model-catalog fetch failure.
+///
+/// A non-2xx answer is the API speaking, not the network failing — tagging it
+/// `transport-other` would file a credential problem under "the network is
+/// broken" (flagged in review), so statuses are tagged `http-<code>` exactly
+/// like the generation path's ledger rows. Only genuine transport errors get a
+/// [`TransportFault`] class.
+fn failure_tag(err: &ureq::Error, url: &str) -> String {
+    match err {
+        ureq::Error::Status(code, _) => format!("http-{code}"),
+        ureq::Error::Transport(_) => crate::upstream::classify_for_url(err, url)
+            .tag()
+            .to_string(),
+    }
+}
+
 /// `None` means "nothing usable came back" — the caller keeps what it has.
 fn fetch_and_merge(api_base: &str, api_key: &str) -> Option<Vec<ModelMeta>> {
     let url = format!("{}/provider/v1/models", api_base.trim_end_matches('/'));
@@ -275,9 +291,15 @@ fn fetch_and_merge(api_base: &str, api_key: &str) -> Option<Vec<ModelMeta>> {
             }
         },
         Err(err) => {
-            // A silent failure here reads as "the model does not exist" — log
-            // it so an unreachable API is diagnosable from the proxy log.
-            crate::log::warn(&format!("model catalog fetch failed: {err}"));
+            // A silent failure here reads as "the model does not exist", so it
+            // is logged with a class tag, the same way a generation failure is
+            // — `catalog-` marks that this is model discovery, not a client's
+            // turn, when both appear in one log. Statuses keep their
+            // `http-<code>` tag; see `failure_tag`.
+            crate::log::warn(&format!(
+                "[catalog-{}] model catalog fetch failed: {err}",
+                failure_tag(&err, &url),
+            ));
             return None;
         }
     };
@@ -353,6 +375,20 @@ fn merge(api_models: Vec<ApiModel>) -> Option<Vec<ModelMeta>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_answer_is_tagged_by_status_not_as_a_transport_fault() {
+        // A 401 from /provider/v1/models is not a transport fault at all: the
+        // API answered. Labelling it `transport-other` would file a credential
+        // problem under "the network is broken".
+        let response = ureq::Response::new(401, "Unauthorized", "").expect("response");
+        let err = ureq::Error::Status(401, response);
+        assert_eq!(failure_tag(&err, "https://api.commandcode.ai"), "http-401");
+
+        let response = ureq::Response::new(500, "Server Error", "").expect("response");
+        let err = ureq::Error::Status(500, response);
+        assert_eq!(failure_tag(&err, "https://api.commandcode.ai"), "http-500");
+    }
 
     #[test]
     fn the_static_catalog_is_the_starting_point() {
