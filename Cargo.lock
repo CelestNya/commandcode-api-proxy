@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "ccproxy"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "rusqlite",
  "serde",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "ccproxy-tray"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "ccproxy",
  "serde_json",
