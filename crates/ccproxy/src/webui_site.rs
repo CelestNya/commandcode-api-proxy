@@ -273,4 +273,54 @@ mod tests {
         assert!(files.iter().any(|p| p.ends_with("js/b.js")));
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn corner_radii_come_only_from_the_token_scale() {
+        // "Some buttons square, some round": the radii used to be ad-hoc
+        // (16/14/8/13/2/999), so two controls on one row could disagree.
+        // Every radius now comes from a named token in tokens.css; this pins
+        // that the scale is declared, and that no stylesheet states a radius
+        // as a bare value again.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("webui");
+        let files = referenced_files(&dir);
+        assert!(!files.is_empty(), "webui/index.html references no assets");
+        let tokens = files
+            .iter()
+            .find(|p| p.ends_with("tokens.css"))
+            .map(|p| std::fs::read_to_string(p).expect("tokens.css readable"))
+            .expect("tokens.css is referenced by index.html");
+        for token in [
+            "--radius-panel",
+            "--radius-card",
+            "--radius-control",
+            "--radius-pill",
+        ] {
+            assert!(tokens.contains(token), "tokens.css must declare {token}");
+        }
+        for path in &files {
+            if path.ends_with("tokens.css") || path.extension().is_none_or(|e| e != "css") {
+                continue;
+            }
+            let text = std::fs::read_to_string(path).expect("css readable");
+            for (i, line) in text.lines().enumerate() {
+                if !line.contains("border-radius") {
+                    continue;
+                }
+                // `50%` is not a corner radius on the scale — it draws a circle
+                // (the chip's status dot). Both spellings are fine; anything
+                // else must name a token.
+                let declared = line
+                    .split("border-radius")
+                    .skip(1)
+                    .any(|rest| rest.contains("var(--radius-") || rest.contains("50%"));
+                assert!(
+                    declared,
+                    "{}:{} uses a bare radius instead of a token: {}",
+                    path.display(),
+                    i.saturating_add(1),
+                    line.trim()
+                );
+            }
+        }
+    }
 }

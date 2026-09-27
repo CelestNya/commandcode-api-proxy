@@ -12,6 +12,21 @@
   --ok: #81C995; --error: #F28B82; --aborted: #FDD663; --interrupted: #8AB4F8;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.22);
   --shadow-hover: 0 2px 4px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.3);
+
+  /* Corner radii. Four steps, by container size — not one global value: a
+     16px radius on an 11px badge reads as a blob, and a 4px radius on a whole
+     panel reads as a mistake. Every radius in the panel comes from here
+     (`webui_site.rs` has a test that fails on a bare value). */
+  --radius-panel: 16px;    /* the big containers: panels, metric cards, the log pane */
+  --radius-card: 12px;     /* inset blocks: the request table's frame, dropdowns */
+  --radius-control: 10px;  /* buttons and inputs — the row that used to mix 8px and 999px */
+  --radius-pill: 999px;    /* fully round: chips, badges, nav items, self-contained toggles */
+
+  /* Transitions. Three durations by distance/size of the change, so hover and
+     state feedback across the panel feel like one system. */
+  --t-fast: .13s ease;     /* colour-only feedback: row hover, badge states */
+  --t-base: .18s ease;     /* the default: buttons, cards, nav items */
+  --t-slow: .24s ease;     /* larger movement: panel reveal, chart draw-in */
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { height: 100%; }
