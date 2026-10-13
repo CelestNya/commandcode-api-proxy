@@ -3,6 +3,11 @@ name = "ccproxy"
 version.workspace = true
 edition.workspace = true
 publish = false
+readme = "../README.md"
+documentation = "https://github.com/CelestNya/commandcode-api-proxy/tree/main/docs"
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lib]
 name = "ccproxy"
