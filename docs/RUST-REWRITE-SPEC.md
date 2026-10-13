@@ -1,8 +1,15 @@
 # Rust 重构需求规格
 
 > 本文件是重构的**验收依据**，不描述"想做什么"，而是描述"必须复刻什么"。
-> 所有行为断言来自 `conformance/golden/`，那是从当前 Node 实现实测录制的，
-> 不是从源码推断的。任何与本文件冲突的实现都是 bug。
+> 所有行为断言来自 `tests/fixtures/*.json`（自原 `conformance/golden/` 迁移而来），
+> 由 `cargo test` 套件执行，不是从源码推断的。任何与本文件冲突的实现都是 bug。
+>
+> **证据来源注记（2026-10-14）**：文中所有 `conformance/golden/` 与
+> `conformance/client-probes/` 路径均指向 Node 时代已删除的夹具/探针目录。
+> 行为断言已迁移至 `crates/ccproxy/tests/fixtures/*.json`
+> （`behaviour.json` / `translate.json` / `upstream-scenarios.json`），
+> 由 `cargo test` 执行（`tests/stream_golden.rs`、`tests/translate_golden.rs` 等）。
+> 历史叙事中的旧路径保留原貌以保持记录真实；现在式指令一律按新路径理解。
 
 ## 0. 背景与目标
 
@@ -40,8 +47,8 @@ reqwest + tokio + windows-rs 的二进制为 1.8 MB，余量充足）。行为�
 
 | 级别 | 标准 | 验证方式 |
 | ---- | ---- | -------- |
-| **必须** | `conformance/golden/behaviour.json` 的 52 个 case 全部匹配 | Rust 侧记录器输出与 golden 逐字段 diff |
-| **必须** | `conformance/golden/translate.json` 的 39 个样本全部匹配 | 单元测试断言 |
+| **必须** | `tests/fixtures/behaviour.json` 的全部 case 匹配 | `tests/stream_golden.rs`：记录器输出与 fixture 逐字段 diff |
+| **必须** | `tests/fixtures/translate.json` 的全部样本匹配 | `tests/translate_golden.rs`：单元断言 |
 | **必须** | 真实 CC 上游端到端可用（ZCode 走代理正常对话、工具调用正常） | 手工验证 |
 | **必须** | 生产端口 8787 契约不变；托盘交接语义不变 | 隔离命名空间 `CC_TRAY_NS` 验证 |
 | **应当** | 单文件 exe < 10 MB | `ls -la target/release/ccproxy.exe` |
@@ -610,7 +617,7 @@ budget 8000 → `medium` —— 它的子集覆盖了低区间，所以不塌缩
 > 2. `max_tokens` 在 **OpenAI 路径可选**（仅当出现时才校验类型与范围），在
 >    **Anthropic 路径必填**。
 >
-> 所有 400 的 message 文案是契约的一部分（见 golden 的 `validation` 组），因为客户端
+> 所有 400 的 message 文案是契约的一部分（见 fixtures 的 `validation` 组），因为客户端
 > 可能据此分支。
 
 ---
@@ -996,7 +1003,7 @@ prefill 语义。**不要在重构里依赖 A。**
 | ---- | ---- | ---- |
 | **取消安全** | `select!` 中读上游 body 与关闭信号竞争时丢字节或解析错位。`read_exact` / `read_to_end` / `write_all` **均非**取消安全 | 循环内持有自己的缓冲区；取消视为硬停，丢弃缓冲而非续读部分行 |
 | **`spawn_blocking` 不可取消** | 已启动的任务在 runtime 关闭时无限等待，托盘需快速退出 | 长时阻塞用真线程；设 `shutdown_timeout` |
-| **CC 的服务端探测** | 请求头不像官方 CLI 会被拒（`Proxy use detected`） | 逐字复刻头集合，用 golden 的 `upstreamRequests` 断言 |
+| **CC 的服务端探测** | 请求头不像官方 CLI 会被拒（`Proxy use detected`） | 逐字复刻头集合，用 fixtures 的 `upstreamRequests` 断言 |
 | **重试可重试性回归** | 错误类型映射错了会导致客户端不重试 | `failure/*` 与流内错误是最高优先级复刻点。**注意 §2.4.3：流内错误在任何类型下都不会触发下游重试**，别把恢复希望押在这里 |
 | **流内失败无自动恢复** | 头已发出后上游才失败，下游不会重试，整轮报废 | 目前**无解**（§2.4.3）。若要做，唯一路径是缓冲首块后再决定状态码，属重构期大决策 |
 | **错误被自己的收尾洗成成功** | 流级错误后补 `finishRecords` → 客户端 `finishReason` 变 `stop`，"断流"看起来像"说完了"（§2.4.4，实测） | **已在 `27df44c` 修复**：`errorRecords` 只发 `error` + `message_stop`；golden 已锁定新行为，Rust 侧照抄，勿回补 `message_delta` |
@@ -1007,6 +1014,10 @@ prefill 语义。**不要在重构里依赖 A。**
 ---
 
 ## 10. 实施顺序建议
+
+> **当前状态（2026-10-14）**：第 1–5 步（骨架、翻译层、NDJSON/SSE、上游、
+> 端到端）已完成并交付，验证方式为 `cargo test --locked`（fixtures 驱动），
+> 本节保留为当时的实施记录。
 
 1. **骨架**：三 crate workspace + 配置加载 + axum 起服 + `/health`。跑通
    `conformance:check` 的 `httpSurface` 组。
@@ -1054,8 +1065,9 @@ SDK 探针来证 —— 上面第二轮两条错断言都属此类，都是纯�
 修改本文件中的行为断言时，先跑：
 
 ```bash
-pnpm conformance:check     # 若 golden 与当前实现不符，先修夹具
+cargo test --locked        # fixtures 已内置于测试套件；若与实现不符，先修 fixtures
 ```
 
-然后从 golden 里取出对应字段作为证据，再写进文档。涉及客户端解读的，跑
-`client-probes/` 下的探针并把输出更新到 `observed/`。
+然后从 `tests/fixtures/` 里取出对应字段作为证据，再写进文档。涉及客户端
+如何解读的断言（原 `client-probes/` 探针已随 Node 源删除，不再有自动化
+证据），改写时须标注为历史实测结论，不得当作现行可验证事实。

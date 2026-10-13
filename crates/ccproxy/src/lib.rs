@@ -1,7 +1,6 @@
 //! cc-proxy — Rust rewrite of the Node proxy.
-//! Behaviour contract: RUST-REWRITE-SPEC.md + ADEVIATIONS.md, enforced by the
-//! test suites (fixture replay + integration).
-//! Behaviour contract: conformance/golden/*.json. Plan: docs/RUST-REWRITE-PLAN.md.
+//! Behaviour contract: docs/RUST-REWRITE-SPEC.md + docs/ADEVIATIONS.md, enforced
+//! by the test suites (fixture replay + integration).
 #![forbid(unsafe_code)]
 #![deny(
     clippy::unwrap_used,

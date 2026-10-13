@@ -6,8 +6,8 @@
 //! sent upstream, one file per failure, keyed by request id.
 //!
 //! Two deliberate limits keep this from becoming a disk or privacy problem:
-//! the body is capped ([`MAX_BODY_BYTES`]), and the directory keeps only the
-//! newest [`MAX_FILES`] dumps. Dumps contain the user's conversation content,
+//! the body is capped (`MAX_BODY_BYTES`), and the directory keeps only the
+//! newest `MAX_FILES` dumps. Dumps contain the user's conversation content,
 //! so they are a diagnostic artifact, not a permanent record.
 
 use std::path::{Path, PathBuf};
