@@ -18,6 +18,10 @@ jobs:
       - run: cargo test --locked -p ccproxy
       - run: cargo clippy --all-targets --all-features --locked -p ccproxy -- -D warnings
       - run: cargo fmt --check
+      - name: Doc build (rustdoc, warnings as errors)
+        run: cargo doc --no-deps --locked -p ccproxy
+        env:
+          RUSTDOCFLAGS: "-D warnings"
 
   windows:
     runs-on: windows-latest
