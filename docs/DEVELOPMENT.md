@@ -79,12 +79,11 @@ folder to `CCProxy-current` and launching its tray, no rebuild.
 mapped image with an orphaned log handle. The script now refuses when a process
 is running from the target path, and swaps via a `-previous` rename.
 
-### WebUI assembly (build-time inlining)
+### WebUI (external front end)
 
-The panel is served as **one self-contained document** (inline CSS/JS, no sibling
-requests) so it works offline and behind any client — but it is *authored* as
-separate files. `build.rs` includes `src/webui_site.rs` via `#[path]` and inlines
-`crates/ccproxy/webui/` into `$OUT_DIR/webui.html` at compile time:
+The panel is a **plain static site** shipped loose beside the executable: no
+build-time inlining, no embedded copy. `index.html` references the `css/` and
+`js/` it needs, and the proxy serves those files as-is from `<exe dir>/webui/`:
 
 ```
 crates/ccproxy/webui/
@@ -94,14 +93,14 @@ crates/ccproxy/webui/
 ```
 
 Editing a style means editing the one file that owns it; adding a file means
-adding one line to `index.html` and nothing else. A referenced file that does not
-exist fails the build rather than shipping a page quietly missing a stylesheet.
+adding one line to `index.html` and nothing else. A referenced file that does
+not exist shows up as a 404 when the page loads — the browser names the gap.
 
-At run time the proxy prefers loose sources at `service/webui/` over the compiled
-copy (`webui.rs::page`, invalidated by walking the directory's newest mtime), so
-an installed copy can be edited and picked up by a reload. The startup log names
-which copy is in use. Delete `service/webui/` for a smaller install; the page
-keeps working from the compiled copy.
+The proxy serves the directory under `/webui/` (`/webui` redirects there so the
+page's relative references resolve), with an `ETag` on every asset so a reload
+with no edits is a zero-byte 304. If `webui/` is missing entirely, `/webui/`
+answers 404 with an explanatory plain-text body — the package must ship the
+directory; there is no fallback copy in the binary.
 
 ## Project structure
 
@@ -135,8 +134,8 @@ crates/
 │   │   ├── models.json      # Vendored model table (aliases, efforts, context)
 │   │   └── translate/       # openai.rs, anthropic_stream.rs, openai_stream.rs,
 │   │                        #   nonstream.rs, models.rs, terminal.rs, util.rs
-│   └── webui/               # Panel sources, inlined at build time (css/, js/, index.html)
-└── ccproxy-tray/          # The tray binary — #![deny(unsafe_code)], FFI sites expect()
+│   └── webui/               # Panel sources, served loose beside the exe (css/, js/, index.html)
+└── ccproxy-tray/          # The tray binary — Win32 FFI confined to win.rs/tray.rs/owner.rs
     └── src/
         ├── main.rs          # Role determination + handover loop
         ├── win.rs           # The only unsafe surface: job objects, mutex/events,

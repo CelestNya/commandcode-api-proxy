@@ -5,7 +5,7 @@ description: 优化 cc-proxy 的 WebUI 控制面板（crates/ccproxy/webui）—
 
 # cc-proxy WebUI 设计（消纳自 anthropics/skills frontend-design）
 
-本 skill 只服务一个对象：`crates/ccproxy/webui/` 的运维控制面板（原生 HTML/CSS/JS，build.rs 内联）。它是**信息密集型工具界面**，不是展示页——审美原则与 landing page 相反，以下内容已经过本地化裁剪。
+本 skill 只服务一个对象：`crates/ccproxy/webui/` 的运维控制面板（原生 HTML/CSS/JS，**外置前端**：`<exe dir>/webui/` 目录由代理按 `/webui/` 路由原样 serve，无内联、无编译时组装；改样式刷新即生效）。它是**信息密集型工具界面**，不是展示页——审美原则与 landing page 相反，以下内容已经过本地化裁剪。
 
 ## 适用边界
 

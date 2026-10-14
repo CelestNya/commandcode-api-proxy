@@ -290,7 +290,10 @@ pub fn handle(state: &SharedState, req: Request) {
     match (method.as_str(), path.as_str()) {
         ("GET", "/health") => handle_health(state, req, &ctx),
         ("GET", "/v1/models") => handle_models(state, req, &ctx),
-        ("GET", "/webui") => crate::webui::handle_page(state, req, &ctx),
+        // `/webui` (no slash) redirects to `/webui/`, where the page's
+        // relative css/js references resolve correctly.
+        ("GET", "/webui") => crate::webui::handle_page_redirect(state, req, &ctx),
+        ("GET", "/webui/") => crate::webui::handle_page(state, req, &ctx),
         ("GET", "/webui/api/sysinfo") => crate::webui::handle_sysinfo(state, req, &ctx),
         ("GET", "/webui/api/stats") => crate::webui::handle_stats(state, req, &ctx),
         ("GET", "/webui/api/attempts") => crate::webui::handle_attempts(state, req, &ctx),
@@ -299,7 +302,11 @@ pub fn handle(state: &SharedState, req: Request) {
         ("POST", "/v1/messages") => handle_messages(state, req, &ctx),
         ("POST", "/v1/messages/count_tokens") => handle_count_tokens(state, req, &ctx),
         _ => {
-            if is_anthropic(&req) {
+            if path.starts_with("/webui/") && !path.starts_with("/webui/api/") {
+                // External front end: any static file under `webui/`
+                // (`css/…`, `js/…`, …). API routes are matched above.
+                crate::webui::handle_asset(state, req, &ctx, &path);
+            } else if is_anthropic(&req) {
                 respond_anthropic_error(req, 404, "not_found_error", "Not found", state, &ctx);
             } else {
                 respond_json(req, 404, json!({"error": "Not found"}), state, &ctx);
@@ -314,6 +321,7 @@ fn handle_preflight(state: &SharedState, req: Request, path: &str) {
         "/health"
             | "/v1/models"
             | "/webui"
+            | "/webui/"
             | "/webui/api/sysinfo"
             | "/webui/api/stats"
             | "/webui/api/attempts"

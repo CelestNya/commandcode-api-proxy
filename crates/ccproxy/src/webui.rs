@@ -21,97 +21,70 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use tiny_http::{Header, Request, Response, StatusCode};
 
-/// The page compiled into the binary — the fallback, and the whole story when
-/// no loose sources ship beside the executable.
+/// Serve a static file from the loose `webui/` directory beside the
+/// executable — the only front end there is now.
 ///
-/// The authoring sources live in `crates/ccproxy/webui/`: `index.html` lists the
-/// stylesheets and scripts, and `build.rs` inlines them via `webui_site`. Edit
-/// the file you care about, not this constant.
-const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/webui.html"));
-
-/// The served page: the loose `webui/` beside the executable when it is present
-/// and assembles cleanly, otherwise the compiled-in copy.
+/// The external front end: `index.html` plus the `css/` and `js/` it references
+/// are shipped as plain files and served as-is. Editing a stylesheet and
+/// reloading takes effect with no rebuild — the whole point of shipping the
+/// sources.
 ///
-/// Preferring the loose copy is what lets a stylesheet be edited and the page
-/// reloaded with no rebuild — the point of shipping the sources.
-///
-/// The assembly is cached against the newest mtime among the sources, so a
-/// request after an edit re-reads the files (that is the whole feature) while a
-/// request with nothing changed costs two `stat` calls and no file reads. A
-/// broken or half-present directory falls back to the compiled copy rather than
-/// serving a page missing its styles, which is the failure this must never
-/// produce.
-fn page() -> String {
-    use std::sync::Mutex;
-    // (newest source mtime seen, the page assembled from it). A restart of the
-    // mtime clock (a file restored to an older timestamp) still invalidates,
-    // because only equality hits the cache.
-    static CACHE: OnceLock<Mutex<Option<(std::time::SystemTime, String)>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(None));
-
+/// Each request reads the file (loopback; the browser fetches each asset once)
+/// and answers 304 when the client's `ETag` still matches, so a reload with no
+/// edits costs a stat plus a hash rather than a re-ship of the page.
+fn serve_static(req: Request, url_path: &str) {
     let Some(dir) = crate::config::webui_site_dir() else {
-        return PAGE.to_string();
+        crate::log::error("WebUI: webui/ 目录缺失（外置前端未随包分发）");
+        respond(
+            req,
+            404,
+            "WebUI 静态目录缺失（webui/ 未随包分发）".into(),
+            "text/plain; charset=utf-8",
+        );
+        return;
     };
-
-    let newest = newest_mtime(&dir);
-    if let (Some(stamp), Ok(guard)) = (newest, cache.lock()) {
-        if let Some((cached_at, page)) = guard.as_ref() {
-            if *cached_at == stamp {
-                return page.clone();
-            }
-        }
-    }
-
-    let assembled = match crate::webui_site::assemble(&dir) {
-        Ok(page) => {
-            crate::log::info(&format!(
-                "WebUI 使用磁盘源码（改后刷新即生效）: {}",
-                dir.display()
-            ));
-            page
-        }
+    let path = match crate::webui_site::asset_path(&dir, url_path) {
+        Ok(p) => p,
         Err(e) => {
-            crate::log::warn(&format!(
-                "WebUI 磁盘源码不可用（{e}）；回退到内置副本: {}",
-                dir.display()
-            ));
-            PAGE.to_string()
+            crate::log::warn(&format!("WebUI: 拒绝路径 {url_path}: {e}"));
+            respond(req, 400, format!("Bad path: {url_path}"), "text/plain; charset=utf-8");
+            return;
         }
     };
-
-    if let (Some(stamp), Ok(mut guard)) = (newest, cache.lock()) {
-        *guard = Some((stamp, assembled.clone()));
-    }
-    assembled
-}
-
-/// The newest modification time among the sources, or `None` when the tree
-/// cannot be walked (in which case the caller assembles without caching).
-///
-/// Walking is what makes an edit to *any* file — a stylesheet, a script, or the
-/// `index.html` that ties them together — invalidate the cache.
-fn newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime> {
-    fn walk(dir: &std::path::Path, newest: &mut Option<std::time::SystemTime>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
+    let body = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            crate::log::warn(&format!("WebUI: 无法读取 {}: {e}", path.display()));
+            respond(req, 404, format!("Not found: {url_path}"), "text/plain; charset=utf-8");
             return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, newest);
-            } else if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
-                if newest.is_none_or(|n| modified > n) {
-                    *newest = Some(modified);
-                }
-            }
         }
+    };
+    let etag = etag_of(&body);
+    let if_none_match = req
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("If-None-Match"))
+        .and_then(|h| h.value.as_str().to_string().into());
+    if page_response(&etag, if_none_match.as_deref()).is_none() {
+        let mut resp = Response::empty(304);
+        for h in headers(&[("Cache-Control", "no-cache"), ("ETag", etag.as_str())]) {
+            resp = resp.with_header(h);
+        }
+        let _ = req.respond(resp);
+        return;
     }
-    let mut newest = None;
-    walk(root, &mut newest);
-    newest
+    let hdrs = headers(&[
+        ("Content-Type", crate::webui_site::content_type(&path)),
+        ("Cache-Control", "no-cache"),
+        ("ETag", etag.as_str()),
+    ]);
+    let mut resp = Response::from_data(body).with_status_code(StatusCode(200));
+    for h in hdrs {
+        resp = resp.with_header(h);
+    }
+    let _ = req.respond(resp);
 }
 
 /// How many ledger rows the detail screen shows by default.
@@ -205,45 +178,40 @@ fn respond_json(req: Request, body: &Value) {
 
 // ── routes ─────────────────────────────────────────────────────
 
-/// `GET /webui` — the panel, as a static document.
+/// `GET /webui/` — the panel's `index.html`, from the loose `webui/` directory.
 ///
 /// The page carries no per-request snapshot: the client hydrates from the JSON
 /// APIs in parallel right after parse, which on loopback costs milliseconds and
 /// buys the thing the snapshot made impossible — a **stable body**, and with it
-/// a stable `ETag`, so a reload is a zero-byte 304 instead of re-shipping
-/// (formerly) ~130 KB of HTML of which two thirds was an inline snapshot.
+/// a stable `ETag`, so a reload is a zero-byte 304 instead of re-shipping the
+/// HTML.
 pub fn handle_page(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
-    let body = page();
-    let etag = etag_of(&body);
-    let if_none_match = req
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("If-None-Match"))
-        .and_then(|h| h.value.as_str().to_string().into());
-    if page_response(&etag, if_none_match.as_deref()).is_none() {
-        let mut resp = Response::empty(304);
-        for h in headers(&[("Cache-Control", "no-cache"), ("ETag", etag.as_str())]) {
-            resp = resp.with_header(h);
-        }
-        let _ = req.respond(resp);
-        return;
-    }
-    let hdrs = headers(&[
-        ("Content-Type", "text/html; charset=utf-8"),
-        ("Cache-Control", "no-cache"),
-        ("ETag", etag.as_str()),
-    ]);
-    let mut resp = Response::from_string(body).with_status_code(StatusCode(200));
-    for h in hdrs {
+    serve_static(req, "/webui/index.html");
+}
+
+/// `GET /webui` — without the trailing slash the page's relative
+/// `css/…`/`js/…` references would resolve under `/`, so redirect to
+/// `/webui/`. The fragment (`#/stats`) survives the redirect.
+pub fn handle_page_redirect(state: &SharedState, req: Request, _ctx: &RequestId) {
+    let _ = state;
+    let mut resp = Response::from_string("").with_status_code(StatusCode(307));
+    for h in headers(&[("Location", "/webui/")]) {
         resp = resp.with_header(h);
     }
     let _ = req.respond(resp);
 }
 
+/// `GET /webui/<asset>` — any static file under the site directory
+/// (`css/…`, `js/…`). The `/webui/api/…` routes are matched before this.
+pub fn handle_asset(state: &SharedState, req: Request, _ctx: &RequestId, path: &str) {
+    let _ = state;
+    serve_static(req, path);
+}
+
 /// The page's ETag: a quoted hash of the exact bytes served. Deterministic
 /// within a binary, which is the lifetime a revalidation cache cares about.
-fn etag_of(page: &str) -> String {
+fn etag_of(page: &[u8]) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     page.hash(&mut hasher);
@@ -978,9 +946,9 @@ mod tests {
     }
     #[test]
     fn the_page_etag_is_stable_and_the_304_path_is_exhausting() {
-        // Astro-style static page: same assembly, same ETag, so a reload with
+        // Astro-style static page: same bytes, same ETag, so a reload with
         // If-None-Match costs zero bytes.
-        let page = "<html>static</html>";
+        let page = b"<html>static</html>";
         let etag = etag_of(page);
         assert_eq!(etag_of(page), etag, "the hash must be deterministic");
         assert!(etag.starts_with('"'), "an HTTP ETag is quoted: {etag}");
