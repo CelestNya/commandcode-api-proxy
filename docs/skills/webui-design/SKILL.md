@@ -30,7 +30,7 @@ description: 优化 cc-proxy 的 WebUI 控制面板（crates/ccproxy/webui）—
 ### 配色与状态语义
 
 - 颜色只承载语义，不承载装饰：`ok/error/aborted/interrupted` 四种请求状态色已在 `tokens.css` 定义（`--ok: #81C995 / --error: #F28B82 / --aborted: #FDD663 / --interrupted: #8AB4F8`），为可区分色板，保持语义、不挪作装饰。
-- 只在 `tokens.css` 的 CSS 变量体系内扩展，禁止硬编码色值——**项目已有测试强制**（`webui_site.rs` 有测试拒绝面板内的裸色值），改动后需通过该测试。
+- 只在 `tokens.css` 的 CSS 变量体系内扩展，禁止硬编码色值——**JS 里的图表色（趋势图 LEG/SERIES、环形图 PALETTE）也要走 `var(--…)`**（SVG 属性支持 CSS 变量）；`webui_site.rs` 的测试只拒**裸 radius**（不是颜色），所以色值靠自查，改动后打开页面确认颜色渲染。
 - 主色 + 单一强调色（`--primary-container #1E3A5F` + `--primary #8AB4F8` 方向正确）；强调色只用于「当前活跃/需要注意」元素。
 
 ### 密度与布局

@@ -10,6 +10,18 @@
   --primary: #8AB4F8; --primary-container: #1E3A5F; --on-primary-container: #D3E3FD;
   --text: #E3E7EC; --muted: #8B94A3;
   --ok: #81C995; --error: #F28B82; --aborted: #FDD663; --interrupted: #8AB4F8;
+
+  /* Chart series colours. The trend legend and the model donut read these via
+     `var(--…)` from JS (SVG presentation attributes accept CSS variables), so
+     a theme change re-colours the charts too. The first four map to the
+     semantic status colours; `--chart-hit` is the cache-hit-rate line. */
+  --chart-hit: #C58AF9;
+  --chart-6: #F2B8B5; --chart-7: #A8DAB5; --chart-8: #FFD8A8;
+  --chart-9: #B3C7F9; --chart-10: #D0B8F0;
+
+  /* Log pane background: one step darker than the app surface so the code
+     block reads as inset, kept as a token instead of a bare hex. */
+  --log-bg: #0B0E13;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.22);
   --shadow-hover: 0 2px 4px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.3);
 
@@ -33,6 +45,7 @@ html { height: 100%; }
 body {
   background: var(--bg); color: var(--text); height: 100%;
   font: 13.5px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 .shell { display: flex; height: 100%; }

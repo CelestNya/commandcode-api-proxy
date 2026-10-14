@@ -16,7 +16,7 @@
 /* The pane is its own scroll container with a fixed height so the tail sits
    at the bottom and the surrounding page does not stretch to 500 lines. */
 .logpane {
-  background: #0B0E13; border: 1px solid var(--outline-variant); border-radius: var(--radius-panel);
+  background: var(--log-bg); border: 1px solid var(--outline-variant); border-radius: var(--radius-panel);
   padding: 12px 14px; height: calc(100vh - 260px); min-height: 240px; overflow: auto;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 12.5px; line-height: 1.6; white-space: pre; tab-size: 4;

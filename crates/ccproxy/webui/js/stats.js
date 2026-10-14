@@ -90,10 +90,10 @@ function downsampleTrend(arr, n) {
 function renderTrend(raw, animate) {
   var trend = downsampleTrend(raw, 12);
   var LEG = [
-    { key: "prompt", name: "Input", color: "#8AB4F8" },
-    { key: "completion", name: "Output", color: "#81C995" },
-    { key: "cached", name: "Cache Read", color: "#FDD663" },
-    { key: "hitRate", name: "Cache Hit Rate", color: "#C58AF9" }
+    { key: "prompt", name: "Input", color: "var(--primary)" },
+    { key: "completion", name: "Output", color: "var(--ok)" },
+    { key: "cached", name: "Cache Read", color: "var(--aborted)" },
+    { key: "hitRate", name: "Cache Hit Rate", color: "var(--chart-hit)" }
   ];
   el("trend-legend").innerHTML = LEG.map(function (l) {
     return '<span><i style="background:' + l.color + '"></i>' + l.name + '</span>';
@@ -108,7 +108,7 @@ function renderTrend(raw, animate) {
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   var pw = W - ML - MR, ph = H - MT - MB;
   if (!trend.length) {
-    svg.innerHTML = '<text x="450" y="150" fill="var(--muted)" font-size="13" text-anchor="middle">暂无数据</text>';
+    svg.innerHTML = '<text x="' + (W / 2) + '" y="150" fill="var(--muted)" font-size="13" text-anchor="middle">暂无数据</text>';
     return;
   }
   var maxTok = 0;
@@ -218,10 +218,10 @@ function renderTrend(raw, animate) {
      data attribute, so a CSS stagger can animate them one after another and
      the legend could highlight them later. */
   var SERIES = [
-    { pts: sHr, color: "#C58AF9", width: 1.6, name: "hitRate" },
-    { pts: sOut, color: "#81C995", width: 2, name: "completion" },
-    { pts: sCa, color: "#FDD663", width: 2, name: "cached" },
-    { pts: sIn, color: "#8AB4F8", width: 2, name: "prompt" }
+    { pts: sHr, color: "var(--chart-hit)", width: 1.6, name: "hitRate" },
+    { pts: sOut, color: "var(--ok)", width: 2, name: "completion" },
+    { pts: sCa, color: "var(--aborted)", width: 2, name: "cached" },
+    { pts: sIn, color: "var(--primary)", width: 2, name: "prompt" }
   ];
   SERIES.forEach(function (se, idx) {
     var d = pchipPath(se.pts);
@@ -232,7 +232,7 @@ function renderTrend(raw, animate) {
   /* data points, denser for short windows (7d) and sampled for long ones */
   var dotStep = Math.max(1, Math.ceil(trend.length / 14));
   SERIES.forEach(function (se, si) {
-    var r = se.color === "#C58AF9" ? 2 : 2.6;
+    var r = se.name === "hitRate" ? 2 : 2.6;
     se.pts.forEach(function (pt, idx) {
       if (idx % dotStep !== 0 && idx !== se.pts.length - 1) return;
       out += '<circle class="trend-dot" style="--i:' + si + '" cx="' + pt[0].toFixed(1) + '" cy="' + pt[1].toFixed(1) + '" r="' + r + '" fill="' + se.color + '" stroke="var(--bg)" stroke-width="1"/>';

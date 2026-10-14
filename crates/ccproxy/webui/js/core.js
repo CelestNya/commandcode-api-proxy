@@ -5,7 +5,13 @@
 
 "use strict";
 var state = { stats: null, attempts: [], days: 14, page: 1, pageSize: 50, daysFetchAt: 0, filters: { model: "", stream: "", status: "" } };
-var PALETTE = ["#8AB4F8", "#81C995", "#FDD663", "#F28B82", "#C58AF9", "#7FD1FF", "#F2B8B5", "#A8DAB5", "#FFD8A8", "#B3C7F9"];
+/* Chart series palette, expressed as CSS variables (see tokens.css): the first
+   four slots map to the semantic status colours, the rest to dedicated chart
+   hues. SVG presentation attributes accept `var(--…)`, so a theme change in
+   tokens.css re-colours every chart without touching JS. */
+var PALETTE = ["var(--primary)", "var(--ok)", "var(--aborted)", "var(--error)",
+  "var(--chart-hit)", "var(--chart-6)", "var(--chart-7)", "var(--chart-8)",
+  "var(--chart-9)", "var(--chart-10)"];
 
 function el(id) { return document.getElementById(id); }
 function fmtNum(n) { return (n == null) ? "—" : Number(n).toLocaleString("en-US"); }

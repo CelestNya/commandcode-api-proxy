@@ -1202,44 +1202,33 @@ mod tests {
 
     #[test]
     fn trend_is_newest_first_then_reversed_for_the_chart() {
+        // Fixture dates are relative to "now": the trend window is a strict
+        // calendar range ending today (SQLite `date('now','localtime',...)`),
+        // so fixed dates would age out of the window as the wall clock moves
+        // on (this test broke on 2026-10-14 when its 2026-09 fixtures fell
+        // past the 14-day horizon). Yesterday and the day before are always
+        // inside any window ≥ 3 days.
+        let now = crate::now_epoch_secs();
+        let day_before = crate::time::iso8601_secs(now - 2 * 86_400);
+        let yesterday = crate::time::iso8601_secs(now - 86_400);
         let conn = ledger(&[
-            (
-                "2026-09-15T10:00:00Z",
-                "openai",
-                "gpt-4o",
-                "ok",
-                100,
-                0,
-                0,
-                100,
-                1,
-                0,
-            ),
-            (
-                "2026-09-16T10:00:00Z",
-                "openai",
-                "gpt-4o",
-                "ok",
-                50,
-                10,
-                0,
-                100,
-                1,
-                0,
-            ),
+            (day_before.as_str(), "openai", "gpt-4o", "ok", 100, 0, 0, 100, 1, 0),
+            (yesterday.as_str(), "openai", "gpt-4o", "ok", 50, 10, 0, 100, 1, 0),
         ]);
         let s = stats_json(&conn, 14);
         let trend = s["trend"].as_array().unwrap();
         // The window is a strict calendar range: every day is present so a
         // different window visibly changes the curve, empty days read 0.
         assert_eq!(trend.len(), 14);
+        let date_before = &day_before[..10];
+        let date_y = &yesterday[..10];
         let i15 = trend
             .iter()
-            .position(|d| d["date"] == "2026-09-15")
+            .position(|d| d["date"] == date_before)
             .unwrap();
         let i16 = trend
             .iter()
-            .position(|d| d["date"] == "2026-09-16")
+            .position(|d| d["date"] == date_y)
             .unwrap();
         assert_eq!(i15 + 1, i16);
         assert_eq!(trend[i16]["attempts"], 1);
