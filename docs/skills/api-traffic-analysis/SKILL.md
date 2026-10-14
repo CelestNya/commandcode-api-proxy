@@ -40,7 +40,8 @@ description: 抓包分析 cc-proxy 的 API 流量（dsh/客户端 → cc-proxy �
 ## 请求/响应结构速查（cc-proxy 链路）
 
 - **客户端侧**（dsh 发到 8787）：OpenAI 兼容 `messages`（system/user/assistant/tool）+ `tools`（dsh 27 工具）+ `stream`。
-- **上游侧**（cc-proxy 转发到 api.commandcode.ai）：`/alpha/generate`，usage 返回 `cache_read_input_tokens`（缓存命中计数，64-token 整数倍 = 上游按块前缀缓存）。
+- **上游侧**（cc-proxy 转发到 api.commandcode.ai）：`/alpha/generate`；上游存活探针 `https://api.commandcode.ai/health`（proxy.rs `PROBE_URL`）。
+- **usage 字段映射**：上游原始字段 `cache_read_input_tokens`（缓存命中计数，64-token 整数倍 = 上游按块前缀缓存）→ cc-proxy 落库/统计为 `cached_tokens`（usage.rs `UsageData`）；`cache_creation_tokens` 为缓存写入 token（open 模型少报）。**分析日志/WebUI 用 `cached_tokens`，抓包看上游原始响应用 `cache_read_input_tokens`**。
 - **SSE 流事件**（转发透传，结构与 OpenAI 兼容）：`message_start`（元信息）、`content_block_delta`（增量文本/tool 参数）、`message_delta`（usage 统计）、`message_stop`。
 
 ## token 与缓存分析

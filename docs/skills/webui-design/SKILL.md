@@ -23,15 +23,15 @@ description: 优化 cc-proxy 的 WebUI 控制面板（crates/ccproxy/webui）—
 
 ### 字体与数字
 
-- **数字一律等宽**（`font-variant-numeric: tabular-nums`），让 token/延迟/费用列对齐可读——这是控制面板最重要的字体决策。
-- 中英混排字体栈保持现状（系统栈即可），**不要引入 Inter/Arial 等通用西文**，也不要为控制面板引入装饰字体。
+- **数字一律等宽**（`font-variant-numeric: tabular-nums`），让 token/延迟/费用列对齐可读——这是控制面板最重要的字体决策。**现状缺口已确认**：`tokens.css` 的 body 字体栈未设 `font-variant-numeric`，表格数字列是比例数字——优化时在 `tokens.css` 加一个 `--num` 工具类或直接设于 `body`。
+- 中英混排字体栈保持现状（`-apple-system, "Segoe UI", "Microsoft YaHei", system-ui` 系统栈即可），**不要引入 Inter/Arial 等通用西文**，也不要为控制面板引入装饰字体。
 - 字号层级：指标卡数值 > 面板标题 > 表格正文 > 辅助说明，层级差 ≥2px。
 
 ### 配色与状态语义
 
-- 颜色只承载语义，不承载装饰：`ok/error/aborted/interrupted` 四种请求状态用**可区分且色盲安全**的色板（不要纯红/纯绿对）。
-- 已在 `tokens.css` 的 CSS 变量体系内扩展，禁止硬编码色值。
-- 主色 + 单一强调色（现状 `#1E3A5F` + `#8AB4F8` 方向正确）；强调色只用于「当前活跃/需要注意」元素。
+- 颜色只承载语义，不承载装饰：`ok/error/aborted/interrupted` 四种请求状态色已在 `tokens.css` 定义（`--ok: #81C995 / --error: #F28B82 / --aborted: #FDD663 / --interrupted: #8AB4F8`），为可区分色板，保持语义、不挪作装饰。
+- 只在 `tokens.css` 的 CSS 变量体系内扩展，禁止硬编码色值——**项目已有测试强制**（`webui_site.rs` 有测试拒绝面板内的裸色值），改动后需通过该测试。
+- 主色 + 单一强调色（`--primary-container #1E3A5F` + `--primary #8AB4F8` 方向正确）；强调色只用于「当前活跃/需要注意」元素。
 
 ### 密度与布局
 

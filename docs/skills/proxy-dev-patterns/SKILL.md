@@ -18,8 +18,8 @@ description: cc-proxy（Rust API 翻译/转发代理）开发时的模式与反�
 | 模式 | 来源要点 | cc-proxy 现状 | 行动 |
 |---|---|---|---|
 | 重试退避 | 指数退避 500ms→1s→2s，max 5s；只重试可修复错误 | 已有：`no_output_retries`（SseBody 流恢复）、model-discovery 403 重试、5xx/429 重试（generate.rs/billing.rs） | **保持**；如需统一退避参数，参照指数退避曲线 |
-| 并发限流 | per-provider semaphore，默认 5 | **缺失**（无并发上限） | 建议：上游/出站并发 semaphore，防突发打爆上游 |
-| 健康端点 | `/health` 返回 provider 状态 | **缺失** | 建议：加 `/health`（监听状态 + 最近错误计数），WebUI 顶部可直接复用 |
+| 并发限流 | per-provider semaphore，默认 5 | 有连接线程上限（超限**拒绝**连接，server.rs `Max concurrent connection threads`）；无上游出站并发**排队**限流 | 如需平滑限流（排队而非拒绝），加 outbound semaphore |
+| 健康端点 | `/health` 返回 provider 状态 | **已有**（server.rs `handle_health`：status/version/cache 快照含 cache_rate） | 可增强：加 errors_1h/retries_1h 计数供监控 |
 | count_tokens | 预检端点需与主端点同 auth | 已有：`/v1/messages/count_tokens`（server.rs） | 保持；改 auth 逻辑时两者同步 |
 | 端点完整性 | 缺失端点导致静默失败 | 已覆盖 messages/count_tokens | 新增端点时检查路由表 |
 | Self-Evolving | 用后即改 SKILL.md | 本 skill 同样适用 | 遵循 |
@@ -33,13 +33,13 @@ description: cc-proxy（Rust API 翻译/转发代理）开发时的模式与反�
 | CCP-03 | MEDIUM | 透传的 header 被上游拒绝（如未知 beta 头） | 翻译层按白名单透传 header，不整体转发 |
 | CCP-04 | MEDIUM | 重试掩盖真实错误（把 auth/quota 也重试） | 只重试可修复错误（model-discovery 403 仅限"模型未识别"消息）——cc-proxy 已按此实现 |
 | CCP-05 | MEDIUM | 前置请求（count_tokens）auth 不一致 | 主端点与预检端点共用 auth 提取函数 |
-| CCP-06 | LOW | 无健康检查导致运维盲区 | 加 `/health`，含最近 N 次错误与重试计数 |
-| CCP-07 | LOW | usage 统计与上游缓存字段不一致 | 缓存口径以 `cache_read_input_tokens` 透传值为准，WebUI 标注口径 |
+| CCP-06 | LOW | `/health` 只有 usage 快照、无错误/重试计数，监控盲区 | 增强现有 `/health`：追加最近 N 次错误与重试计数 |
+| CCP-07 | LOW | usage 统计与上游缓存字段不一致 | 缓存口径以上游透传值为准（上游 `cache_read_input_tokens` → 本地 `cached_tokens`，见 usage.rs），WebUI 标注口径 |
 
 ## 新增功能的推荐做法
 
-1. **并发限流**：在 generate 入口加 `tokio::sync::Semaphore`，默认 5–10；只限上游出站，不限监听。
-2. **/health 端点**：返回 `{ "status": "ok", "listening": 8787, "errors_1h": N, "retries_1h": M }`，与 WebUI 顶栏 chip 复用。
+1. **并发限流（排队）**：现有连接上限是「拒绝超限连接」；如需平滑，在 generate 入口加 `tokio::sync::Semaphore`（默认 5–10），只限上游出站、不限监听，超限排队而非拒绝。
+2. **/health 增强**：现有端点返回 `{status, version, cache}`；追加 `errors_1h`、`retries_1h` 计数，与 WebUI 顶栏 chip 复用。
 3. **统一退避**：如需调整 no-output 重试，参照 500ms→1s→2s 指数曲线，单次上限 5s 总窗。
 4. **端点新增**：改 `server.rs` 路由表 + `count_tokens` 同步 + usage 透传字段同步，三处联动。
 
