@@ -11,6 +11,9 @@
 | `webui-design` | anthropics/skills `frontend-design` | 设计思维、字体/配色/密度原则、图表细节、避免 AI slop 检查清单 | 营销页 BOLD 审美（控制面板不需要）、动画秀（运维 UI 优先信息密度）；全部落到 cc-proxy webui 的实际页面结构 |
 | `proxy-dev-patterns` | terrylica/cc-skills `claude-code-proxy-patterns` | 重试退避、并发限流、健康端点、端点完整性、反模式表、Self-Evolving 机制 | OAuth/Keychain/launchd（macOS 专属，不适用 Rust 翻译代理）；标注 cc-proxy 已实现的能力，只保留真正的增量 |
 | `api-traffic-analysis` | alexfazio/cc-trace | mitmproxy 链式抓包方案、过滤语法、请求/响应结构速查、SSE 事件、token 统计 | Claude Code/Anthropic 专属交互流程与证书教学；本地化为 commandcode.ai 上游 + 本机实测教训（pktmon loopback 局限） |
+| `rust-performance` | actionbook/rust-skills `m10-performance` | 先测量后优化的方法论、瓶颈优先级（算法>结构>分配>缓存>SIMD）、criterion/perf/flamegraph 工具链、常见错误与反模式 | meta-cognition 认知分层框架、领域扩展（本仓库不需要）；对照 cc-proxy 标注 release profile 已有、基准缺失 |
+| `ci-pipeline` | agentic-awesome-skills `github-workflow-automation` | CI/CD 设计原则（权限最小化/缓存/矩阵/超时）、工作流结构、发布物设计 | AI 驱动的 PR 审查/issue 分诊/部署审批（本项目不需要）；如实标注 ci.yml/release.yml 已有、缺口是 rust-cache 与 Linux 发布物 |
+| `cross-platform-architecture` | bg-szy/TOP-SKILLS `native-feel-cross-platform-desktop` | 平台层隔离三层结构、单一契约防漂移、cfg 编译期选型、反模式表 | 桌面 GUI 壳（WKWebView/Swift/C#/Tauri/UniFFI——本项目是 CLI 服务 + 外置 WebUI + 可选 tray）；落地为 tray/进程/单实例/路径的 Linux 替代决策表 |
 
 ## 防死技能机制
 
@@ -24,5 +27,8 @@ docs/skills/
 ├── README.md                    <- 本索引
 ├── webui-design/SKILL.md        <- 前端优化（控制面板审美 + 优化清单）
 ├── proxy-dev-patterns/SKILL.md  <- 代理开发模式与反模式（含 cc-proxy 现状对照）
-└── api-traffic-analysis/SKILL.md<- API 流量抓包分析（Windows 实测方案）
+├── api-traffic-analysis/SKILL.md<- API 流量抓包分析（Windows 实测方案）
+├── rust-performance/SKILL.md    <- Rust 性能优化方法论（先测量 + 优先级 + 工具链）
+├── ci-pipeline/SKILL.md         <- GitHub Actions CI/CD 设计（现状对照 + Linux 发布物）
+└── cross-platform-architecture/SKILL.md <- 跨平台三层解耦（trait/cfg + Linux 移植决策表）
 ```
