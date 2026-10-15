@@ -97,7 +97,10 @@ impl TrayEvent {
     }
 
     /// 事件 → 命令 id；`None` 只用于理论上不可逆的缺省（不暴露）。
+    /// Windows 托盘用事件→命令 id 重建菜单动作；Linux 侧只消费 `from_cmd`，
+    /// 故此处为跨平台契约保留（ubuntu 非测试编译不构造）。
     #[must_use]
+    #[allow(dead_code)]
     pub const fn to_cmd(self) -> Option<u32> {
         match self {
             Self::Start => Some(cmd::START),
@@ -192,6 +195,11 @@ pub fn build_menu(
 /// 生命周期：`start` 注册图标并进入事件循环（阻塞，直到 `Quit` 事件或
 /// `stop`）；菜单事件经 `on_event` 回调投递（后端线程执行）；`stop` 反注册
 /// 并结束循环（幂等，可被 `start` 重新进入）。
+///
+/// Linux 当前事件循环只调 `start`（其余方法由 v0.8 的 ledger 轮询接线）；
+/// Windows 主路径调用全部方法。trait 声明处豁免 dead_code，避免单平台
+/// 未消费时误报。
+#[allow(dead_code)]
 pub trait TrayBackend {
     /// 注册并进入事件循环。阻塞；返回 `Ok` 表示正常退出。
     fn start(
@@ -212,6 +220,10 @@ pub trait TrayBackend {
 ///
 /// `start` 依次把 `queued_events` 投递给回调；`Quit` 事件后返回。事件队列
 /// 清空即返回，让测试不必依赖真实的平台事件循环。
+///
+/// 仅测试消费；非测试编译时是 dead code（--all-targets 的 clippy 对 bin
+/// target 独立检查）。
+#[allow(dead_code)]
 pub struct MockTray {
     started: bool,
     status: Option<TrayStatus>,
@@ -224,6 +236,7 @@ pub struct MockTray {
     pub queued_events: Vec<TrayEvent>,
 }
 
+#[allow(dead_code)]
 impl MockTray {
     #[must_use]
     pub fn new() -> Self {

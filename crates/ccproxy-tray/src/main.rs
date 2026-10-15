@@ -54,6 +54,7 @@ mod win;
 
 #[cfg(windows)]
 use std::cell::RefCell;
+#[cfg(windows)]
 use std::path::PathBuf;
 #[cfg(windows)]
 use std::rc::Rc;

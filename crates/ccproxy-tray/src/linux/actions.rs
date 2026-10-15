@@ -108,8 +108,6 @@ pub fn toggle_autostart(exec: &str, log: &LogFile) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn autostart_desktop_file_shape() {
         let exec = "/usr/bin/commandcode-proxy";
