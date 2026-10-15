@@ -3,6 +3,8 @@ name = "ccproxy-tray"
 version.workspace = true
 edition.workspace = true
 publish = false
+description = "System tray companion for commandcode-proxy"
+license = "MIT"
 
 # Named to match the artifact the existing hot-swap folder and the handover
 # test look for, so the C# tray and this one are interchangeable during the
@@ -17,10 +19,10 @@ path = "src/main.rs"
 name = "commandcode-proxy-tray"
 maintainer = "CelestNya <celestnya@users.noreply.github.com>"
 copyright = "2026 CelestNya"
-license-file = "LICENSE"
 section = "net"
 priority = "optional"
 depends = "commandcode-proxy"
+maintainer-scripts = "../../packaging/deb/scripts/"
 assets = [
   ["target/release/CCProxyTray", "usr/bin/commandcode-proxy-tray", "755"],
   ["packaging/desktop/commandcode-proxy-tray.desktop", "usr/share/applications/", "644"],

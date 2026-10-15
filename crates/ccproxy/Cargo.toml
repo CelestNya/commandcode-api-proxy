@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 publish = false
 readme = "../README.md"
+description = "API translation proxy for commandcode.ai"
+license = "MIT"
 documentation = "https://github.com/CelestNya/commandcode-api-proxy/tree/main/docs"
 
 [package.metadata.docs.rs]
@@ -15,7 +17,6 @@ all-features = true
 name = "commandcode-proxy"
 maintainer = "CelestNya <celestnya@users.noreply.github.com>"
 copyright = "2026 CelestNya"
-license-file = "LICENSE"
 section = "net"
 priority = "optional"
 # No runtime system deps beyond glibc (rusqlite is bundled; tray is zbus-only).
@@ -26,7 +27,9 @@ assets = [
   ["packaging/systemd/commandcode-proxy.service", "lib/systemd/system/", "644"],
   ["packaging/deb/env.example", "etc/commandcode-proxy/", "640"],
 ]
-maintainer-scripts = "packaging/deb/scripts/"
+# maintainer-scripts resolves against the crate dir (manifest dir), unlike
+# assets which resolve against the workspace root (cwd).
+maintainer-scripts = "../../packaging/deb/scripts/"
 
 [lib]
 name = "ccproxy"
