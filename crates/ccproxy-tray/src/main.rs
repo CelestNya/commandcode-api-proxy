@@ -544,9 +544,13 @@ fn linux_main() {
 
     let mut tray = linux::tray::LinuxTray::new(status, menu, tooltip);
     let log_cb = std::sync::Arc::clone(&log);
-    let _ = tray.start(Box::new(move |event| {
+    if let Err(e) = tray.start(Box::new(move |event| {
         linux_dispatch(event, &proxy, port, &log_cb);
-    }));
+    })) {
+        // 无会话总线（无桌面会话）等场景：记录原因而不是静默退出，否则
+        // 安装后点了图标没反应却没有任何线索可查。
+        log.append(&format!("[tray] 托盘后端启动失败：{e}"));
+    }
     log.append("[tray] 退出");
 }
 
@@ -575,7 +579,12 @@ fn linux_dispatch(
             linux::actions::xdg_open(&format!("http://127.0.0.1:{port}/webui"), log);
         }
         TrayEvent::ToggleAutostart => {
-            linux::actions::toggle_autostart(&proxy.display().to_string(), log);
+            // 与 Windows 语义一致：开机自启拉起的是托盘（而非代理 CLI），
+            // 否则 systemd 服务 + autostart 同时跑代理会端口冲突。
+            let exec = std::env::current_exe()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| proxy.display().to_string());
+            linux::actions::toggle_autostart(&exec, log);
         }
         TrayEvent::Quit => {
             log.append("[tray] 手动退出（停止代理请用菜单「停止代理」或 ccproxy stop）")
