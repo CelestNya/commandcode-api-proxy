@@ -1,0 +1,183 @@
+# cc-proxy Linux 移植开发计划
+
+状态：**方案已定，待实施**（2026-10-15 综合评审）
+范围：cc-proxy（Rust API 翻译/转发代理）Linux 版——CLI + systemd + SNI 托盘，deb/AppImage/AUR 发布。
+
+---
+
+## 1. 背景与现状
+
+cc-proxy 当前形态：
+
+- `ccproxy`（服务本体，跨平台依赖）+ `CCProxyTray`（Windows 托盘管理器，windows-sys 全 Win32）
+- WebUI **已外置**（前端分离，无内联：`/webui/` 静态 serve + ETag 304，commit `4549183`）
+- CI 已有：`ci.yml`（ubuntu 质量门 + windows 双构建）、`release.yml`（Windows zip 发布）
+- 仓库：`origin` = CelestNya/commandcode-api-proxy（`rust-rewrite` 分支未推）；`gh` 已登录（repo+workflow）
+- 项目技能库 6 个（webui-design / proxy-dev-patterns / api-traffic-analysis / rust-performance / ci-pipeline / cross-platform-architecture）
+
+目标：Debian 系 + Arch 系可用，服务 CLI + systemd 自启 + SNI 托盘（KDE/XFCE 原生、GNOME 降级），发布 deb / AppImage / AUR。
+
+## 2. 已定决策（2026-10-15）
+
+| ID | 决策 | 内容 |
+|---|---|---|
+| D1 | 前端外置 | 已完成（`4549183`）：删 build.rs 内联、`/webui/` 静态 serve、无内联兜底 |
+| D2 | 服务 CLI | `ccproxy start\|stop\|status\|logs\|config` 子命令——无桌面时的管理入口（替代 tray 监督角色） |
+| D3 | tray 跨平台 | **方案 B**：自研 `TrayBackend` trait + Linux 走 **zbus StatusNotifierItem**（零 GTK 依赖） |
+| D4 | 远程 CI | 推 `rust-rewrite` 到 origin，GH Actions 双平台构建（ubuntu = Linux 实证通道） |
+| D5 | 发布物 | deb（cargo-deb + systemd unit）+ AppImage（linuxdeploy）+ AUR PKGBUILD |
+| D6 | AUR | 暂无 Arch 账号：先本地出 PKGBUILD + .SRCINFO（+ 可选 ccproxy-bin），注册后 `git push` 即发布 |
+| D7 | 目录注入 | 打包按系统类型把目录写进**环境变量**（`CCPROXY_WEBUI_DIR` / `CCPROXY_DATA_DIR` / `CCPROXY_LOG_DIR`），代码只读 env + exe 旁兜底，**不做平台检测** |
+| D8 | deb systemd | **带 unit**：自启 / 崩溃重启（Restart=on-failure）/ 日志进 journalctl / `User=ccproxy` 低权；非 systemd 用 CLI |
+| D9 | 数据路径 | 安装模式：`/var/lib/ccproxy`（配合 User=ccproxy）；便携模式保持 exe 旁 |
+| D10 | 托盘验收 | 四层验收：L0 协议（无头 CI）/ L1 呈现（真实桌面）/ L2 行为 / L3 兼容矩阵（见 §6） |
+
+## 3. 架构：三层解耦
+
+```mermaid
+flowchart TB
+    subgraph Core["核心逻辑（跨平台、纯 Rust、forbid(unsafe)）"]
+        L[ccproxy lib: proxy/server/translate/generate/billing/webui]
+    end
+    subgraph Contract["平台服务 trait（契约层）"]
+        T[TrayBackend]
+        P[ProcessSupervisor]
+        S[SingleInstance]
+        G[PortGuard]
+        X[SystemProxy]
+        R[ResourcePaths]
+    end
+    subgraph Impl["平台实现（cfg 编译期绑定，系统调用集中）"]
+        W[platform/windows/: tray_win, job_object, mutex_lock, tcp_table]
+        LN[platform/linux/: tray_sni, pdeathsig, abstract_socket, proctab]
+        M[platform/mock/: 契约测试替身]
+    end
+    Core --> Contract
+    Contract --> W
+    Contract --> LN
+    Contract --> M
+```
+
+- trait 只暴露核心需要的操作（3-5 个方法），不做平台能力全集
+- 固定差异用 `#[cfg]`（system_proxy 已是）；需多实现才用 trait + `cfg use ... as`（零动态分发）
+- 契约测试：同一组断言对 mock / win 实现 / linux 实现各跑一遍
+
+## 4. 平台能力映射
+
+| 能力 | Windows（现有） | Linux（待实现） |
+|---|---|---|
+| 托盘 | `Shell_NotifyIconW`（tray.rs/win.rs） | zbus StatusNotifierItem（KDE/XFCE 原生；GNOME 需扩展=降级） |
+| 进程回收 | Job Object `KillOnClose` | `prctl(PR_SET_PDEATHSIG)` + 退出时杀进程组 |
+| 单实例+交接 | 命名互斥体（owner.rs） | abstract unix socket bind（内核原子）或 flock |
+| 端口守卫 | `GetExtendedTcpTable` | `/proc/net/tcp` 或 bind 探测 |
+| 系统代理 | 环境变量 + HKCU 注册表（winreg，cfg(windows)） | 环境变量（`system_proxy()` 已优先） |
+| 资源路径 | exe 旁 `webui/` | env 注入（D7）→ exe 旁兜底 → 明确 404 |
+| 数据/日志 | exe 旁（便携） | 安装模式 `/var/lib/ccproxy`（systemd）；便携保持 exe 旁 |
+| 服务管理 | tray 监督 + 自启 | systemd unit（非 systemd 用 CLI） |
+
+## 5. 里程碑与任务分解
+
+### M0 — CI 实证闭环（获得 Linux 编译验证通道）
+
+| 任务 | 内容 | 验收 |
+|---|---|---|
+| T0.1 | 推 `rust-rewrite` 到 origin | Actions 首次触发 |
+| T0.2 | ci.yml 加 `Swatinem/rust-cache`（ubuntu + windows job） | 二次运行命中缓存 |
+| T0.3 | release.yml 注释修正（前端分离后"内联副本"表述过时） | 文档与代码一致 |
+| T0.4 | Actions 全绿：ubuntu build ccproxy + windows 双构建测试 | 两 job 绿 |
+
+### M1 — 跨平台基础（ResourcePaths + CLI + systemd 设计）
+
+| 任务 | 内容 | 验收 |
+|---|---|---|
+| T1.1 | `ResourcePaths`：`webui_site_dir()` / `billing_dir()` / `log_path()` / `tray_log_path()` 统一走 env（D7）→ exe 旁兜底 | 单测覆盖 env/缺省/便携三态 |
+| T1.2 | CLI 子命令 `start/stop/status/logs/config`（保留 `--import-legacy-usage`）；status=端口/进程/健康；stop=优雅停止 | 隔离实例（PORT=18787）冒烟通过 |
+| T1.3 | systemd unit 草案 + 安装布局（`/var/lib/ccproxy`、`EnvironmentFile=/etc/ccproxy/env`、`User=ccproxy`） | docs 落地，M3 打包直接引用 |
+| T1.4 | 全量测试回归（220+）+ clippy/fmt | cargo test 全绿 |
+
+### M2 — tray 平台抽象（三层落地）
+
+| 任务 | 内容 | 验收 |
+|---|---|---|
+| T2.1 | `TrayBackend` trait 定义 + 契约测试骨架（mock 实现） | 契约断言可跑 |
+| T2.2 | Windows 实现适配 trait（现有 tray.rs/win.rs 重构，行为不变） | Windows 编译 + 现有功能不回归 |
+| T2.3 | Linux zbus SNI 实现：注册/必需属性/IconPixmap/dbusmenu 菜单/属性更新/反注册 + **无 session bus 降级检测**（→ CLI 模式不崩溃） | L0 协议断言全过（§6） |
+| T2.4 | 平台化其余：ProcessSupervisor（PDEATHSIG）、SingleInstance（abstract socket）、PortGuard（/proc） | 双平台编译 + 契约测试 |
+| T2.5 | 契约测试三实现全跑（mock + win + linux） | CI（ubuntu 无头 dbus-launch）通过 |
+
+### M3 — 打包与发布
+
+| 任务 | 内容 | 验收 |
+|---|---|---|
+| T3.1 | deb：cargo-deb（systemd unit、`/usr/share/ccproxy/webui`、env 注入、依赖声明） | `dpkg -i` 安装后 `systemctl status ccproxy` 正常 + webui 可达 |
+| T3.2 | AppImage：linuxdeploy（AppDir 布局、`$APPDIR` env、zbus SNI 无需 GTK） | `--appimage-extract-and-run` 可运行 |
+| T3.3 | AUR：PKGBUILD（源码编译）+ ccproxy-bin（可选）+ `.SRCINFO` 生成脚本 | `makepkg` 本地构建通过 |
+| T3.4 | release.yml 加 Linux job（deb/AppImage artifacts 上传） | 打 tag 自动出三产物 |
+
+### M4 — 托盘验收（集成）
+
+| 任务 | 内容 | 验收 |
+|---|---|---|
+| T4.1 | L0 无头协议测试接入 CI（dbus-launch + busctl 断言） | L0 6 项断言全过 |
+| T4.2 | L1 真实桌面清单：KDE Plasma（X11+Wayland）、XFCE、（GNOME 扩展=降级验证） | 截图/人工清单签字 |
+| T4.3 | L2 行为断言：菜单语义 / 单实例交接 / 防孤儿 / 无头降级 | 逐项可复现 |
+| T4.4 | L3 兼容矩阵回归 + 验收报告 | 全矩阵通过 + 文档化边界 |
+
+**依赖链**：T0.4 → T1.x → T2.x → T3.x；T4 依赖 T2/T3；T3.1 依赖 T1.1/T1.3。
+
+## 6. 托盘验收标准（四层）
+
+### L0 协议层（无头、CI 自动化——SNI 是 DBus 对象，无需显示服务器）
+
+| # | 断言 | 手段 |
+|---|---|---|
+| 1 | session bus 注册 `org.freedesktop.StatusNotifierItem-<pid>-<id>` | `busctl --user list` |
+| 2 | Watcher 枚举到：`RegisteredStatusNotifierItems` 包含该名字 | `busctl` get-property |
+| 3 | 必需属性合法：Category/Id/Title 非空、IconName 或 IconPixmap 非空、Status | `busctl` introspect |
+| 4 | `Menu` → dbusmenu 对象，`GetLayout` 返回预期条目（数 + label + 状态） | dbusmenu GetLayout |
+| 5 | 状态切换 → `PropertyChanged` 信号 | `dbus-monitor --session` |
+| 6 | 退出 → 反注册、watcher 列表移除 | 退出后重查 |
+
+工具：`system-tray` crate 的 Stray（watcher 模拟）或 busctl 命令行。
+
+### L1 呈现层（真实桌面）
+
+| 桌面 | 状态 | 验收 |
+|---|---|---|
+| KDE Plasma（X11+Wayland） | 原生 SNI | 图标出现 → 右键菜单条目正确 → 启停状态图标/提示变化 |
+| XFCE | 原生 SNI | 同上 |
+| GNOME（Wayland） | **无原生支持，需 AppIndicator 扩展** | 有扩展显示；无扩展不显示=**预期降级**（文档化，不算缺陷） |
+
+### L2 行为层
+
+菜单"退出"→ 退出码 0 + 子进程回收 + 端口释放；"启动/停止"→ 子进程真实起停；单实例交接 → 服务不中断；强杀 tray → 子进程回收（PDEATHSIG）；无 session bus → 降级 CLI 不崩溃；契约测试三实现全过。
+
+### L3 兼容矩阵
+
+`KDE X11 → KDE Wayland → XFCE → GNOME(Wayland, 有扩展)`，每环境跑：注册 → 显示 → 菜单 → 退出。
+
+## 7. 风险与缓解
+
+| 风险 | 影响 | 缓解 |
+|---|---|---|
+| GNOME AppIndicator 扩展随大版本失效（GNOME 46/48 有真实案例） | 图标不显示 | 定位为降级场景，README 写明；验收不判 bug |
+| SNI 注册竞态（KDE bug 416652：注册后立即销毁留空条目） | 幽灵图标 | 注册/销毁时序处理 + 验收断言"启动即退出不留残留" |
+| Wayland 下菜单定位由桌面 shell 决定 | 菜单位置异常 | 不自实现弹出，用 dbusmenu 协议 |
+| 本机 Windows 无法交叉编译 Linux（缺 C 编译器） | 本地无法实证 | **M0 CI 先行**；ubuntu runner 自带 gcc/make |
+| rusqlite bundled 需 gcc/make | 构建失败 | CI runner 自带；文档注明构建依赖 |
+| 若未来出 snap 包 | AppArmor 拦 SNI 对象路径（Electron 真实案例） | 不在本计划范围；届时重验 |
+
+## 8. 发布计划（建议分两版）
+
+| 版本 | 内容 | 说明 |
+|---|---|---|
+| **v0.7.0**（Linux 里程碑 1） | M0+M1：CLI 版（无 tray），deb + AppImage | 无头服务器/容器可用；tray 未完成前不阻塞 |
+| **v0.8.0**（完整 Linux） | M2+M3+M4：tray + 全平台 + AUR | 桌面体验完整，验收报告随版发布 |
+
+Windows 发布流程保持现状（release.yml），Linux 发布并入同一工作流（矩阵 job）。
+
+## 9. 开放问题（需用户拍板）
+
+1. 发布节奏：接受 v0.7.0（CLI 先行）/ v0.8.0（tray 完整）两版，还是一次到位（M0-M4 连续实施后一次发布）？
+2. L1 呈现验收的 KDE 环境来源：用户自备虚拟机 / 本仓库 CI 自建？（本机 Windows 无法直接跑 KDE）
+3. AUR 包名：`ccproxy`（源码）+ `ccproxy-bin`（预编译）两个变体是否都要？
