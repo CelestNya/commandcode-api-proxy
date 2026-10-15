@@ -44,7 +44,8 @@ docker run --rm -v "$OUT_DIR:/out" archlinux:latest bash -euo pipefail -c '
         cp PKGBUILD.real PKGBUILD
         makepkg --printsrcinfo > .SRCINFO
     "
-    tar -tf commandcode-proxy-bin-*.pkg.tar.zst | grep -q usr/bin/commandcode-proxy
+    # main pkg only (exclude the *-debug-* variant makepkg also emits)
+    tar -tf commandcode-proxy-bin-[0-9]*.pkg.tar.zst | grep -q usr/bin/commandcode-proxy
     echo AUR-VERIFY-OK
 '
 
