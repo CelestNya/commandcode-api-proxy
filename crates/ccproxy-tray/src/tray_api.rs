@@ -17,7 +17,8 @@ use std::fmt;
 pub enum TrayError {
     /// 后端不可用（无会话总线 / 无 shell 通知区 / 无 XDG 桌面环境）。
     Unavailable(String),
-    /// 注册或运行期失败。
+    /// 注册或运行期失败（v0.8 刷新轮询路径将构造；保留契约完整性）。
+    #[allow(dead_code)]
     Failed(String),
 }
 

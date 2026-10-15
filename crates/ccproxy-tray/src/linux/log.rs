@@ -1,7 +1,7 @@
 //! Linux 托盘日志：简单追加写，与 Windows `process::LogFile` 对应。
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// 生命周期日志文件（`tray.log`）。
 #[derive(Clone)]
@@ -13,11 +13,6 @@ impl LogFile {
     #[must_use]
     pub fn new(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// 追加一行带时间戳的日志。失败静默（日志失败不阻断托盘）。

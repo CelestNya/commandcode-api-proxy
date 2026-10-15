@@ -57,12 +57,14 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 #[cfg(windows)]
 use std::rc::Rc;
+#[cfg(windows)]
 use std::sync::Arc;
 #[cfg(windows)]
 use std::time::{Duration, Instant};
 
 /// Where the shipped package puts things: the proxy binary and `logs/` sit
 /// beside the tray exe.
+#[cfg(windows)]
 fn install_root() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -496,12 +498,20 @@ fn fatal(log: &process::LogFile, message: &str) {
 /// 服务由 CLI 启停（无 Job Object / 交接协议——Linux 服务化更标准）。
 #[cfg(unix)]
 fn linux_main() {
-    use tray_api::{build_menu, TrayBackend, TrayEvent, TrayStatus};
+    use tray_api::{build_menu, TrayBackend, TrayStatus};
 
     let port = linux::settings::instance_port();
     // Arc：事件回调（'static 闭包）与主线程共享日志句柄。
     let log = std::sync::Arc::new(linux::log::LogFile::new(linux::settings::tray_log_path()));
     log.append("[tray] 启动（Linux / SNI）");
+
+    // 单实例锁：KDE 重复启动会注册多个 SNI 图标。pid 锁文件 + /proc 存活
+    // 检查（残留可覆盖），见 linux/single_instance.rs。
+    if let Err(e) = linux::single_instance::acquire(&linux::settings::namespace()) {
+        log.append(&format!("[tray] 退出：{e}"));
+        return;
+    }
+    log.append("[tray] 单实例锁已取得");
 
     let Some(proxy) = linux::settings::proxy_binary() else {
         log.append("[tray] 找不到 ccproxy 二进制（设置 CC_PROXY_BIN，或放在托盘同级）");

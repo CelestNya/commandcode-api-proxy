@@ -261,6 +261,11 @@ impl TrayBackend for LinuxTray {
 impl LinuxTray {
     /// 触发 ksni 向面板发 PropertyChanged / MenuChanged 通知，让图标与菜单
     /// 立即反映新状态。spawn 前调用是安全的（无句柄时只改状态）。
+    ///
+    /// v0.8 的 ledger 轮询将定期调 set_status/set_menu 刷新缓存标签；当前
+    /// 事件循环只有菜单动作，无外部刷新线程，故此处暂未被构造（契约层
+    /// 保留该能力）。
+    #[allow(dead_code)]
     fn refresh(&self) {
         let handle_guard = match self.handle.lock() {
             Ok(g) => g,
