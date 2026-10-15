@@ -39,7 +39,6 @@ docker run --rm -v "$OUT_DIR:/out" archlinux:latest bash -euo pipefail -c '
         set -euo pipefail
         # verification build resolves the source to the local tarball
         cp PKGBUILD.verify PKGBUILD
-        sed -i \"s#source=(.*)#source=(\\\"commandcode-proxy-${VERSION}-linux-x86_64.tar.gz\\\")#\" PKGBUILD
         makepkg -f
         # .SRCINFO must describe the REAL package (GitHub URL) for the AUR
         cp PKGBUILD.real PKGBUILD
