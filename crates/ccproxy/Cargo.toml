@@ -3,7 +3,7 @@ name = "ccproxy"
 version.workspace = true
 edition.workspace = true
 publish = false
-readme = "../README.md"
+readme = "../../README.md"
 description = "API translation proxy for commandcode.ai"
 license = "MIT"
 documentation = "https://github.com/CelestNya/commandcode-api-proxy/tree/main/docs"
@@ -22,16 +22,29 @@ priority = "optional"
 # No runtime system deps beyond glibc (rusqlite is bundled; tray is zbus-only).
 depends = "$auto"
 # built assets (target/release/*) resolve against the workspace root; static
-# assets and maintainer-scripts resolve against the crate dir (../../ = root).
+# assets and maintainer-scripts resolve against the crate dir and reject `..`
+# segments, so the release workflow stages everything under pkg/ first.
 assets = [
   ["target/release/ccproxy", "usr/bin/commandcode-proxy", "755"],
-  ["../../crates/ccproxy/webui/", "usr/share/commandcode-proxy/webui/", "755"],
-  ["../../packaging/systemd/commandcode-proxy.service", "lib/systemd/system/", "644"],
-  ["../../packaging/deb/env.example", "etc/commandcode-proxy/", "640"],
+  ["webui/index.html", "usr/share/commandcode-proxy/webui/", "644"],
+  ["webui/css/content.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/detail.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/layout.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/log.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/overview.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/responsive.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/tokens.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/js/api.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/app.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/attempts.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/core.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/logs.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/router.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/stats.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["pkg/systemd/commandcode-proxy.service", "lib/systemd/system/", "644"],
+  ["pkg/env.example", "etc/commandcode-proxy/", "640"],
 ]
-# maintainer-scripts resolves against the crate dir (manifest dir), unlike
-# assets which resolve against the workspace root (cwd).
-maintainer-scripts = "../../packaging/deb/scripts/"
+maintainer-scripts = "pkg/scripts/"
 
 [lib]
 name = "ccproxy"

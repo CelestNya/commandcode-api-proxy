@@ -92,8 +92,18 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
       - name: Build .deb packages
-        # cargo-deb takes a single -p; one package per crate.
+        # cargo-deb resolves built assets against the workspace root but
+        # static assets/maintainer-scripts against each crate dir, rejecting
+        # `..` segments — so stage everything under pkg/ first.
         run: |
+          mkdir -p crates/ccproxy/pkg/systemd crates/ccproxy/pkg/scripts
+          cp packaging/systemd/commandcode-proxy.service crates/ccproxy/pkg/systemd/
+          cp packaging/deb/env.example crates/ccproxy/pkg/
+          cp packaging/deb/scripts/preinst packaging/deb/scripts/postinst crates/ccproxy/pkg/scripts/
+          mkdir -p crates/ccproxy-tray/pkg
+          cp packaging/desktop/commandcode-proxy-tray.desktop crates/ccproxy-tray/pkg/
+          cp packaging/icons/commandcode-proxy.svg crates/ccproxy-tray/pkg/
+          # cargo-deb takes a single -p; one package per crate.
           cargo deb -p ccproxy
           cargo deb -p ccproxy-tray
       - name: Build AppImage

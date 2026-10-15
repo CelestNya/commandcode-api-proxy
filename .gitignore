@@ -2,6 +2,10 @@
 /target/
 release/
 
+# cargo-deb staging (release workflow copies packaging assets under each
+# crate's pkg/ before packaging; never committed)
+crates/*/pkg/
+
 # Runtime state (never committed: logs, ledgers, request dumps live here)
 logs/
 *.log
