@@ -15,7 +15,7 @@ all-features = true
 name = "commandcode-proxy"
 maintainer = "CelestNya <celestnya@users.noreply.github.com>"
 copyright = "2026 CelestNya"
-license-file = "../LICENSE"
+license-file = "LICENSE"
 section = "net"
 priority = "optional"
 # No runtime system deps beyond glibc (rusqlite is bundled; tray is zbus-only).
