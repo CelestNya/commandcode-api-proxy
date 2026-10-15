@@ -1,12 +1,23 @@
 name: Release
 
-# Build, test and publish a release as ONE ready-to-run zip. Triggered when
-# a `v*` tag is pushed (the normal release flow) or manually from the
-# Actions tab (workflow_dispatch) when a release is needed without a new tag.
+# Build, test and publish a release. Triggered when a `v*` tag is pushed (the
+# standard release flow) or manually from the Actions tab (workflow_dispatch)
+# to exercise the pipeline without publishing — `publish` is tag-only.
 #
-# Layout inside the zip (same as build-rust.cmd's package): the tray sits at
-# the root, the proxy it launches lives in service/, and package.json carries
-# the version — extract anywhere and double-click CCProxyTray.exe.
+# Release name is `commandcode-proxy` (the crate stays `ccproxy`; "ccproxy" is
+# ambiguous and banned as a published name). Layout inside the Windows zip
+# (same as build-rust.cmd's package): tray at the root, proxy in service/,
+# package.json carries the version — extract anywhere and double-click
+# CCProxyTray.exe. The webui/ folder on disk is the single source of truth
+# for the panel (nothing is compiled into the binary since the front-end
+# split), so a style/script edit is picked up by a reload without a rebuild.
+#
+# Linux artifacts (see docs/LINUX-PORT-PLAN.md §5 T3.x):
+#   - .deb x2: commandcode-proxy (+ systemd unit, webui, env) and
+#     commandcode-proxy-tray (depends on the proxy)
+#   - AppImage: commandcode-proxy-<ver>-x86_64.AppImage
+#   - AUR source tarball + rendered PKGBUILD + .SRCINFO for
+#     commandcode-proxy-bin (precompiled)
 #
 # GitHub decides "latest" by publish time, NOT by version ordering — v0.5.0
 # once won latest merely by being published a second later than v0.5.2.
@@ -20,10 +31,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
+  windows:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -42,12 +53,9 @@ jobs:
           Set-Content -Path pkg/package.json -Value ('{"version":"' + $ver + '"}') -Encoding utf8
           # The two extra pieces build-rust.cmd stages, so a downloaded
           # release behaves like a local build: the proxy serves the panel
-          # from the webui/ folder on disk (it is the single source of truth —
-          # nothing is compiled into the binary since the front-end split), so
-          # a style or script can be edited on an installed copy and picked up
-          # by a reload (no rebuild), and the config beside the exe is where
-          # the egress policy is set. Keep this list in step with
-          # build-rust.cmd.
+          # from the webui/ folder on disk (single source of truth), and the
+          # config beside the exe is where the egress policy is set. Keep
+          # this list in step with build-rust.cmd.
           Copy-Item crates/ccproxy/webui pkg/service/webui -Recurse
           # Written through WriteAllText rather than Set-Content: `-Encoding
           # utf8` means "with a BOM" on Windows PowerShell, and the parser
@@ -59,10 +67,72 @@ jobs:
         shell: pwsh
         run: |
           $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches.Groups[1].Value
-          Compress-Archive -Path pkg/* -DestinationPath ("CCProxy-v" + $ver + ".zip") -CompressionLevel Optimal
-          Write-Output "packaged CCProxy-v$ver.zip"
+          Compress-Archive -Path pkg/* -DestinationPath ("commandcode-proxy-v" + $ver + "-windows-x86_64.zip") -CompressionLevel Optimal
+          Write-Output "packaged commandcode-proxy-v$ver-windows-x86_64.zip"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: commandcode-proxy-v*.zip
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --locked
+      - name: Build release binaries
+        run: cargo build --release --locked
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build .deb packages
+        run: cargo deb -p ccproxy -p ccproxy-tray
+      - name: Build AppImage
+        run: |
+          VER=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          bash packaging/appimage/build-appimage.sh "$VER" "$GITHUB_WORKSPACE"
+      - name: Build AUR source tarball + render/verify PKGBUILD
+        run: |
+          VER=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          bash packaging/aur/build-tarball.sh "$VER" "$GITHUB_WORKSPACE"
+          bash packaging/aur/verify-aur.sh "$VER" "$GITHUB_WORKSPACE"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            target/debian/*.deb
+            packaging-out/*
+          if-no-files-found: error
+
+  publish:
+    # Tag-only: workflow_dispatch runs build the pipeline but must not create
+    # or mutate a GitHub Release.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: [windows, linux]
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           make_latest: true
-          files: CCProxy-v*.zip
+          files: |
+            dist/windows/commandcode-proxy-v*.zip
+            dist/linux/target/debian/*.deb
+            dist/linux/packaging-out/commandcode-proxy-*.AppImage
+            dist/linux/packaging-out/commandcode-proxy-*-linux-x86_64.tar.gz
+            dist/linux/packaging-out/PKGBUILD
+            dist/linux/packaging-out/.SRCINFO

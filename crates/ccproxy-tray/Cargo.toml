@@ -11,6 +11,22 @@ publish = false
 name = "CCProxyTray"
 path = "src/main.rs"
 
+# Debian packaging: separate tray package depending on the proxy package.
+# The binary is renamed to the release name; see LINUX-PORT-PLAN.md §5 T3.1.
+[package.metadata.deb]
+name = "commandcode-proxy-tray"
+maintainer = "CelestNya <celestnya@users.noreply.github.com>"
+copyright = "2026 CelestNya"
+license = "MIT"
+section = "net"
+priority = "optional"
+depends = "commandcode-proxy"
+assets = [
+  ["target/release/CCProxyTray", "usr/bin/commandcode-proxy-tray", "755"],
+  ["packaging/desktop/commandcode-proxy-tray.desktop", "usr/share/applications/", "644"],
+  ["packaging/icons/commandcode-proxy.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
+
 [dependencies]
 ccproxy = { path = "../ccproxy" }
 serde_json = { workspace = true }

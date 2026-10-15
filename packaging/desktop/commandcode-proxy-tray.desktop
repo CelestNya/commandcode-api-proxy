@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=commandcode-proxy Tray
+Comment=commandcode.ai API translation proxy status tray
+Exec=/usr/bin/commandcode-proxy-tray
+Icon=commandcode-proxy
+Terminal=false
+Categories=Network;
+StartupNotify=false

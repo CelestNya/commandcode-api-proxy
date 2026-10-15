@@ -105,14 +105,14 @@ flowchart TB
 | T2.4 | 平台化其余 | ✅ `linux/single_instance.rs`（pid 锁 + /proc 存活检查，防 KDE 双图标）；⚠️ PDEATHSIG/abstract socket/PortGuard **不做**——Linux 代理是独立服务（CLI/systemd），tray 经 CLI 启停 + 新进程组，无子进程句柄即无孤儿问题（比 Windows Job Object 更标准） |
 | T2.5 | 契约测试三实现全跑 | ✅ mock（本机 50 tests）+ linux 单元测试（CI ubuntu）+ windows 现有测试套件（CI windows）；L0 无头 DBus 断言归 M4 T4.1 |
 
-### M3 — 打包与发布
+### M3 — 打包与发布 ✅ commit `b9c12a6` 后续（T3.1–T3.4 配置/脚本已落地，CI 验证中）
 
-| 任务 | 内容 | 验收 |
-|---|---|---|
-| T3.1 | deb：cargo-deb（systemd unit、`/usr/share/ccproxy/webui`、env 注入、依赖声明） | `dpkg -i` 安装后 `systemctl status ccproxy` 正常 + webui 可达 |
-| T3.2 | AppImage：linuxdeploy（AppDir 布局、`$APPDIR` env、zbus SNI 无需 GTK） | `--appimage-extract-and-run` 可运行 |
-| T3.3 | AUR：PKGBUILD（源码编译）+ ccproxy-bin（可选）+ `.SRCINFO` 生成脚本 | `makepkg` 本地构建通过 |
-| T3.4 | release.yml 加 Linux job（deb/AppImage artifacts 上传） | 打 tag 自动出三产物 |
+| 任务 | 内容 | 验收 | 状态 |
+|---|---|---|---|
+| T3.1 | deb：cargo-deb（`[package.metadata.deb]` 两 crate；发布名 **commandcode-proxy**；systemd unit → `/lib/systemd/system/`；webui → `/usr/share/commandcode-proxy/webui`；env → `/etc/commandcode-proxy/`；`User=commandcode-proxy` 低权 preinst 创建；postinst 建目录+首装拷 env；`depends=$auto`（rusqlite bundled 零系统依赖）） | `dpkg -i` 后 `systemctl status commandcode-proxy` 正常 + webui 可达 | 配置已写，CI 打包验证中 |
+| T3.2 | AppImage：`packaging/appimage/build-appimage.sh`（AppDir：usr/bin/{commandcode-proxy,commandcode-proxy-tray} + webui + AppRun 注入 `CC_WEBUI_DIR=$APPDIR/...` + desktop/icon；appimagetool `APPIMAGE_EXTRACT_AND_RUN=1` 免 FUSE；zbus SNI 无需 GTK） | `--appimage-extract-and-run` 可运行 | 脚本已写，CI 验证中 |
+| T3.3 | AUR：**只出 `commandcode-proxy-bin` 预编译**（`packaging/aur/PKGBUILD.template` 占位符渲染 + `verify-aur.sh` 在 archlinux 容器跑真 `makepkg -f` + `makepkg --printsrcinfo` 出 `.SRCINFO`；无 Arch 账号，先本地容器验证，注册后推 aur.archlinux.org） | 容器 makepkg 通过 + 包内含二进制 | 脚本已写，CI 验证中 |
+| T3.4 | release.yml 重构三 job：`windows`（zip 改名 **commandcode-proxy-v<ver>-windows-x86_64.zip**）/ `linux`（build+deb×2+AppImage+tarball+PKGBUILD 渲染+AUR 容器验证）/ `publish`（tag-only：softprops 汇总上传全部产物） | 打 tag 自动出 Windows zip + deb×2 + AppImage + tarball + PKGBUILD + .SRCINFO | 已写，workflow_dispatch 验证中 |
 
 ### M4 — 托盘验收（集成）
 

@@ -42,16 +42,24 @@ pub fn tray_log_path() -> PathBuf {
     state_dir().join("tray.log")
 }
 
-/// 代理二进制路径：`CC_PROXY_BIN` env 优先，否则 exe 同级 `ccproxy`。
+/// 代理二进制路径：`CC_PROXY_BIN` env 优先，否则 exe 同级找发布名
+/// `commandcode-proxy`（deb/AppImage/AUR 安装名），再兼容旧名 `ccproxy`
+/// （本地开发构建）。
 #[must_use]
 pub fn proxy_binary() -> Option<PathBuf> {
     if let Ok(bin) = std::env::var("CC_PROXY_BIN") {
         return Some(PathBuf::from(bin));
     }
-    std::env::current_exe()
+    let dir = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|p| p.join("ccproxy")))
-        .filter(|p| p.is_file())
+        .and_then(|exe| exe.parent().map(PathBuf::from))?;
+    for name in ["commandcode-proxy", "ccproxy"] {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// 代理日志路径：`CC_LOG_DIR` env 优先，否则 XDG 状态目录下

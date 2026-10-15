@@ -9,6 +9,26 @@ documentation = "https://github.com/CelestNya/commandcode-api-proxy/tree/main/do
 [package.metadata.docs.rs]
 all-features = true
 
+# Debian packaging (release name commandcode-proxy; the crate stays ccproxy).
+# Built by the release workflow with `cargo deb`; see docs/LINUX-PORT-PLAN.md §5 T3.1.
+[package.metadata.deb]
+name = "commandcode-proxy"
+maintainer = "CelestNya <celestnya@users.noreply.github.com>"
+copyright = "2026 CelestNya"
+license = "MIT"
+section = "net"
+priority = "optional"
+# No runtime system deps beyond glibc (rusqlite is bundled; tray is zbus-only).
+depends = "$auto"
+assets = [
+  ["target/release/ccproxy", "usr/bin/commandcode-proxy", "755"],
+  ["crates/ccproxy/webui/", "usr/share/commandcode-proxy/webui/", "755"],
+  ["packaging/systemd/commandcode-proxy.service", "lib/systemd/system/", "644"],
+  ["packaging/deb/env.example", "etc/commandcode-proxy/", "640"],
+]
+pre-install = "packaging/deb/preinst.sh"
+post-install = "packaging/deb/postinst.sh"
+
 [lib]
 name = "ccproxy"
 path = "src/lib.rs"

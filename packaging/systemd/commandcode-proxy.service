@@ -1,18 +1,20 @@
-# cc-proxy systemd unit (Debian packaging draft — installed as
-# /lib/systemd/system/commandcode-proxy.service by the deb).
+# commandcode-proxy systemd unit (installed as
+# /lib/systemd/system/commandcode-proxy.service by the deb / AUR package).
 #
-# Layout contract (see docs/LINUX-PORT-PLAN.md D7-D9):
+# Layout contract (see docs/LINUX-PORT-PLAN.md D7-D9; release name is
+# commandcode-proxy, the crate stays ccproxy):
 #   - binary:        /usr/bin/commandcode-proxy   (release name; crate is ccproxy)
-#   - panel sources: /usr/share/ccproxy/webui     -> CC_WEBUI_DIR
-#   - ledger/data:   /var/lib/ccproxy             -> CC_DATA_DIR
-#   - logs:          /var/log/ccproxy             -> CC_LOG_DIR
-#   - env overrides: /etc/ccproxy/env             (EnvironmentFile; operator-owned)
+#   - panel sources: /usr/share/commandcode-proxy/webui  -> CC_WEBUI_DIR
+#   - ledger/data:   /var/lib/commandcode-proxy          -> CC_DATA_DIR
+#   - logs:          /var/log/commandcode-proxy          -> CC_LOG_DIR
+#   - env overrides: /etc/commandcode-proxy/env          (EnvironmentFile; operator-owned)
 #
-# `ccproxy start` is the foreground command; systemd supervises it, so the CLI
-# PID file is not used here (stop = systemctl stop, not `ccproxy stop`).
+# `commandcode-proxy start` is the foreground command; systemd supervises it,
+# so the CLI PID file is not used here (stop = systemctl stop, not
+# `commandcode-proxy stop`).
 
 [Unit]
-Description=commandcode.ai API translation proxy (cc-proxy)
+Description=commandcode.ai API translation proxy (commandcode-proxy)
 Documentation=https://github.com/CelestNya/commandcode-api-proxy
 After=network-online.target
 Wants=network-online.target
@@ -20,13 +22,13 @@ Wants=network-online.target
 [Service]
 Type=simple
 # Runs unprivileged; the listener is on an unprivileged port (default 8787).
-User=ccproxy
-Group=ccproxy
+User=commandcode-proxy
+Group=commandcode-proxy
 ExecStart=/usr/bin/commandcode-proxy start
-EnvironmentFile=/etc/ccproxy/env
-Environment=CC_WEBUI_DIR=/usr/share/ccproxy/webui
-Environment=CC_DATA_DIR=/var/lib/ccproxy
-Environment=CC_LOG_DIR=/var/log/ccproxy
+EnvironmentFile=-/etc/commandcode-proxy/env
+Environment=CC_WEBUI_DIR=/usr/share/commandcode-proxy/webui
+Environment=CC_DATA_DIR=/var/lib/commandcode-proxy
+Environment=CC_LOG_DIR=/var/log/commandcode-proxy
 # Failed attempts restart; a clean exit (stop requested) does not.
 Restart=on-failure
 RestartSec=2
@@ -35,7 +37,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/ccproxy /var/log/ccproxy
+ReadWritePaths=/var/lib/commandcode-proxy /var/log/commandcode-proxy
 
 [Install]
 WantedBy=multi-user.target
