@@ -143,6 +143,7 @@ pub fn run_stop(c: &Config) -> i32 {
         return 1;
     }
     // Wait up to ~5s for the listener to go away before declaring success.
+    #[allow(clippy::arithmetic_side_effects)]
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
         if health(&c.host, c.port).is_err() {
