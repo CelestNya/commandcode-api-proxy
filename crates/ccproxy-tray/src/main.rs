@@ -45,14 +45,20 @@ mod settings;
 mod supervision;
 #[cfg(windows)]
 mod tray;
+// `tray_api` is the Linux-side contract layer; on Windows nothing outside the
+// tests references it, so silence dead-code there without relaxing it on Linux.
+#[cfg_attr(not(unix), allow(dead_code))]
 mod tray_api;
 #[cfg(windows)]
 mod win;
 
+#[cfg(windows)]
 use std::cell::RefCell;
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::rc::Rc;
 use std::sync::Arc;
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
 /// Where the shipped package puts things: the proxy binary and `logs/` sit
@@ -221,6 +227,7 @@ fn windows_main() {
 }
 
 /// Execute a menu choice.
+#[cfg(windows)]
 fn dispatch(
     action: tray::Action,
     proxy: &process::SharedProxy,
@@ -269,6 +276,7 @@ pub fn webui_url(port: u16) -> String {
 /// tray's own `logs/tray.log`: the tray file holds only two lifecycle lines,
 /// and a user who opens it sees no errors while the real ones sit next door.
 /// The path comes from the proxy's own resolver so the two cannot drift.
+#[cfg(windows)]
 fn open_log(root: &std::path::Path, log: &process::LogFile) {
     let path = settings::proxy_log_path(root, &settings::namespace());
     if !path.exists() {
@@ -278,6 +286,7 @@ fn open_log(root: &std::path::Path, log: &process::LogFile) {
 }
 
 /// Open the tray's own log in Notepad — the lifecycle file, not the proxy's.
+#[cfg(windows)]
 fn open_tray_log(log: &process::LogFile) {
     let path = log.path().to_path_buf();
     if !path.exists() {
@@ -291,11 +300,13 @@ fn open_tray_log(log: &process::LogFile) {
 /// The menu greys this out while the proxy is stopped, but the proxy can also
 /// die between the menu being built and the choice being taken; a failed launch
 /// is logged rather than swallowed so that case is diagnosable.
+#[cfg(windows)]
 fn open_webui(port: u16, log: &process::LogFile) {
     shell_open(&win::Wide::new(webui_url(port)), log);
 }
 
 /// Hand a string to the shell's `open` verb.
+#[cfg(windows)]
 fn shell_open(target: &win::Wide, log: &process::LogFile) {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     let verb = win::Wide::new("open");
@@ -325,6 +336,7 @@ fn shell_open(target: &win::Wide, log: &process::LogFile) {
 ///
 /// `stood_down` is raised on the one path that ends this process, so the UI
 /// loop (which owns the process's lifetime) can notice and exit.
+#[cfg(windows)]
 fn handover_loop(
     role: owner::Role,
     port: u16,
@@ -436,6 +448,7 @@ fn handover_loop(
 /// A `windows` subsystem binary has no console, so stdout is not available —
 /// the file is the only way to see this from a terminal. It must never take
 /// over from a running instance.
+#[cfg(windows)]
 fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
     use std::io::Write;
     let path = root.join("selfcheck.log");
@@ -473,6 +486,7 @@ fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
     }
 }
 
+#[cfg(windows)]
 fn fatal(log: &process::LogFile, message: &str) {
     log.append(&format!("[tray] {message}"));
     win::message_box(message, false);
@@ -569,6 +583,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn a_manual_quit_leaves_a_log_line_behind() {
         // The quit path never returns to the UI loop, so without a line here a
         // vanished tray is indistinguishable from a silent crash — exactly the
