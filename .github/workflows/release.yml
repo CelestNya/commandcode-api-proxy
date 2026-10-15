@@ -119,9 +119,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux
+          # only the real deliverables: pkg/ and *.pkg.tar.zst are makepkg
+          # intermediates owned by the container builder (640/700 perms the
+          # runner cannot read for zip creation)
           path: |
             target/debian/*.deb
-            packaging-out/*
+            packaging-out/commandcode-proxy-*.AppImage
+            packaging-out/commandcode-proxy-*-linux-x86_64.tar.gz
+            packaging-out/PKGBUILD
+            packaging-out/.SRCINFO
           if-no-files-found: error
 
   publish:

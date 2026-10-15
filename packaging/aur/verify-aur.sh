@@ -49,7 +49,8 @@ docker run --rm -v "$OUT_DIR:/out" archlinux:latest bash -euo pipefail -c '
     tar -tf commandcode-proxy-bin-[0-9]*.pkg.tar.zst | grep usr/bin/commandcode-proxy >/dev/null
     # drop the intermediate variants while we still own /out (docker chowned
     # everything to builder; the host runner cannot rm them afterwards)
-    rm -f PKGBUILD.real PKGBUILD.verify
+    rm -f PKGBUILD.real PKGBUILD.verify *-debug-*.pkg.tar.zst
+    rm -rf pkg
     echo AUR-VERIFY-OK
 '
 
