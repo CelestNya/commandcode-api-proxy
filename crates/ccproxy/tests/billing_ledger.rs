@@ -361,19 +361,26 @@ fn the_request_id_ties_the_attempts_of_one_turn_together() {
         true,
     );
 
-    // The second row may still be inside the writer's batch window, so commit
-    // before reading rather than assuming it has landed.
-    ccproxy::billing::flush();
+    // The second row may still be inside the writer's batch window — and this
+    // test process's own `flush()` does not reach the proxy subprocess — so
+    // poll the DB until both rows land (same pattern as rows_after_quiet).
     let conn = Connection::open(dir.join("billing.db")).expect("open");
+    let mut total: i64 = 0;
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        total = conn
+            .query_row("select count(*) from billing", [], |r| r.get(0))
+            .expect("query");
+        if total >= 2 {
+            break;
+        }
+    }
+    assert_eq!(total, 2, "both attempts are on disk");
     let distinct: i64 = conn
         .query_row("select count(distinct reqId) from billing", [], |r| {
             r.get(0)
         })
         .expect("query");
-    let total: i64 = conn
-        .query_row("select count(*) from billing", [], |r| r.get(0))
-        .expect("query");
-    assert_eq!(total, 2, "both attempts are on disk");
     assert_eq!(
         distinct, 1,
         "one client request means one reqId, so a retry chain stays legible"

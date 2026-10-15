@@ -92,7 +92,10 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
       - name: Build .deb packages
-        run: cargo deb -p ccproxy -p ccproxy-tray
+        # cargo-deb takes a single -p; one package per crate.
+        run: |
+          cargo deb -p ccproxy
+          cargo deb -p ccproxy-tray
       - name: Build AppImage
         run: |
           VER=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
