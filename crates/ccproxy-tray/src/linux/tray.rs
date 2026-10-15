@@ -135,6 +135,7 @@ fn menu_items(menu: &[MenuItem], tx: mpsc::Sender<TrayEvent>) -> Vec<ksni::MenuI
 
 /// 画一个 ARGB32 圆点图标（ksni::Icon 数据为每像素 4 字节 ARGB）。
 fn dot_icon(size: u32, r: u8, g: u8, b: u8) -> ksni::Icon {
+    #[allow(clippy::arithmetic_side_effects)]
     let mut data = Vec::with_capacity((size * size * 4) as usize);
     #[allow(clippy::arithmetic_side_effects)]
     let center = (size as f32 - 1.0) / 2.0;

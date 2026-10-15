@@ -114,7 +114,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ccproxy-xdg-test-{}", std::process::id()));
         let file = dir.join("commandcode-proxy.desktop");
         let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::create_dir_all(&file.parent().unwrap());
+        let _ = std::fs::create_dir_all(file.parent().unwrap());
         std::fs::write(&file, format!(
             "[Desktop Entry]\nType=Application\nName=commandcode-proxy\nComment=API translation proxy tray\nExec={exec}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
         ))
