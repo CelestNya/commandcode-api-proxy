@@ -10,6 +10,15 @@ use std::path::Path;
 pub const DEFAULT_CC_VERSION: &str = "1.54.1";
 pub const DEFAULT_CC_API_BASE: &str = "https://api.commandcode.ai";
 
+/// Env overrides for packaged resource directories (D7). The packager injects
+/// the OS-appropriate locations into these variables; the code reads env first
+/// and falls back to the portable exe-adjacent layout. There is deliberately
+/// *no* platform detection here — the same variables work on Windows and Linux.
+pub const WEBUI_DIR_ENV: &str = "CC_WEBUI_DIR";
+pub const DATA_DIR_ENV: &str = "CC_DATA_DIR";
+pub const LOG_DIR_ENV: &str = "CC_LOG_DIR";
+pub const TRAY_LOG_DIR_ENV: &str = "CC_TRAY_LOG_DIR";
+
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u64 = 8787;
 const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
@@ -373,77 +382,138 @@ fn non_empty(raw: Option<&str>) -> Option<String> {
     raw.filter(|v| !v.is_empty()).map(str::to_owned)
 }
 
-/// Where the proxy writes its own log: `logs/proxy.log` beside the binary,
-/// under a `test-<ns>` subdirectory for a namespaced (isolated) instance.
-///
-/// Mirrors the tray's layout so both files land in the same directory, and
-/// takes its inputs as parameters so the decision is testable without touching
-/// the process environment or the filesystem.
-#[must_use]
-pub fn log_path_from(exe_dir: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
-    let base = exe_dir.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
-    let logs = base.join("logs");
-    let dir = match ns.filter(|v| !v.trim().is_empty()) {
-        Some(ns) => logs.join(format!("test-{ns}")),
-        None => logs,
-    };
-    dir.join("proxy.log")
-}
-
-/// The proxy log path for this process: next to `current_exe`, namespaced when
-/// `CC_TRAY_NS` is set (same variable the ledger uses).
+/// The proxy log path for this process. `CC_LOG_DIR` (the packaged layout)
+/// names the log directory directly; otherwise the path is next to
+/// `current_exe`, namespaced when `CC_TRAY_NS` is set (same variable the
+/// ledger uses).
 #[must_use]
 pub fn log_path() -> std::path::PathBuf {
+    let env_dir = env_dir(LOG_DIR_ENV);
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
     let ns = std::env::var("CC_TRAY_NS").ok();
-    log_path_from(exe_dir.as_deref(), ns.as_deref())
+    log_path_with(exe_dir.as_deref(), ns.as_deref(), env_dir.as_deref())
 }
 
-/// The tray's own log: `logs/tray.log` under `root` (the package root, one
-/// level above the proxy when the shipped layout puts the proxy in `service/`).
-///
-/// Mirrors [`log_path_from`] for the same directory scheme, so the WebUI's log
-/// screen can offer the tray's lifecycle lines beside the proxy's own.
+/// The proxy log path with no env override — the legacy decision, kept for
+/// existing callers and tests.
 #[must_use]
-pub fn tray_log_path_from(root: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
-    let base = root.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
-    let logs = base.join("logs");
-    let dir = match ns.filter(|v| !v.trim().is_empty()) {
-        Some(ns) => logs.join(format!("test-{ns}")),
-        None => logs,
-    };
-    dir.join("tray.log")
+pub fn log_path_from(exe_dir: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
+    log_path_with(exe_dir, ns, None)
 }
 
-/// The tray log path for this process. The proxy runs from `<root>/service`,
-/// so the package root is its exe directory's parent; a proxy launched straight
-/// from the root has no separate tray log, and the path simply will not exist.
+/// The decision, with `env_dir` as the optional override. When set, `env_dir`
+/// *is* the log directory (no `logs/` suffix — the packager named it already);
+/// the namespace still nests under it so an isolated instance cannot read
+/// production's file or vice versa.
+fn log_path_with(
+    exe_dir: Option<&Path>,
+    ns: Option<&str>,
+    env_dir: Option<&Path>,
+) -> std::path::PathBuf {
+    match env_dir {
+        Some(dir) => match ns.filter(|v| !v.trim().is_empty()) {
+            Some(ns) => dir.join(format!("test-{ns}")).join("proxy.log"),
+            None => dir.join("proxy.log"),
+        },
+        None => {
+            let base = exe_dir.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+            let logs = base.join("logs");
+            let dir = match ns.filter(|v| !v.trim().is_empty()) {
+                Some(ns) => logs.join(format!("test-{ns}")),
+                None => logs,
+            };
+            dir.join("proxy.log")
+        }
+    }
+}
+
+/// The tray log path for this process. `CC_TRAY_LOG_DIR` (the packaged layout)
+/// names the tray log directory directly; otherwise the proxy runs from
+/// `<root>/service`, so the package root is its exe directory's parent; a proxy
+/// launched straight from the root has no separate tray log, and the path
+/// simply will not exist.
 #[must_use]
 pub fn tray_log_path() -> std::path::PathBuf {
+    let env_dir = env_dir(TRAY_LOG_DIR_ENV);
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
     let root = exe_dir.as_deref().and_then(Path::parent);
     let ns = std::env::var("CC_TRAY_NS").ok();
-    tray_log_path_from(root, ns.as_deref())
+    tray_log_path_with(root, ns.as_deref(), env_dir.as_deref())
 }
 
-/// The loose WebUI sources beside the executable: `webui/index.html`, if that
-/// directory exists.
+/// The tray log path with no env override — the legacy decision, kept for
+/// existing callers and tests.
+#[must_use]
+pub fn tray_log_path_from(root: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
+    tray_log_path_with(root, ns, None)
+}
+
+/// The decision, with `env_dir` as the optional override; when set it *is* the
+/// log directory (no `logs/` suffix).
+fn tray_log_path_with(
+    root: Option<&Path>,
+    ns: Option<&str>,
+    env_dir: Option<&Path>,
+) -> std::path::PathBuf {
+    match env_dir {
+        Some(dir) => match ns.filter(|v| !v.trim().is_empty()) {
+            Some(ns) => dir.join(format!("test-{ns}")).join("tray.log"),
+            None => dir.join("tray.log"),
+        },
+        None => {
+            let base = root.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+            let logs = base.join("logs");
+            let dir = match ns.filter(|v| !v.trim().is_empty()) {
+                Some(ns) => logs.join(format!("test-{ns}")),
+                None => logs,
+            };
+            dir.join("tray.log")
+        }
+    }
+}
+
+/// The loose WebUI sources: `CC_WEBUI_DIR` when set (the packaged layout
+/// injects it), else `webui/` beside the executable when that directory exists.
 ///
-/// The proxy ships the assembled page inside the binary, but a package may also
-/// carry the sources so a stylesheet can be edited and just reloaded (see
-/// `webui::page`). `None` means "no loose copy" — not an error, and the common
-/// case for a minimal install.
+/// The proxy serves the panel from disk (front-end split: nothing is compiled
+/// into the binary), so a stylesheet can be edited and just reloaded. `None`
+/// means "no webui available" — the panel routes 404, not an error.
 #[must_use]
 pub fn webui_site_dir() -> Option<std::path::PathBuf> {
+    let env_dir = env_dir(WEBUI_DIR_ENV);
     let exe_dir = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))?;
-    let dir = exe_dir.join("webui");
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    webui_site_dir_from(exe_dir.as_deref(), env_dir.as_deref())
+}
+
+/// The decision with inputs passed in, so it is testable without the process
+/// environment or the filesystem. The env override wins over the exe-adjacent
+/// fallback; either way the directory must actually contain `index.html`.
+#[must_use]
+pub fn webui_site_dir_from(
+    exe_dir: Option<&Path>,
+    env_dir: Option<&Path>,
+) -> Option<std::path::PathBuf> {
+    if let Some(dir) = env_dir {
+        if dir.join("index.html").is_file() {
+            return Some(dir.to_path_buf());
+        }
+    }
+    let dir = exe_dir?.join("webui");
     dir.join("index.html").is_file().then_some(dir)
+}
+
+/// Read a directory env var, treating empty/whitespace as absent.
+fn env_dir(key: &str) -> Option<std::path::PathBuf> {
+    std::env::var(key)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(std::path::PathBuf::from)
 }
 
 /// JS `Number()` for the subset of strings these env vars realistically carry.

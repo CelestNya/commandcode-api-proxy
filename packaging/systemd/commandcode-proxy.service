@@ -1,0 +1,41 @@
+# cc-proxy systemd unit (Debian packaging draft — installed as
+# /lib/systemd/system/commandcode-proxy.service by the deb).
+#
+# Layout contract (see docs/LINUX-PORT-PLAN.md D7-D9):
+#   - binary:        /usr/bin/commandcode-proxy   (release name; crate is ccproxy)
+#   - panel sources: /usr/share/ccproxy/webui     -> CC_WEBUI_DIR
+#   - ledger/data:   /var/lib/ccproxy             -> CC_DATA_DIR
+#   - logs:          /var/log/ccproxy             -> CC_LOG_DIR
+#   - env overrides: /etc/ccproxy/env             (EnvironmentFile; operator-owned)
+#
+# `ccproxy start` is the foreground command; systemd supervises it, so the CLI
+# PID file is not used here (stop = systemctl stop, not `ccproxy stop`).
+
+[Unit]
+Description=commandcode.ai API translation proxy (cc-proxy)
+Documentation=https://github.com/CelestNya/commandcode-api-proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs unprivileged; the listener is on an unprivileged port (default 8787).
+User=ccproxy
+Group=ccproxy
+ExecStart=/usr/bin/commandcode-proxy start
+EnvironmentFile=/etc/ccproxy/env
+Environment=CC_WEBUI_DIR=/usr/share/ccproxy/webui
+Environment=CC_DATA_DIR=/var/lib/ccproxy
+Environment=CC_LOG_DIR=/var/log/ccproxy
+# Failed attempts restart; a clean exit (stop requested) does not.
+Restart=on-failure
+RestartSec=2
+# Hard bounds so a wedged upstream cannot grow the process without limit.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ccproxy /var/log/ccproxy
+
+[Install]
+WantedBy=multi-user.target

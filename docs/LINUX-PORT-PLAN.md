@@ -27,7 +27,7 @@ cc-proxy 当前形态：
 | D4 | 远程 CI | 推 `rust-rewrite` 到 origin，GH Actions 双平台构建（ubuntu = Linux 实证通道） |
 | D5 | 发布物 | deb（cargo-deb + systemd unit）+ AppImage（linuxdeploy）+ AUR PKGBUILD |
 | D6 | AUR | 暂无 Arch 账号：先本地出 PKGBUILD + .SRCINFO（+ 可选 ccproxy-bin），注册后 `git push` 即发布 |
-| D7 | 目录注入 | 打包按系统类型把目录写进**环境变量**（`CCPROXY_WEBUI_DIR` / `CCPROXY_DATA_DIR` / `CCPROXY_LOG_DIR`），代码只读 env + exe 旁兜底，**不做平台检测** |
+| D7 | 目录注入 | 打包按系统类型把目录写进**环境变量**（`CC_WEBUI_DIR` / `CC_DATA_DIR` / `CC_LOG_DIR` / `CC_TRAY_LOG_DIR`，沿用现有 CC_ 前缀），代码只读 env + exe 旁兜底，**不做平台检测** |
 | D8 | deb systemd | **带 unit**：自启 / 崩溃重启（Restart=on-failure）/ 日志进 journalctl / `User=ccproxy` 低权；非 systemd 用 CLI |
 | D9 | 数据路径 | 安装模式：`/var/lib/ccproxy`（配合 User=ccproxy）；便携模式保持 exe 旁 |
 | D10 | 托盘验收 | 四层验收：L0 协议（无头 CI）/ L1 呈现（真实桌面）/ L2 行为 / L3 兼容矩阵（见 §6） |

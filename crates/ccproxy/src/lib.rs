@@ -26,6 +26,7 @@
 
 pub mod billing;
 pub mod catalog;
+pub mod cli;
 pub mod cli_version;
 pub mod config;
 pub mod dump;

@@ -28,6 +28,7 @@ use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TryS
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::config::DATA_DIR_ENV;
 use crate::time::{iso8601_secs, now_epoch_secs, now_iso8601};
 use crate::upstream::AttemptSink;
 use crate::usage::UsageData;
@@ -154,11 +155,24 @@ enum Message {
 /// LOCALAPPDATA is unset. `CC_TRAY_NS` appends a subdirectory so an isolated
 /// instance cannot write into the production database.
 pub fn billing_dir() -> PathBuf {
-    billing_dir_from(
-        std::env::var("LOCALAPPDATA").ok().as_deref(),
-        std::env::var("HOME").ok().as_deref(),
-        std::env::var("CC_TRAY_NS").ok().as_deref(),
-    )
+    // The packaged layout injects CC_DATA_DIR (e.g. /var/lib/ccproxy on Linux);
+    // it then behaves like the portable base below, still namespaced by
+    // CC_TRAY_NS so an isolated instance cannot touch production's ledger.
+    let env_dir = std::env::var(DATA_DIR_ENV)
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let ns = std::env::var("CC_TRAY_NS").ok();
+    match env_dir {
+        Some(dir) => match non_empty(ns.as_deref()) {
+            Some(ns) => Path::new(&dir).join(ns),
+            None => PathBuf::from(dir),
+        },
+        None => billing_dir_from(
+            std::env::var("LOCALAPPDATA").ok().as_deref(),
+            std::env::var("HOME").ok().as_deref(),
+            ns.as_deref(),
+        ),
+    }
 }
 
 /// The directory decision, with its inputs passed in so it can be tested
