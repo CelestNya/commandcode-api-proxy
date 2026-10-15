@@ -7,4 +7,5 @@
 pub mod actions;
 pub mod log;
 pub mod settings;
+pub mod single_instance;
 pub mod tray;

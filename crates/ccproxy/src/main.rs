@@ -154,7 +154,10 @@ fn install_signal_stop(
 
     let flag = Arc::new(AtomicBool::new(false));
     let thread_flag = Arc::clone(&flag);
-    let thread_server = server.clone();
+    // `server.clone()` on a `&Server` resolves to the blanket `Clone for &T`
+    // (copies the reference), which would escape the function into the thread
+    // (E0521 on Linux). Dereference first to clone the owned handle.
+    let thread_server = (*server).clone();
     let _ = signal_hook::flag::register(SIGTERM, Arc::clone(&flag));
     let _ = signal_hook::flag::register(SIGINT, Arc::clone(&flag));
     std::thread::spawn(move || {
