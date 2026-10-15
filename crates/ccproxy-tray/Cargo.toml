@@ -25,8 +25,8 @@ depends = "commandcode-proxy"
 maintainer-scripts = "../../packaging/deb/scripts/"
 assets = [
   ["target/release/CCProxyTray", "usr/bin/commandcode-proxy-tray", "755"],
-  ["packaging/desktop/commandcode-proxy-tray.desktop", "usr/share/applications/", "644"],
-  ["packaging/icons/commandcode-proxy.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+  ["../../packaging/desktop/commandcode-proxy-tray.desktop", "usr/share/applications/", "644"],
+  ["../../packaging/icons/commandcode-proxy.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
 ]
 
 [dependencies]

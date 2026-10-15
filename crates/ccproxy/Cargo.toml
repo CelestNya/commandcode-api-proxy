@@ -21,11 +21,13 @@ section = "net"
 priority = "optional"
 # No runtime system deps beyond glibc (rusqlite is bundled; tray is zbus-only).
 depends = "$auto"
+# built assets (target/release/*) resolve against the workspace root; static
+# assets and maintainer-scripts resolve against the crate dir (../../ = root).
 assets = [
   ["target/release/ccproxy", "usr/bin/commandcode-proxy", "755"],
-  ["crates/ccproxy/webui/", "usr/share/commandcode-proxy/webui/", "755"],
-  ["packaging/systemd/commandcode-proxy.service", "lib/systemd/system/", "644"],
-  ["packaging/deb/env.example", "etc/commandcode-proxy/", "640"],
+  ["../../crates/ccproxy/webui/", "usr/share/commandcode-proxy/webui/", "755"],
+  ["../../packaging/systemd/commandcode-proxy.service", "lib/systemd/system/", "644"],
+  ["../../packaging/deb/env.example", "etc/commandcode-proxy/", "640"],
 ]
 # maintainer-scripts resolves against the crate dir (manifest dir), unlike
 # assets which resolve against the workspace root (cwd).
