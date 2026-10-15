@@ -44,8 +44,9 @@ docker run --rm -v "$OUT_DIR:/out" archlinux:latest bash -euo pipefail -c '
         cp PKGBUILD.real PKGBUILD
         makepkg --printsrcinfo > .SRCINFO
     "
-    # main pkg only (exclude the *-debug-* variant makepkg also emits)
-    tar -tf commandcode-proxy-bin-[0-9]*.pkg.tar.zst | grep -q usr/bin/commandcode-proxy
+    # main pkg only (exclude the *-debug-* variant makepkg also emits);
+    # no -q: grep must drain the pipe or tar dies with SIGPIPE (141)
+    tar -tf commandcode-proxy-bin-[0-9]*.pkg.tar.zst | grep usr/bin/commandcode-proxy >/dev/null
     echo AUR-VERIFY-OK
 '
 
