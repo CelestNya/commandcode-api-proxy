@@ -5,6 +5,7 @@
 //! systemd 启动），托盘菜单通过 CLI 启停，不直接持有子进程句柄——因此
 //! 不存在 Job Object / 交接协议，托盘崩溃也不影响已启动的服务。
 
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 

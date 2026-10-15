@@ -85,6 +85,8 @@ impl ksni::Tray for Snitray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
+            icon_name: String::new(),
+            icon_pixmap: Vec::new(),
             title: self
                 .state
                 .lock()
@@ -120,9 +122,9 @@ fn menu_items(menu: &[MenuItem], tx: mpsc::Sender<TrayEvent>) -> Vec<ksni::MenuI
                 if entry.enabled {
                     if let Some(ev) = TrayEvent::from_cmd(entry.id) {
                         let tx = tx.clone();
-                        item.activate = Some(Box::new(move |_this: &mut Snitray| {
+                        item.activate = Box::new(move |_this: &mut Snitray| {
                             let _ = tx.send(ev);
-                        }));
+                        });
                     }
                 }
                 item.into()
@@ -152,8 +154,8 @@ fn dot_icon(size: u32, r: u8, g: u8, b: u8) -> ksni::Icon {
         }
     }
     ksni::Icon {
-        width: size,
-        height: size,
+        width: size as i32,
+        height: size as i32,
         data,
     }
 }
@@ -195,9 +197,11 @@ impl TrayBackend for LinuxTray {
 
         // blocking API：spawn 注册 StatusNotifierItem（连接会话总线）。
         // 无会话总线（无桌面）时这里失败——上层决定降级策略。
-        let handle = tray
-            .spawn()
-            .map_err(|e| TrayError::Unavailable(e.to_string()))?;
+        let handle = {
+            use ksni::blocking::TrayMethods;
+            tray.spawn()
+                .map_err(|e| TrayError::Unavailable(e.to_string()))?
+        };
         *self.handle.lock().unwrap_or_else(|p| p.into_inner()) = Some(handle);
 
         // 事件循环：转发菜单事件；Quit 或 stop() 结束并反注册。

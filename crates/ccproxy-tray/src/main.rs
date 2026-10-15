@@ -499,7 +499,8 @@ fn linux_main() {
     use tray_api::{build_menu, TrayBackend, TrayEvent, TrayStatus};
 
     let port = linux::settings::instance_port();
-    let log = linux::log::LogFile::new(linux::settings::tray_log_path());
+    // Arc：事件回调（'static 闭包）与主线程共享日志句柄。
+    let log = std::sync::Arc::new(linux::log::LogFile::new(linux::settings::tray_log_path()));
     log.append("[tray] 启动（Linux / SNI）");
 
     let Some(proxy) = linux::settings::proxy_binary() else {
