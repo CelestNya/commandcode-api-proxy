@@ -47,9 +47,12 @@ docker run --rm -v "$OUT_DIR:/out" archlinux:latest bash -euo pipefail -c '
     # main pkg only (exclude the *-debug-* variant makepkg also emits);
     # no -q: grep must drain the pipe or tar dies with SIGPIPE (141)
     tar -tf commandcode-proxy-bin-[0-9]*.pkg.tar.zst | grep usr/bin/commandcode-proxy >/dev/null
+    # drop the intermediate variants while we still own /out (docker chown'd
+    # everything to builder; the host runner cannot rm them afterwards)
+    rm -f PKGBUILD.real PKGBUILD.verify
     echo AUR-VERIFY-OK
 '
 
-# The built artifact stays for the record; the real PKGBUILD is the deliverable.
-rm -f "$OUT_DIR/PKGBUILD.real" "$OUT_DIR/PKGBUILD.verify"
+# The built artifact stays for the record; the real PKGBUILD is the deliverable
+# (variants already removed inside the container).
 echo "PKGBUILD + .SRCINFO rendered for commandcode-proxy-bin $VERSION"
