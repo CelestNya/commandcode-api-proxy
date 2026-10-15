@@ -31,12 +31,22 @@
 )]
 
 mod health;
+#[cfg(unix)]
+mod linux;
+#[cfg(windows)]
 mod owner;
+#[cfg(windows)]
 mod portguard;
+#[cfg(windows)]
 mod process;
+#[cfg(windows)]
 mod settings;
+#[cfg(windows)]
 mod supervision;
+#[cfg(windows)]
 mod tray;
+mod tray_api;
+#[cfg(windows)]
 mod win;
 
 use std::cell::RefCell;
@@ -55,6 +65,14 @@ fn install_root() -> PathBuf {
 }
 
 fn main() {
+    #[cfg(windows)]
+    windows_main();
+    #[cfg(unix)]
+    linux_main();
+}
+
+#[cfg(windows)]
+fn windows_main() {
     let root = install_root();
     let ns = settings::namespace();
     let port = settings::instance_port();
@@ -458,6 +476,84 @@ fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
 fn fatal(log: &process::LogFile, message: &str) {
     log.append(&format!("[tray] {message}"));
     win::message_box(message, false);
+}
+
+/// Linux 入口：托盘经 zbus StatusNotifierItem（ksni）呈现，代理作为独立
+/// 服务由 CLI 启停（无 Job Object / 交接协议——Linux 服务化更标准）。
+#[cfg(unix)]
+fn linux_main() {
+    use tray_api::{build_menu, TrayBackend, TrayEvent, TrayStatus};
+
+    let port = linux::settings::instance_port();
+    let log = linux::log::LogFile::new(linux::settings::tray_log_path());
+    log.append("[tray] 启动（Linux / SNI）");
+
+    let Some(proxy) = linux::settings::proxy_binary() else {
+        log.append("[tray] 找不到 ccproxy 二进制（设置 CC_PROXY_BIN，或放在托盘同级）");
+        return;
+    };
+    log.append(&format!("[tray] 代理二进制：{}", proxy.display()));
+
+    // 初始状态：探测 /health（不主动拉起服务——菜单里启动）。
+    let running = health::port_serving(port, None);
+    let status = if running {
+        TrayStatus::Running
+    } else {
+        TrayStatus::Stopped
+    };
+    let state_word = if running { "running" } else { "stopped" };
+    let tooltip = format!(
+        "Commandcode Proxy — {state_word} (:{port}) v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    log.append(&format!("[tray] 端口 {port} 状态：{state_word}"));
+
+    let cache = ("24h 缓存率：—".to_string(), " ".to_string());
+    let menu = build_menu(
+        running,
+        linux::settings::autostart_enabled(),
+        &cache,
+        env!("CARGO_PKG_VERSION"),
+    );
+
+    let mut tray = linux::tray::LinuxTray::new(status, menu, tooltip);
+    let _ = tray.start(Box::new(move |event| {
+        linux_dispatch(event, &proxy, port, &log);
+    }));
+    log.append("[tray] 退出");
+}
+
+/// Linux 菜单事件分发。
+#[cfg(unix)]
+fn linux_dispatch(
+    event: tray_api::TrayEvent,
+    proxy: &std::path::Path,
+    port: u16,
+    log: &linux::log::LogFile,
+) {
+    use tray_api::TrayEvent;
+    match event {
+        TrayEvent::Start => linux::actions::start_proxy(proxy, port, log),
+        TrayEvent::Stop => linux::actions::stop_proxy(proxy, log),
+        TrayEvent::OpenLog => linux::actions::open_proxy_log(log),
+        TrayEvent::OpenTrayLog => {
+            let p = linux::settings::tray_log_path();
+            if !p.is_file() {
+                let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
+                let _ = std::fs::File::create(&p);
+            }
+            linux::actions::xdg_open(&p.display().to_string(), log);
+        }
+        TrayEvent::OpenWebUi => {
+            linux::actions::xdg_open(&format!("http://127.0.0.1:{port}/webui"), log);
+        }
+        TrayEvent::ToggleAutostart => {
+            linux::actions::toggle_autostart(&proxy.display().to_string(), log);
+        }
+        TrayEvent::Quit => {
+            log.append("[tray] 手动退出（停止代理请用菜单「停止代理」或 ccproxy stop）")
+        }
+    }
 }
 
 #[cfg(test)]

@@ -15,6 +15,12 @@ path = "src/main.rs"
 ccproxy = { path = "../ccproxy" }
 serde_json = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# zbus StatusNotifierItem 实现（零 GTK）。blocking feature 提供同步 API，
+# 避免引入 tokio 运行时（ksni readme 亦提示 zbus/tokio 依赖树的已知 panic
+# 场景——本项目无 tokio，直接走 blocking 最干净）。
+ksni = { version = "0.3", features = ["blocking"] }
+
 [target.'cfg(windows)'.dependencies]
 # Raw bindings rather than the typed `windows` crate: the surface below is a
 # few dozen well-understood calls, the crate is already in the lock file via
