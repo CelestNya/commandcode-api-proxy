@@ -172,6 +172,7 @@ mod tests {
         let webui = root.join("usr/share/commandcode-proxy/webui");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&webui).unwrap();
+        std::fs::create_dir_all(&bin).unwrap(); // canonicalize 要求中间组件存在
         std::fs::write(webui.join("index.html"), "<html></html>").unwrap();
 
         let resolved = packaged_webui_dir(&bin).expect("install layout must resolve");
