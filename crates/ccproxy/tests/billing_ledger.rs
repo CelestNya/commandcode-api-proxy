@@ -240,9 +240,21 @@ fn request(port: u16, path: &str, body: &Value, stream: bool) -> (u16, String) {
 /// unit tests use `flush()`; the proxy here has no handle to its ledger.
 #[allow(clippy::type_complexity)]
 fn rows_after_quiet(dir: &Path) -> Vec<(i64, String, Option<String>, Option<i64>, Option<i64>)> {
+    // The ledger is written by a batching thread, so "flush then read" can
+    // race a slow CI machine: a fixed sleep is the classic flake. Poll until
+    // two consecutive reads agree (rows stopped growing), bounded at 5 s.
     ccproxy::billing::flush();
-    std::thread::sleep(Duration::from_millis(50));
-    rows(dir)
+    let mut last = rows(dir);
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        ccproxy::billing::flush();
+        let now = rows(dir);
+        if now == last && !now.is_empty() {
+            return now;
+        }
+        last = now;
+    }
+    last
 }
 
 #[test]

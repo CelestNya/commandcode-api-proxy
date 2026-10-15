@@ -972,32 +972,69 @@ const MAX_CONCURRENCY: usize = 64;
 const THREAD_STACK_BYTES: usize = 512 * 1024;
 
 pub fn serve(server: tiny_http::Server, state: SharedState) {
+    // `serve` keeps the historical contract: block until the server is shut
+    // down or the process exits. Callers that need a graceful stop (SIGTERM,
+    // CLI `stop`) use `serve_with_stop` instead.
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    serve_with_stop(server, state, &stop);
+}
+
+/// Serve until `stop` is set, then return. The listener is polled on a short
+/// timeout so a signal can take effect within ~200 ms instead of only when the
+/// next request arrives or the listener is unblocked.
+///
+/// This exists because `tiny_http::Server` is **not** `Clone`: a shutdown
+/// thread cannot hold an owned handle to unblock the accept loop, so the loop
+/// itself must notice the stop flag.
+pub fn serve_with_stop(
+    server: tiny_http::Server,
+    state: SharedState,
+    stop: &std::sync::atomic::AtomicBool,
+) {
     let in_flight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    for request in server.incoming_requests() {
-        let state = Arc::clone(&state);
-        let in_flight = Arc::clone(&in_flight);
-        let current = in_flight.load(std::sync::atomic::Ordering::Relaxed);
-        if current >= MAX_CONCURRENCY {
-            // Refuse rather than queue; the client sees a fast failure.
-            let _ = request.respond(
-                Response::from_string(
-                    "{\"error\":{\"message\":\"Server busy\",\"type\":\"proxy_error\"}}",
-                )
-                .with_status_code(503),
-            );
-            continue;
+    loop {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
         }
-        in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let counter = Arc::clone(&in_flight);
-        let spawned = std::thread::Builder::new()
-            .stack_size(THREAD_STACK_BYTES)
-            .spawn(move || {
-                handle(&state, request);
-                counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            });
-        if spawned.is_err() {
-            in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        match server.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(Some(request)) => spawn_handler(request, &state, &in_flight),
+            // Timeout: poll the stop flag again.
+            Ok(None) => {}
+            Err(_) => break,
         }
+    }
+}
+
+/// Handle one request on a bounded thread, refusing past the concurrency cap.
+/// Shared by `serve` and `serve_with_stop` so the two cannot drift.
+fn spawn_handler(
+    request: tiny_http::Request,
+    state: &SharedState,
+    in_flight: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let state = Arc::clone(state);
+    let in_flight = Arc::clone(in_flight);
+    let current = in_flight.load(std::sync::atomic::Ordering::Relaxed);
+    if current >= MAX_CONCURRENCY {
+        // Refuse rather than queue; the client sees a fast failure.
+        let _ = request.respond(
+            Response::from_string(
+                "{\"error\":{\"message\":\"Server busy\",\"type\":\"proxy_error\"}}",
+            )
+            .with_status_code(503),
+        );
+        return;
+    }
+    in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let counter = Arc::clone(&in_flight);
+    let spawned = std::thread::Builder::new()
+        .stack_size(THREAD_STACK_BYTES)
+        .spawn(move || {
+            handle(&state, request);
+            counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        });
+    if spawned.is_err() {
+        in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

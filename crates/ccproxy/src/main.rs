@@ -125,14 +125,15 @@ fn main() {
     }
 
     // On Unix, SIGTERM/SIGINT are caught so `stop` (and `kill`/systemd stop)
-    // shut the server down gracefully: the flag unblocks the listener, serve()
-    // returns, and the PID file is cleaned up below.
+    // shut the server down gracefully: the flag makes `serve_with_stop` return,
+    // and the PID file is cleaned up below. No shutdown thread is needed —
+    // tiny_http::Server is not Clone, so the serve loop polls the flag itself.
     #[cfg(unix)]
-    let stop_flag = install_signal_stop(&server);
+    let stop_flag = install_signal_stop();
     #[cfg(not(unix))]
-    let _stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-    ccproxy::server::serve(server, state);
+    ccproxy::server::serve_with_stop(server, state, &stop_flag);
 
     #[cfg(unix)]
     if stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -141,31 +142,16 @@ fn main() {
     ccproxy::cli::remove_pid();
 }
 
-/// Catch SIGTERM/SIGINT and turn them into a graceful stop: the flag is set
-/// and the listener is unblocked, so `serve` returns and main cleans up.
-/// The tiny_http server is cheap to clone (shared interior).
+/// Catch SIGTERM/SIGINT into a flag that `serve_with_stop` polls.
 #[cfg(unix)]
-fn install_signal_stop(
-    server: &tiny_http::Server,
-) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+fn install_signal_stop() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
     use signal_hook::consts::{SIGINT, SIGTERM};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
     let flag = Arc::new(AtomicBool::new(false));
-    let thread_flag = Arc::clone(&flag);
-    // `server.clone()` on a `&Server` resolves to the blanket `Clone for &T`
-    // (copies the reference), which would escape the function into the thread
-    // (E0521 on Linux). Dereference first to clone the owned handle.
-    let thread_server = (*server).clone();
     let _ = signal_hook::flag::register(SIGTERM, Arc::clone(&flag));
     let _ = signal_hook::flag::register(SIGINT, Arc::clone(&flag));
-    std::thread::spawn(move || {
-        while !thread_flag.load(Ordering::Relaxed) {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-        thread_server.unblock();
-    });
     flag
 }
 

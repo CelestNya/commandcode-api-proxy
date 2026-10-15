@@ -95,15 +95,15 @@ flowchart TB
 | T1.3 | systemd unit 草案 + 安装布局（`/var/lib/ccproxy`、`EnvironmentFile=/etc/ccproxy/env`、`User=ccproxy`） | docs 落地，M3 打包直接引用 |
 | T1.4 | 全量测试回归（220+）+ clippy/fmt | cargo test 全绿 |
 
-### M2 — tray 平台抽象（三层落地）
+### M2 — tray 平台抽象（三层落地）✅ commit `1b26b1d` / `4353735`
 
-| 任务 | 内容 | 验收 |
+| 任务 | 内容 | 状态 |
 |---|---|---|
-| T2.1 | `TrayBackend` trait 定义 + 契约测试骨架（mock 实现） | 契约断言可跑 |
-| T2.2 | Windows 实现适配 trait（现有 tray.rs/win.rs 重构，行为不变） | Windows 编译 + 现有功能不回归 |
-| T2.3 | Linux zbus SNI 实现：注册/必需属性/IconPixmap/dbusmenu 菜单/属性更新/反注册 + **无 session bus 降级检测**（→ CLI 模式不崩溃） | L0 协议断言全过（§6） |
-| T2.4 | 平台化其余：ProcessSupervisor（PDEATHSIG）、SingleInstance（abstract socket）、PortGuard（/proc） | 双平台编译 + 契约测试 |
-| T2.5 | 契约测试三实现全跑（mock + win + linux） | CI（ubuntu 无头 dbus-launch）通过 |
+| T2.1 | `TrayBackend` trait 定义 + 契约测试骨架（mock 实现） | ✅ `tray_api.rs`：菜单模型 / TrayEvent / build_menu / MockTray + 10 契约测试 |
+| T2.2 | Windows 实现适配 trait | ⚠️ **契约对齐，运行时切换留 v0.8**——Windows 主路径（handover/supervision/job）保持现有 run_ui 驱动零回归；trait 形状已与 Action/menu_entries 一一对应，v0.8 与 AUR 同版切换 |
+| T2.3 | Linux zbus SNI 实现 | ✅ `linux/tray.rs`（ksni 0.3 blocking）：IconPixmap 程序化圆点 / dbusmenu 菜单（activate 经 mpsc 投递）/ 状态刷新 / 无 session bus 返回 Unavailable（main 降级退出） |
+| T2.4 | 平台化其余 | ✅ `linux/single_instance.rs`（pid 锁 + /proc 存活检查，防 KDE 双图标）；⚠️ PDEATHSIG/abstract socket/PortGuard **不做**——Linux 代理是独立服务（CLI/systemd），tray 经 CLI 启停 + 新进程组，无子进程句柄即无孤儿问题（比 Windows Job Object 更标准） |
+| T2.5 | 契约测试三实现全跑 | ✅ mock（本机 50 tests）+ linux 单元测试（CI ubuntu）+ windows 现有测试套件（CI windows）；L0 无头 DBus 断言归 M4 T4.1 |
 
 ### M3 — 打包与发布
 
@@ -176,8 +176,10 @@ flowchart TB
 
 Windows 发布流程保持现状（release.yml），Linux 发布并入同一工作流（矩阵 job）。
 
-## 9. 开放问题（需用户拍板）
+## 9. 开放问题（已拍板，2026-10-15）
 
-1. 发布节奏：接受 v0.7.0（CLI 先行）/ v0.8.0（tray 完整）两版，还是一次到位（M0-M4 连续实施后一次发布）？
-2. L1 呈现验收的 KDE 环境来源：用户自备虚拟机 / 本仓库 CI 自建？（本机 Windows 无法直接跑 KDE）
-3. AUR 包名：`ccproxy`（源码）+ `ccproxy-bin`（预编译）两个变体是否都要？
+1. **发布节奏** ✅：分两版——v0.7.0（CLI 先行：deb + AppImage）/ v0.8.0（tray 完整 + AUR）；semver：bug→patch、feat→minor、架构→major。
+2. **L1 呈现验收 KDE 环境** ✅：用户自备 KDE（有）；**自主截图验证脚本**（最大化解放人工）；**XFCE 不单独验收**（同协议，L0 已覆盖）；**GNOME 不验收**（文档化降级——AppIndicator 扩展随 GNOME 46/48 大版本失效：Red Hat bugzilla 2268403、openSUSE 论坛）。
+3. **AUR 包** ✅：只出 **`commandcode-proxy-bin` 预编译**（不碰内核无需重编译；无 Arch 账号先本地 makepkg 验证，注册后推送）。
+4. **对外发布名** ✅：`commandcode-proxy`（描述型利于搜索；内部 crate 名 ccproxy 保留，打包层重命名）。
+5. **分支模型** ✅：main = 发布主线（release 走主分支），dev = 开发分支；标准发布流程。
