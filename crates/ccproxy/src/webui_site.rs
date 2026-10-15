@@ -149,9 +149,18 @@ mod tests {
 
     #[test]
     fn content_type_is_keyed_by_extension() {
-        assert_eq!(content_type(Path::new("index.html")), "text/html; charset=utf-8");
-        assert_eq!(content_type(Path::new("tokens.css")), "text/css; charset=utf-8");
-        assert_eq!(content_type(Path::new("stats.js")), "text/javascript; charset=utf-8");
+        assert_eq!(
+            content_type(Path::new("index.html")),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            content_type(Path::new("tokens.css")),
+            "text/css; charset=utf-8"
+        );
+        assert_eq!(
+            content_type(Path::new("stats.js")),
+            "text/javascript; charset=utf-8"
+        );
         assert_eq!(content_type(Path::new("icon.svg")), "image/svg+xml");
         assert_eq!(
             content_type(Path::new("unknown.xyz")),
@@ -161,10 +170,7 @@ mod tests {
 
     #[test]
     fn referenced_files_lists_every_asset() {
-        let dir = std::env::temp_dir().join(format!(
-            "ccproxy-site-refs-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("ccproxy-site-refs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("css")).unwrap();
         std::fs::create_dir_all(dir.join("js")).unwrap();

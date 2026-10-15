@@ -49,7 +49,12 @@ fn serve_static(req: Request, url_path: &str) {
         Ok(p) => p,
         Err(e) => {
             crate::log::warn(&format!("WebUI: 拒绝路径 {url_path}: {e}"));
-            respond(req, 400, format!("Bad path: {url_path}"), "text/plain; charset=utf-8");
+            respond(
+                req,
+                400,
+                format!("Bad path: {url_path}"),
+                "text/plain; charset=utf-8",
+            );
             return;
         }
     };
@@ -57,7 +62,12 @@ fn serve_static(req: Request, url_path: &str) {
         Ok(b) => b,
         Err(e) => {
             crate::log::warn(&format!("WebUI: 无法读取 {}: {e}", path.display()));
-            respond(req, 404, format!("Not found: {url_path}"), "text/plain; charset=utf-8");
+            respond(
+                req,
+                404,
+                format!("Not found: {url_path}"),
+                "text/plain; charset=utf-8",
+            );
             return;
         }
     };
@@ -1180,8 +1190,30 @@ mod tests {
         let day_before = crate::time::iso8601_secs(now - 2 * 86_400);
         let yesterday = crate::time::iso8601_secs(now - 86_400);
         let conn = ledger(&[
-            (day_before.as_str(), "openai", "gpt-4o", "ok", 100, 0, 0, 100, 1, 0),
-            (yesterday.as_str(), "openai", "gpt-4o", "ok", 50, 10, 0, 100, 1, 0),
+            (
+                day_before.as_str(),
+                "openai",
+                "gpt-4o",
+                "ok",
+                100,
+                0,
+                0,
+                100,
+                1,
+                0,
+            ),
+            (
+                yesterday.as_str(),
+                "openai",
+                "gpt-4o",
+                "ok",
+                50,
+                10,
+                0,
+                100,
+                1,
+                0,
+            ),
         ]);
         let s = stats_json(&conn, 14);
         let trend = s["trend"].as_array().unwrap();
@@ -1190,14 +1222,8 @@ mod tests {
         assert_eq!(trend.len(), 14);
         let date_before = &day_before[..10];
         let date_y = &yesterday[..10];
-        let i15 = trend
-            .iter()
-            .position(|d| d["date"] == date_before)
-            .unwrap();
-        let i16 = trend
-            .iter()
-            .position(|d| d["date"] == date_y)
-            .unwrap();
+        let i15 = trend.iter().position(|d| d["date"] == date_before).unwrap();
+        let i16 = trend.iter().position(|d| d["date"] == date_y).unwrap();
         assert_eq!(i15 + 1, i16);
         assert_eq!(trend[i16]["attempts"], 1);
         assert_eq!(trend[i16]["prompt"], 50);
