@@ -532,8 +532,9 @@ fn linux_main() {
     );
 
     let mut tray = linux::tray::LinuxTray::new(status, menu, tooltip);
+    let log_cb = std::sync::Arc::clone(&log);
     let _ = tray.start(Box::new(move |event| {
-        linux_dispatch(event, &proxy, port, &log);
+        linux_dispatch(event, &proxy, port, &log_cb);
     }));
     log.append("[tray] 退出");
 }
