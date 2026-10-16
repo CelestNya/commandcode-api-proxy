@@ -287,7 +287,8 @@ pub unsafe extern "system" fn wnd_proc(
                 let event = u32::try_from(lparam).unwrap_or(0);
                 match event {
                     WM_RBUTTONUP => state.show_menu(hwnd),
-                    WM_LBUTTONDBLCLK => state.record(Action::OpenLog),
+                    // 双击弹 WebUI（UX 0.7.0：日志文件淡出用户视野，打开日志走菜单/日志屏）
+                    WM_LBUTTONDBLCLK => state.record(Action::OpenWebUi),
                     _ => {}
                 }
             }
