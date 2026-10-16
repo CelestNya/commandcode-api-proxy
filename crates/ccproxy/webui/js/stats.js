@@ -35,24 +35,6 @@ function renderSummary(s) {
            '<div class="mvalue">' + c.value + '</div><div class="msub">' + c.sub + '</div></div>';
   }).join("");
 
-
-  renderModels(s.models || []);
-  var sts = [
-    { k: "ok", v: t.ok || 0, c: "var(--ok)" },
-    { k: "error", v: t.error || 0, c: "var(--error)" },
-    { k: "aborted", v: t.aborted || 0, c: "var(--aborted)" },
-    { k: "interrupted", v: t.interrupted || 0, c: "var(--interrupted)" }
-  ];
-  sts.sort(function (a, b) { return b.v - a.v; }); /* biggest first */
-  var tot = t.attempts || 0;
-  el("status-summary").textContent = fmtNum(tot) + " 次尝试";
-  el("status-bars").innerHTML = sts.map(function (st) {
-    var pct = tot > 0 ? (st.v / tot * 100) : 0;
-    return '<div class="status-bar-row"><div class="sbr-head"><b>' + st.k + '</b>' +
-      '<span>' + fmtNum(st.v) + ' · ' + pct.toFixed(1) + '%</span></div>' +
-      '<div class="sbr-track"><div class="sbr-fill" style="width:' + pct.toFixed(1) + '%;background:' + st.c + '"></div></div></div>';
-  }).join("");
-
   /* top-bar consumption chip follows the selected window (the money number
      the user is looking at) */
   el("chip-cost").textContent = fmtUsd(w.costUsd != null ? w.costUsd : t.costUsd);
@@ -104,7 +86,7 @@ function renderTrend(raw, animate) {
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   var pw = W - ML - MR, ph = H - MT - MB;
   if (!trend.length) {
-    svg.innerHTML = '<text x="' + (W / 2) + '" y="150" fill="var(--muted)" font-size="13" text-anchor="middle">暂无数据</text>';
+    svg.innerHTML = '<text x="' + (W / 2) + '" y="150" fill="var(--muted)" font-size="13" text-anchor="middle">所选时段内暂无请求</text>';
     return;
   }
   var maxTok = 0, maxCost = 0;
@@ -251,35 +233,4 @@ function renderTrend(raw, animate) {
   } else {
     svg.classList.remove("trend-animate");
   }
-}
-
-function renderModels(models) {
-  el("model-count").textContent = models.length + " 个模型";
-  var tot = 0;
-  models.forEach(function (m) { tot += m.tokens || 0; });
-  el("model-table").innerHTML = models.map(function (m, i) {
-    return '<tr><td title="' + esc(m.model) + '">' + esc(m.model) + '</td>' +
-      '<td>' + fmtNum(m.attempts) + '</td><td>' + fmtTokens(m.tokens) + '</td>' +
-      '<td>' + fmtUsd(m.costUsd) + '</td></tr>';
-  }).join("") || '<tr><td colspan="4" class="muted">暂无数据</td></tr>';
-  var svg = el("model-donut");
-  var C = 2 * Math.PI * 62;
-  if (!tot) {
-    svg.innerHTML = '<text x="100" y="104" fill="var(--muted)" font-size="13" text-anchor="middle">暂无数据</text>';
-    return;
-  }
-  var out = '<circle cx="100" cy="100" r="62" fill="none" stroke="var(--surface-variant)" stroke-width="26"/>';
-  var acc = 0;
-  models.forEach(function (m, i) {
-    var frac = (m.tokens || 0) / tot;
-    var dash = frac * C - 2;
-    if (dash < 0.5) dash = 0;
-    out += '<circle cx="100" cy="100" r="62" fill="none" stroke="' + PALETTE[i % PALETTE.length] + '" stroke-width="26" ' +
-      'stroke-dasharray="' + dash.toFixed(2) + ' ' + (C - dash).toFixed(2) + '" stroke-dashoffset="' + (-acc * C).toFixed(2) + '" ' +
-      'transform="rotate(-90 100 100)"/>';
-    acc += frac;
-  });
-  out += '<text x="100" y="97" fill="var(--text)" font-size="20" font-weight="650" text-anchor="middle">' + fmtTokens(tot) + '</text>' +
-    '<text x="100" y="116" fill="var(--muted)" font-size="11" text-anchor="middle">累计 Token</text>';
-  svg.innerHTML = out;
 }

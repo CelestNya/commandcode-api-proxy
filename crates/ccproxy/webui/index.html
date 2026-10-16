@@ -70,30 +70,12 @@
               <input type="datetime-local" id="w-from" title="起始时间">
               <input type="datetime-local" id="w-to" title="结束时间">
               <button id="w-apply" class="btn-mini">应用</button>
+              <span class="win-range" id="window-range"></span>
             </span>
           </h2>
           <div class="trend-chart">
             <div class="legend" id="trend-legend"></div>
             <svg id="trend-chart" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
-          </div>
-        </div>
-
-        <div class="ov-row">
-          <div class="panel">
-            <h2>模型分布 <span class="extra" id="model-count"></span></h2>
-            <div class="model-layout">
-              <svg id="model-donut" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet"></svg>
-              <div>
-                <table class="model-table">
-                  <thead><tr><th>模型</th><th>请求</th><th>Token</th><th>费用</th></tr></thead>
-                  <tbody id="model-table"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-          <div class="panel">
-            <h2>状态分布 <span class="extra" id="status-summary"></span></h2>
-            <div id="status-bars"></div>
           </div>
         </div>
       </section>

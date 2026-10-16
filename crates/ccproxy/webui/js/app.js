@@ -28,8 +28,35 @@ function startDataPolling() {
 /* ── overview window picker (independent from the details one, R1) ── */
 function isoNow() { return new Date().toISOString().slice(0, 19); }
 function isoAgo(hours) { return new Date(Date.now() - hours * 3600 * 1000).toISOString().slice(0, 19); }
+
+/* state.window stores second-granular UTC ISO (no Z); the datetime-local
+   inputs are local wall time. Convert both ways when syncing the picker. */
+function dtLocalFromIso(iso) {
+  var d = new Date(iso.indexOf("Z") >= 0 ? iso : iso + "Z");
+  function p(x) { return (x < 10 ? "0" : "") + x; }
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+         "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+function rangeText(from, to) {
+  function short(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso.indexOf("Z") >= 0 ? iso : iso + "Z");
+    function p(x) { return (x < 10 ? "0" : "") + x; }
+    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+  return from && to ? short(from) + " ~ " + short(to) : "";
+}
+
+/* Sync the two inputs + the range label to `state.window`, then refetch. */
+function syncWindowPickerUI() {
+  var w = state.window;
+  el("w-from").value = w && w.from ? dtLocalFromIso(w.from) : "";
+  el("w-to").value = w && w.to ? dtLocalFromIso(w.to) : "";
+  el("window-range").textContent = rangeText(w && w.from, w && w.to);
+}
 function setOverviewWindow(from, to) {
   state.window = { from: from, to: to };
+  syncWindowPickerUI();
   fetchStats(true);
 }
 function wireWindowPicker() {
@@ -43,7 +70,7 @@ function wireWindowPicker() {
   });
   el("w-apply").addEventListener("click", function () {
     var f = el("w-from").value, t = el("w-to").value;
-    if (!f && !t) return;
+    if (!f && !t) { syncWindowPickerUI(); return; } /* empty custom range → show what's active */
     /* datetime-local is local wall time; convert to second-granular UTC ISO
        (the backend adds the right-closed boundary suffix itself). */
     var from = f ? new Date(f).toISOString().slice(0, 19) : null;
@@ -54,14 +81,20 @@ function wireWindowPicker() {
 }
 
 /* ── details window (independent state, R1) ── */
+function syncAttemptsWindowUI() {
+  var w = state.aWindow;
+  el("a-from").value = w && w.from ? dtLocalFromIso(w.from) : "";
+  el("a-to").value = w && w.to ? dtLocalFromIso(w.to) : "";
+}
 function wireAttemptsWindow() {
   el("a-apply").addEventListener("click", function () {
     var f = el("a-from").value, t = el("a-to").value;
-    if (!f && !t) return;
+    if (!f && !t) { syncAttemptsWindowUI(); return; } /* empty → show what's active */
     state.aWindow = {
       from: f ? new Date(f).toISOString().slice(0, 19) : null,
       to: t ? new Date(t).toISOString().slice(0, 19) : null
     };
+    syncAttemptsWindowUI();
     state.page = 1;
     fetchAttempts();
     fetchStats(false);
@@ -72,6 +105,10 @@ document.addEventListener("DOMContentLoaded", function () {
   route();
   wireWindowPicker();
   wireAttemptsWindow();
+  /* Default window (24h) matches the backend's DEFAULT_WINDOW_HOURS; sync the
+     picker inputs + range label so the selector looks done from first paint. */
+  if (!state.window.from) { state.window = { from: isoAgo(24), to: isoNow() }; }
+  syncWindowPickerUI();
   ["f-model", "f-stream", "f-status"].forEach(function (id) {
     el(id).addEventListener("change", function () {
       state.filters[id.replace("f-", "")] = el(id).value;
