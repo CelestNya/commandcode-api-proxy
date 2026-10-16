@@ -10,6 +10,24 @@ function renderStats(s, animate) {
   renderTrend(s.trend || [], animate === true);
 }
 
+/* Cost axis ticks: no trailing zeros and a stable digit count, so the right
+   scale reads "$1 / $0.75 / $0.5 / $0" instead of mixing $1.00 with $0.7500.
+   Cards keep the richer fmtUsd; this is axis-only. */
+function fmtTickUsd(v) {
+  if (v == null || isNaN(v)) return "";
+  if (v >= 1) return "$" + v.toFixed(2);
+  var r = Math.round(v * 1000) / 1000;
+  return "$" + String(r);
+}
+/* X-axis ticks: daily buckets are "10-16", hourly buckets drop the raw ISO
+   "T" and read "10-16 15:00" — the machine stamp never reaches the axis. */
+function fmtTickDate(s) {
+  if (!s) return "";
+  var i = s.indexOf("T");
+  if (i < 0) return s.slice(5);
+  return s.slice(5, i) + " " + s.slice(i + 1, 16);
+}
+
 /* Everything in the overview except the trend chart. The live stream calls
    this on every snapshot regardless of the selected window — lifetime
    numbers are window-independent; the window cards follow the picker. */
@@ -21,13 +39,17 @@ function renderSummary(s) {
   var tTok = (t.promptTokens || 0) + (t.completionTokens || 0);
   var wTok = (w.promptTokens || 0) + (w.completionTokens || 0);
   var fail = (t.error || 0) + (t.aborted || 0) + (t.interrupted || 0);
+  /* Cache hit rate is the health signal this panel exists for: colour the
+     value by threshold so a drop is visible at a glance (掉缓存诊断口径). */
+  var hr = w.hitRate;
+  var hrCls = hr == null ? "" : hr >= 0.8 ? " ok" : hr >= 0.5 ? "" : hr > 0 ? " warn" : " err";
 
   var cards = [
     { label: "窗口请求", value: fmtNum(w.attempts), sub: "总计: " + fmtNum(t.attempts), cls: "" },
     { label: "窗口 Token", value: fmtTokens(wTok), sub: "输入 " + fmtTokens(w.promptTokens) + "（含缓存 " + fmtTokens(w.cachedTokens) + "）/ 输出 " + fmtTokens(w.completionTokens), cls: "" },
     { label: "累计 Token", value: fmtTokens(tTok), sub: "输入 " + fmtTokens(t.promptTokens) + "（含缓存 " + fmtTokens(t.cachedTokens) + "）/ 输出 " + fmtTokens(t.completionTokens), cls: "accent" },
     { label: "费用", value: fmtUsd(w.costUsd), sub: "终身 " + fmtUsd(t.costUsd), cls: "accent" },
-    { label: "缓存命中率", value: fmtPct(w.hitRate), sub: "窗口内命中 / 输入", cls: "" },
+    { label: "缓存命中率", value: fmtPct(w.hitRate), sub: "窗口内命中 / 输入", cls: hrCls },
     { label: "总尝试", value: fmtNum(t.attempts), sub: "成功 " + fmtNum(t.ok) + " / 失败 " + fmtNum(fail), cls: "" }
   ];
   el("metric-cards").innerHTML = cards.map(function (c) {
@@ -86,7 +108,16 @@ function renderTrend(raw, animate) {
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
   var pw = W - ML - MR, ph = H - MT - MB;
   if (!trend.length) {
-    svg.innerHTML = '<text x="' + (W / 2) + '" y="150" fill="var(--muted)" font-size="13" text-anchor="middle">所选时段内暂无请求</text>';
+    svg.innerHTML =
+      '<g stroke="var(--outline-variant)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M' + (W / 2 - 100) + ' 152 L' + (W / 2 - 55) + ' 152 L' + (W / 2 - 10) + ' 128 L' + (W / 2 + 35) + ' 176 L' + (W / 2 + 80) + ' 176"/>' +
+      '<circle cx="' + (W / 2 - 100) + '" cy="152" r="2.4" fill="var(--bg)"/>' +
+      '<circle cx="' + (W / 2 - 55) + '" cy="152" r="2.4" fill="var(--bg)"/>' +
+      '<circle cx="' + (W / 2 - 10) + '" cy="128" r="2.4" fill="var(--bg)"/>' +
+      '<circle cx="' + (W / 2 + 35) + '" cy="176" r="2.4" fill="var(--bg)"/>' +
+      '<circle cx="' + (W / 2 + 80) + '" cy="176" r="2.4" fill="var(--bg)"/>' +
+      '</g>' +
+      '<text x="' + (W / 2) + '" y="200" fill="var(--muted)" font-size="13" text-anchor="middle">所选时段内暂无请求</text>';
     return;
   }
   var maxTok = 0, maxCost = 0;
@@ -110,12 +141,12 @@ function renderTrend(raw, animate) {
   for (var p = 0; p <= 4; p++) {
     var py = MT + ph * p / 4;
     var cv = maxCost * (1 - p / 4);
-    out += '<text x="' + (W - MR + 8) + '" y="' + (py + 4) + '" fill="var(--chart-6)" font-size="10">' + fmtUsd(cv) + '</text>';
+    out += '<text x="' + (W - MR + 8) + '" y="' + (py + 4) + '" fill="var(--muted)" font-size="10">' + fmtTickUsd(cv) + '</text>';
   }
   var step = Math.max(1, Math.ceil(trend.length / 8));
   trend.forEach(function (d, i) {
     if (i % step !== 0 && i !== trend.length - 1) return;
-    out += '<text x="' + x(i) + '" y="' + (H - 14) + '" fill="var(--muted)" font-size="10" text-anchor="middle">' + d.date.slice(5) + '</text>';
+    out += '<text x="' + x(i) + '" y="' + (H - 14) + '" fill="var(--muted)" font-size="10" text-anchor="middle">' + fmtTickDate(d.date) + '</text>';
   });
   function pts(key, yfn) {
     var arr = [];

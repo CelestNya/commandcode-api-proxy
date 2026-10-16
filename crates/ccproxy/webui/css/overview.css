@@ -3,7 +3,7 @@
  * 指标卡、面板容器、模型分布表、Token 趋势图与入场动画。
  */
 
-.metric-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.metric-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .mcard {
   background: var(--surface); border: 1px solid var(--outline-variant); border-radius: var(--radius-panel);
   padding: 14px 16px 12px; box-shadow: var(--shadow);
@@ -36,6 +36,7 @@
 .panel h2 .extra a.active {
   color: var(--on-primary-container); background: var(--primary-container);
   border-color: transparent; font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(138, 180, 248, .35);
 }
 /* window picker: preset pills + two local-time fields + apply */
 .window-picker { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
