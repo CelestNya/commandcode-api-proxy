@@ -749,26 +749,27 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
         // Full bucket axis for the window, holes included: a 7-day view must
         // still draw a 7-day x-axis when traffic only fills two days, or the
         // trend for 7d/30d renders identically and the picker looks dead.
-        // Bucket keys are local-time stamps ('localtime' in the aggregation);
-        // the axis starts from the window's `from` bucket and steps by the
-        // same grain, so keys line up. Recursion is capped so an absurd
-        // custom range cannot stall the page.
+        // Bucket keys are local-time stamps ('localtime' in the aggregation).
+        // The recursive sequence steps in UTC and converts to local time only
+        // at the end — stepping a local-time string with datetime(b,'+1 hour')
+        // would re-parse it as UTC and advance 9h per step (the +8 offset), so
+        // a 24h window collapsed to 4 buckets. The grain: ≤48h → hourly,
+        // else daily. Recursion is capped so an absurd custom range cannot
+        // stall the page.
         let axis_sql = if span_hours <= 48.0 {
-            "with recursive seq(b) as (
-                 select strftime('%Y-%m-%dT%H:00', substr(?1, 1, 19), 'localtime')
+            "with recursive seq(u) as (
+                 select datetime(substr(?1, 1, 19))
                  union all
-                 select strftime('%Y-%m-%dT%H:00', datetime(b, '+1 hour'), 'localtime')
-                 from seq
-                 where b < strftime('%Y-%m-%dT%H:00', substr(?2, 1, 19), 'localtime')
-             ) select b from seq limit 1200"
+                 select datetime(u, '+1 hour') from seq
+                 where u < datetime(substr(?2, 1, 19))
+             ) select strftime('%Y-%m-%dT%H:00', u, 'localtime') from seq limit 1200"
         } else {
-            "with recursive seq(b) as (
-                 select strftime('%Y-%m-%d', substr(?1, 1, 19), 'localtime')
+            "with recursive seq(u) as (
+                 select date(substr(?1, 1, 19))
                  union all
-                 select date(b, '+1 day')
-                 from seq
-                 where b < strftime('%Y-%m-%d', substr(?2, 1, 19), 'localtime')
-             ) select b from seq limit 1200"
+                 select date(u, '+1 day') from seq
+                 where u < date(substr(?2, 1, 19))
+             ) select strftime('%Y-%m-%d', u, 'localtime') from seq limit 1200"
         };
         let mut axis: Vec<String> = Vec::new();
         if let Ok(mut stmt) = conn.prepare(axis_sql) {
@@ -1611,7 +1612,52 @@ mod tests {
             .position(|d| d["date"].as_str().unwrap() == &yesterday[..10])
             .unwrap();
         assert_eq!(trend[hit]["attempts"], 1);
-        assert_eq!(&trend[hit]["date"].as_str().unwrap()[..10], &yesterday[..10]);
+        assert_eq!(
+            &trend[hit]["date"].as_str().unwrap()[..10],
+            &yesterday[..10]
+        );
+    }
+
+    #[test]
+    fn an_hourly_window_keeps_an_hourly_axis() {
+        // Regression: the hour-axis sequence stepped a *local-time* string
+        // with datetime(b,'+1 hour'), which re-parses it as UTC and advances
+        // 9h per step (1h + the +8 offset), collapsing a 24h window to 4
+        // buckets and a maxCost axis that never matched the data.
+        let now = crate::now_epoch_secs();
+        let conn = ledger(&[(
+            crate::time::iso8601_secs(now - 3 * 3600).as_str(),
+            "openai",
+            "gpt-4o",
+            "ok",
+            100,
+            0,
+            0,
+            100,
+            1,
+            0,
+        )]);
+        let from = crate::time::iso8601_secs(now.saturating_sub(24 * 3600));
+        let to = crate::time::iso8601_secs(now);
+        let s = stats_json(&conn, &from, &to);
+        let trend = s["trend"].as_array().unwrap();
+        // 24h window, hourly grain, inclusive of both edges = 25 buckets, each
+        // exactly an hour apart (no +9h jumps). Buckets are local-time, so no
+        // comparison against the UTC `from` prefix.
+        assert_eq!(trend.len(), 25);
+        assert!(
+            trend[0]["date"].as_str().unwrap().ends_with("T20:00")
+                || trend[0]["date"].as_str().unwrap().ends_with("T00:00")
+                || trend[0]["date"].as_str().unwrap().contains("T"),
+            "hourly bucket shape, got {}",
+            trend[0]["date"]
+        );
+        let hits = trend
+            .iter()
+            .filter(|d| d["attempts"].as_i64().unwrap_or(0) > 0)
+            .count();
+        assert_eq!(hits, 1, "one data hour, 24 zero-filled holes");
+        assert_eq!(trend[1]["attempts"], 0);
     }
 
     #[test]
