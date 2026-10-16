@@ -21,22 +21,57 @@ function startDataPolling() {
     if (document.hidden) return;
     var view = currentView();
     if (view === "stats") fetchStats(false);
-    else if (view === "attempts") fetchAttempts();
+    else if (view === "attempts") { fetchAttempts(); fetchStats(false); } /* mini cards follow the window too */
   }, 1000);
+}
+
+/* ── overview window picker (independent from the details one, R1) ── */
+function isoNow() { return new Date().toISOString().slice(0, 19); }
+function isoAgo(hours) { return new Date(Date.now() - hours * 3600 * 1000).toISOString().slice(0, 19); }
+function setOverviewWindow(from, to) {
+  state.window = { from: from, to: to };
+  fetchStats(true);
+}
+function wireWindowPicker() {
+  document.querySelectorAll(".window-picker a[data-h]").forEach(function (a) {
+    a.addEventListener("click", function () {
+      var h = Number(a.getAttribute("data-h"));
+      document.querySelectorAll(".window-picker a[data-h]").forEach(function (x) { x.classList.remove("active"); });
+      a.classList.add("active");
+      setOverviewWindow(isoAgo(h), isoNow());
+    });
+  });
+  el("w-apply").addEventListener("click", function () {
+    var f = el("w-from").value, t = el("w-to").value;
+    if (!f && !t) return;
+    /* datetime-local is local wall time; convert to second-granular UTC ISO
+       (the backend adds the right-closed boundary suffix itself). */
+    var from = f ? new Date(f).toISOString().slice(0, 19) : null;
+    var to = t ? new Date(t).toISOString().slice(0, 19) : null;
+    document.querySelectorAll(".window-picker a[data-h]").forEach(function (x) { x.classList.remove("active"); });
+    setOverviewWindow(from, to);
+  });
+}
+
+/* ── details window (independent state, R1) ── */
+function wireAttemptsWindow() {
+  el("a-apply").addEventListener("click", function () {
+    var f = el("a-from").value, t = el("a-to").value;
+    if (!f && !t) return;
+    state.aWindow = {
+      from: f ? new Date(f).toISOString().slice(0, 19) : null,
+      to: t ? new Date(t).toISOString().slice(0, 19) : null
+    };
+    state.page = 1;
+    fetchAttempts();
+    fetchStats(false);
+  });
 }
 
 document.addEventListener("DOMContentLoaded", function () {
   route();
-  el("days-7").addEventListener("click", function () { setDays(7); });
-  el("days-14").addEventListener("click", function () { setDays(14); });
-  el("days-30").addEventListener("click", function () { setDays(30); });
-  function setDays(n) {
-    state.days = n;
-    [7, 14, 30].forEach(function (d) { el("days-" + d).classList.toggle("active", d === n); });
-    // A deliberate window change is worth the draw-in; the live poll's
-    // once-a-second refresh is not (see renderTrend).
-    fetchStats(true);
-  }
+  wireWindowPicker();
+  wireAttemptsWindow();
   ["f-model", "f-stream", "f-status"].forEach(function (id) {
     el(id).addEventListener("change", function () {
       state.filters[id.replace("f-", "")] = el(id).value;
@@ -52,11 +87,27 @@ document.addEventListener("DOMContentLoaded", function () {
   });
   el("btn-refresh").addEventListener("click", function () { fetchAttempts(); fetchStats(); });
 
+  el("drawer-close").addEventListener("click", closeDrawer);
+  el("req-drawer").addEventListener("click", function (e) {
+    if (e.target === el("req-drawer") || e.target.id === "drawer-close") closeDrawer();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !el("req-drawer").hidden) closeDrawer();
+  });
+
   /* Log screen: switching file restarts the follow loop; a manual scroll away
      from the bottom suspends auto-scroll, scrolling back re-arms it. */
   el("log-which").addEventListener("change", function () {
     logState.which = el("log-which").value;
     startLogPolling();
+  });
+  document.querySelectorAll(".lvl-filter input[data-lvl]").forEach(function (cb) {
+    cb.addEventListener("change", function () {
+      logState.levels[cb.getAttribute("data-lvl")] = cb.checked;
+      /* Re-paint from the file so the filter applies to already-rendered
+         lines too; the follow loop resumes from the fresh anchor. */
+      startLogPolling();
+    });
   });
   el("log-refresh").addEventListener("click", function () { startLogPolling(); });
   el("log-autoscroll").addEventListener("click", function () {

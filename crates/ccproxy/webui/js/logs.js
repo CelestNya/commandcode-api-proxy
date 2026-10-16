@@ -9,7 +9,12 @@
  */
 
 /* ── log screen ── */
-var logState = { which: "proxy", pollTimer: null, autoScroll: true, len: 0, inFlight: false };
+var logState = { which: "proxy", pollTimer: null, autoScroll: true, len: 0, inFlight: false,
+  levels: { DEBUG: true, INFO: true, WARN: true, ERROR: true } };
+/* Keep the DOM bounded: the page never pages old logs (users open the file
+   themselves), and an unbounded pane degrades into the jank this screen
+   exists to avoid. 2000 rendered lines is a comfortable ceiling. */
+var LOG_DOM_MAX = 2000;
 
 function logLevel(line) {
   if (line.indexOf("[ERROR]") >= 0) return "lv-error";
@@ -17,6 +22,16 @@ function logLevel(line) {
   if (line.indexOf("[INFO]") >= 0) return "lv-info";
   if (line.indexOf("[DEBUG]") >= 0) return "lv-debug";
   return "lv-other";
+}
+function logLevelKey(line) {
+  if (line.indexOf("[ERROR]") >= 0) return "ERROR";
+  if (line.indexOf("[WARN]") >= 0) return "WARN";
+  if (line.indexOf("[INFO]") >= 0) return "INFO";
+  if (line.indexOf("[DEBUG]") >= 0) return "DEBUG";
+  return "OTHER";
+}
+function logShown(line) {
+  return logState.levels[logLevelKey(line)] !== false;
 }
 
 function logLineHtml(line) {
@@ -26,6 +41,12 @@ function logLineHtml(line) {
   var head = m ? '<span class="ts">' + esc(m[1]) + "</span>" + esc(m[2]) : "";
   var body = m ? m[3] : line;
   return '<span class="ln ' + logLevel(line) + '">' + head + esc(body) + "</span>";
+}
+
+function trimLogDom(pane) {
+  while (pane.childElementCount > LOG_DOM_MAX) {
+    pane.removeChild(pane.firstElementChild);
+  }
 }
 
 function setFollowChip(on, text) {
@@ -56,9 +77,10 @@ function renderLog(d, full) {
   if (full || d.reset) {
     /* Full paint: first entry, the file switch, or a rotation that shrank the
        file under the client's offset. Rebuild once, then re-anchor. */
-    var lines = (d.lines || "").split("\n").filter(function (l) { return l !== ""; });
+    var lines = (d.lines || "").split("\n").filter(function (l) { return l !== "" && logShown(l); });
     pane.innerHTML = lines.map(logLineHtml).join("\n");
     logState.len = d.len || 0;
+    trimLogDom(pane);
     if (logState.autoScroll) scrollLogToBottom();
     setFollowChip(true, "实时");
     return;
@@ -71,8 +93,12 @@ function renderLog(d, full) {
   }
   if (d.lines) {
     var atBottom = logState.autoScroll;
-    pane.insertAdjacentHTML("beforeend",
-      d.lines.split("\n").filter(function (l) { return l !== ""; }).map(logLineHtml).join("\n"));
+    var add = d.lines.split("\n").filter(function (l) { return l !== "" && logShown(l); })
+      .map(logLineHtml).join("\n");
+    if (add) {
+      pane.insertAdjacentHTML("beforeend", add);
+      trimLogDom(pane);
+    }
     if (atBottom) scrollLogToBottom();
   }
   logState.len = d.len;

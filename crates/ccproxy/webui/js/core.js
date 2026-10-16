@@ -4,7 +4,15 @@
  */
 
 "use strict";
-var state = { stats: null, attempts: [], days: 14, page: 1, pageSize: 50, daysFetchAt: 0, filters: { model: "", stream: "", status: "" } };
+var state = {
+  stats: null, attempts: [],
+  /* 概览与明细各自独立的时段（UX 0.7.0 R1：两个选择器不共用状态）。
+     from/to 为秒级 UTC ISO（`YYYY-MM-DDTHH:MM:SS`），后端负责右闭边界。 */
+  window: { from: null, to: null },
+  aWindow: { from: null, to: null },
+  page: 1, pageSize: 50,
+  filters: { model: "", stream: "", status: "" }
+};
 /* Chart series palette, expressed as CSS variables (see tokens.css): the first
    four slots map to the semantic status colours, the rest to dedicated chart
    hues. SVG presentation attributes accept `var(--…)`, so a theme change in

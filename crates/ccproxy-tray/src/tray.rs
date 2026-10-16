@@ -106,9 +106,9 @@ impl UiState {
 
     /// Store `self` in `hwnd`'s user-data slot and show the icon.
     ///
-    /// The state is leaked into the slot and reclaimed by [`detach`]; the
+    /// The state is leaked into the slot and reclaimed by [`Self::detach`]; the
     /// window outlives every use of the pointer, which is what makes the
-    /// `&'static` reborrow in [`state_of`] sound.
+    /// `&'static` reborrow in the `state_of` helper sound.
     pub fn attach(&self, hwnd: HWND) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_USERDATA};
         let raw = std::ptr::from_ref(self).cast::<std::ffi::c_void>();

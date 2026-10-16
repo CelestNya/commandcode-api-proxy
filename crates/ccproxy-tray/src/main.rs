@@ -369,9 +369,7 @@ fn handover_loop(
             // things about the port.) Stand down the same way a commit does —
             // stop the child, hand back the lock, let the UI loop end this
             // process — and the incumbent's rollback resumes cleanly.
-            log.warn(
-                "交接失败：未能在期限内提供可应答的 /health —— 回滚：停止本方代理，交还现任",
-            );
+            log.warn("交接失败：未能在期限内提供可应答的 /health —— 回滚：停止本方代理，交还现任");
             if let Ok(mut p) = proxy.lock() {
                 p.stop();
             }

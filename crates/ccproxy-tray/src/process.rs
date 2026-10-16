@@ -221,9 +221,8 @@ impl ProxyProcess {
                     // outlives this call.
                     let handle = std::os::windows::io::AsRawHandle::as_raw_handle(&child);
                     if !job.assign(handle.cast()) {
-                        self.log.warn(
-                            "[tray] 警告：挂入 Job Object 失败，托盘退出后可能留下孤儿进程",
-                        );
+                        self.log
+                            .warn("[tray] 警告：挂入 Job Object 失败，托盘退出后可能留下孤儿进程");
                     }
                 }
                 self.log

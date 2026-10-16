@@ -62,11 +62,14 @@
         <div class="panel" style="margin-top:12px">
           <h2>
             Token 使用趋势
-            <span class="extra">
-              <span style="color:var(--muted)">时间范围</span>
-              <a id="days-7" data-days="7">近7天</a>
-              <a id="days-14" class="active" data-days="14">近14天</a>
-              <a id="days-30" data-days="30">近30天</a>
+            <span class="extra window-picker">
+              <a data-h="1">近1小时</a>
+              <a data-h="24" class="active">24小时</a>
+              <a data-h="168">7天</a>
+              <a data-h="720">30天</a>
+              <input type="datetime-local" id="w-from" title="起始时间">
+              <input type="datetime-local" id="w-to" title="结束时间">
+              <button id="w-apply" class="btn-mini">应用</button>
             </span>
           </h2>
           <div class="trend-chart">
@@ -99,6 +102,10 @@
       <section class="view" id="view-attempts">
         <div class="mini-cards" id="mini-cards"></div>
         <div class="filterbar">
+          <label>时段</label>
+          <input type="datetime-local" id="a-from" title="起始时间">
+          <input type="datetime-local" id="a-to" title="结束时间">
+          <button id="a-apply" class="btn-mini">应用</button>
           <label>模型</label>
           <select id="f-model"><option value="">全部</option></select>
           <label>类型</label>
@@ -122,21 +129,25 @@
         <div class="table-wrap">
           <table>
             <colgroup>
-              <col style="width:4%"><col style="width:14%"><col style="width:15%">
-              <col style="width:7%"><col style="width:6%"><col style="width:8%">
-              <col style="width:15%"><col style="width:13%"><col style="width:14%"><col style="width:4%">
+              <col style="width:3%"><col style="width:12%"><col style="width:14%">
+              <col style="width:6%"><col style="width:5%"><col style="width:8%">
+              <col style="width:14%"><col style="width:8%"><col style="width:12%"><col style="width:13%"><col style="width:5%">
             </colgroup>
             <thead>
               <tr>
                 <th>#</th><th>请求 ID</th><th>模型</th>
                 <th>端点</th><th>类型</th><th>状态</th>
-                <th>TOKEN</th><th>延迟</th><th>时间</th><th>尝试</th>
+                <th>TOKEN</th><th>费用</th><th>延迟</th><th>时间</th><th>尝试</th>
               </tr>
             </thead>
             <tbody id="attempts-body"></tbody>
           </table>
           <div class="empty" id="attempts-empty" style="display:none">没有符合条件的记录</div>
           <div class="pager" id="pager"></div>
+        </div>
+        <div class="drawer" id="req-drawer" hidden>
+          <div class="drawer-head"><b>请求详情</b><button id="drawer-close" class="btn-mini">×</button></div>
+          <div id="drawer-body"></div>
         </div>
       </section>
 
@@ -148,6 +159,12 @@
             <option value="proxy">代理日志 proxy.log</option>
             <option value="tray">托盘日志 tray.log</option>
           </select>
+          <label class="lvl-filter">
+            <input type="checkbox" data-lvl="DEBUG" checked>DEBUG
+            <input type="checkbox" data-lvl="INFO" checked>INFO
+            <input type="checkbox" data-lvl="WARN" checked>WARN
+            <input type="checkbox" data-lvl="ERROR" checked>ERROR
+          </label>
           <span class="chip" id="log-follow-chip"><span class="dot"></span><b id="log-follow-text">连接中</b></span>
           <span class="fgrow"></span>
           <button id="log-autoscroll" class="active">自动滚动</button>

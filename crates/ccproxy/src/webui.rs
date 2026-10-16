@@ -518,7 +518,14 @@ fn parse_window(url: &str) -> (String, String) {
         }
     }
     let now = crate::time::now_epoch_secs();
-    let to = to.unwrap_or_else(|| crate::time::iso8601_secs(now));
+    let mut to = to.unwrap_or_else(|| crate::time::iso8601_secs(now));
+    // Right-closed boundary: a second-granular `to` must still admit rows
+    // whose ts carries millis on that same second (`..:20.789Z` > `..:20`).
+    // Appending "Z999" keeps every same-second row ≤ to ('Z' > '.') while
+    // excluding the next second ('0' < '1' at the seconds position).
+    if to.len() == 19 {
+        to.push_str("Z999");
+    }
     let from = from.unwrap_or_else(|| {
         crate::time::iso8601_secs(now.saturating_sub(DEFAULT_WINDOW_HOURS.saturating_mul(3600)))
     });
@@ -692,12 +699,8 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
                     // window selects the same rate, so a representative one is
                     // enough; minute 0 is off-peak.
                     let minute = if row.2 == 1 { 120 } else { 0 };
-                    let cost = pricing.cost_breakdown(
-                        &row.1, row.4, row.5, row.6, row.7, minute,
-                    );
-                    let entry = by_bucket
-                        .entry(row.0.clone())
-                        .or_default();
+                    let cost = pricing.cost_breakdown(&row.1, row.4, row.5, row.6, row.7, minute);
+                    let entry = by_bucket.entry(row.0.clone()).or_default();
                     entry.attempts = entry.attempts.saturating_add(row.3);
                     entry.prompt = entry.prompt.saturating_add(row.4);
                     entry.cached = entry.cached.saturating_add(row.5);
@@ -965,29 +968,26 @@ fn attempts_json(conn: &Connection, from_ts: &str, to_ts: &str, limit: i64) -> V
         Err(_) => return json!([]),
     };
     let rows = stmt
-        .query_map(
-            rusqlite::params![from_ts, to_ts, limit],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, bool>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
-                    row.get::<_, Option<i64>>(9)?,
-                    row.get::<_, Option<i64>>(10)?,
-                    row.get::<_, Option<i64>>(11)?,
-                    row.get::<_, Option<i64>>(12)?,
-                    row.get::<_, Option<i64>>(13)?,
-                    row.get::<_, Option<i64>>(14)?,
-                    row.get::<_, Option<String>>(15)?,
-                ))
-            },
-        )
+        .query_map(rusqlite::params![from_ts, to_ts, limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, bool>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, Option<i64>>(11)?,
+                row.get::<_, Option<i64>>(12)?,
+                row.get::<_, Option<i64>>(13)?,
+                row.get::<_, Option<i64>>(14)?,
+                row.get::<_, Option<String>>(15)?,
+            ))
+        })
         .ok();
 
     // reqId -> aggregated request (BTreeMap keeps insertion order; the SQL
@@ -1010,6 +1010,8 @@ fn attempts_json(conn: &Connection, from_ts: &str, to_ts: &str, limit: i64) -> V
         cost: crate::pricing::CostBreakdown,
         priced: bool,
         tools: Option<Vec<String>>,
+        /// One entry per attempt, ascending — the retry chain for the sidebar.
+        attempts_detail: Vec<Value>,
     }
     let mut by_req: std::collections::BTreeMap<String, Req> = std::collections::BTreeMap::new();
     if let Some(rows) = rows {
@@ -1032,8 +1034,17 @@ fn attempts_json(conn: &Connection, from_ts: &str, to_ts: &str, limit: i64) -> V
                 cost: crate::pricing::CostBreakdown::default(),
                 priced: false,
                 tools: None,
+                attempts_detail: Vec::new(),
             });
             entry.attempts = entry.attempts.saturating_add(1);
+            entry.attempts_detail.push(json!({
+                "attempt": r.5,
+                "ts": r.0,
+                "status": r.6,
+                "errorTag": r.7,
+                "durationMs": r.13,
+                "ttfbMs": r.14,
+            }));
             // The SQL orders attempts ascending, so the last row of a reqId is
             // its final attempt: that status/tag/latency is the request's.
             entry.ts = r.0.clone();
@@ -1057,12 +1068,20 @@ fn attempts_json(conn: &Connection, from_ts: &str, to_ts: &str, limit: i64) -> V
                 entry.reasoning = entry.reasoning.saturating_add(t);
             }
             if entry.tools.is_none() {
-                entry.tools = r.15.and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok());
+                entry.tools =
+                    r.15.and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok());
             }
             // Price this attempt at its own peak/off-peak period, so a
             // peak-hour row keeps its peak price however late the page opens.
             if let Some(minute) = crate::pricing::minute_of_day_from_iso8601(&r.0) {
-                if let Some(c) = pricing.cost_breakdown(&r.3, r.8.unwrap_or(0), r.9.unwrap_or(0), r.10.unwrap_or(0), r.11.unwrap_or(0), minute) {
+                if let Some(c) = pricing.cost_breakdown(
+                    &r.3,
+                    r.8.unwrap_or(0),
+                    r.9.unwrap_or(0),
+                    r.10.unwrap_or(0),
+                    r.11.unwrap_or(0),
+                    minute,
+                ) {
                     entry.cost.uncached += c.uncached;
                     entry.cost.cached += c.cached;
                     entry.cost.cache_creation += c.cache_creation;
@@ -1101,11 +1120,16 @@ fn attempts_json(conn: &Connection, from_ts: &str, to_ts: &str, limit: i64) -> V
                     "total": r.cost.total,
                 },
                 "tools": r.tools,
+                "attemptsDetail": r.attempts_detail,
             })
         })
         .collect();
     // Newest first by last activity.
-    out.sort_by(|a, b| b.get("ts").and_then(|v| v.as_str()).cmp(&a.get("ts").and_then(|v| v.as_str())));
+    out.sort_by(|a, b| {
+        b.get("ts")
+            .and_then(|v| v.as_str())
+            .cmp(&a.get("ts").and_then(|v| v.as_str()))
+    });
     json!(out)
 }
 
@@ -1243,7 +1267,16 @@ mod tests {
                                       reasoningTokens, durationMs)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, null, ?11)",
                 rusqlite::params![
-                    ts, format!("req-{i}"), model, wire, stream, attempt, status, prompt, cached, completion,
+                    ts,
+                    format!("req-{i}"),
+                    model,
+                    wire,
+                    stream,
+                    attempt,
+                    status,
+                    prompt,
+                    cached,
+                    completion,
                     duration
                 ],
             )
@@ -1453,7 +1486,7 @@ mod tests {
         assert_eq!(trend[i16]["completion"], 0);
         assert_eq!(trend[i16]["hitRate"], 10.0 / 50.0); // cached / prompt (prompt includes cached)
         assert_eq!(trend[i15]["hitRate"], 0.0); // cached 0 with prompt > 0 is a real 0% hit
-        // platform aggregation
+                                                // platform aggregation
         let platforms = s["platforms"].as_array().unwrap();
         assert_eq!(platforms.len(), 1);
         assert_eq!(platforms[0]["wire"], "openai");
@@ -1533,13 +1566,18 @@ mod tests {
         // No parameters: a 24h window ending now.
         let (from, to) = parse_window("/webui/api/stats");
         assert!(to > from, "to={to} from={from}");
-        // ISO-second shape, matching the ledger's own timestamps.
+        // ISO-second shape, matching the ledger's own timestamps. The default
+        // `to` is now also bounded right-closed ("Z999" suffix).
         assert_eq!(from.len(), 19, "from={from}");
-        assert_eq!(to.len(), 19, "to={to}");
-        // Explicit edges are used verbatim (lexicographic ISO comparison).
-        let (f2, t2) = parse_window("/webui/api/stats?from=2026-10-01T00:00:00&to=2026-10-02T00:00:00");
+        assert_eq!(to.len(), 23, "to={to}");
+        assert!(to.ends_with("Z999"), "to={to}");
+        // Explicit edges are used verbatim (lexicographic ISO comparison);
+        // a second-granular `to` gets the right-closed boundary suffix so
+        // same-second rows with millis are still included.
+        let (f2, t2) =
+            parse_window("/webui/api/stats?from=2026-10-01T00:00:00&to=2026-10-02T00:00:00");
         assert_eq!(f2, "2026-10-01T00:00:00");
-        assert_eq!(t2, "2026-10-02T00:00:00");
+        assert_eq!(t2, "2026-10-02T00:00:00Z999");
         // One edge missing falls back for that edge only.
         let (f3, t3) = parse_window("/webui/api/stats?from=2026-10-01T00:00:00");
         assert_eq!(f3, "2026-10-01T00:00:00");
@@ -1625,7 +1663,10 @@ mod tests {
             &crate::time::iso8601_secs(now - 5 * 86_400),
             &crate::time::iso8601_secs(now),
         );
-        assert_eq!(s["window"]["attempts"], 1, "only the newer row is in the 5-day window");
+        assert_eq!(
+            s["window"]["attempts"], 1,
+            "only the newer row is in the 5-day window"
+        );
         assert_eq!(s["window"]["promptTokens"], 10);
         // Lifetime totals still count everything.
         assert_eq!(s["totals"]["attempts"], 2);
@@ -1660,18 +1701,15 @@ mod tests {
             );",
         )
         .unwrap();
-        for (attempt, status, prompt, cached, completion, duration) in [
-            (1, "ok", 100, 50, 30, 500),
-            (2, "ok", 160, 100, 40, 700),
-        ] {
+        for (attempt, status, prompt, cached, completion, duration) in
+            [(1, "ok", 100, 50, 30, 500), (2, "ok", 160, 100, 40, 700)]
+        {
             conn.execute(
                 "insert into billing (ts, reqId, model, wire, stream, attempt, status,
                                       promptTokens, cachedTokens, completionTokens,
                                       reasoningTokens, durationMs)
                  values (?1, 'same-req', 'gpt-4o', 'openai', 1, ?2, ?3, ?4, ?5, ?6, null, ?7)",
-                rusqlite::params![
-                    ts, attempt, status, prompt, cached, completion, duration
-                ],
+                rusqlite::params![ts, attempt, status, prompt, cached, completion, duration],
             )
             .unwrap();
         }

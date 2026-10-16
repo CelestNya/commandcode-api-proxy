@@ -1,6 +1,6 @@
 //! The handover protocol: two-phase commit, never force-kill.
 //!
-//! ```
+//! ```text
 //! successor                                    incumbent
 //!   置 StandbyEvent ──────────────────────────► 停服务、释放锁、置 Ack
 //!   取得互斥锁 ◄────────────────────────────── (Ack 已置)

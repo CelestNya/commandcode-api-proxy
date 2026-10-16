@@ -6,14 +6,13 @@
 /* ── mini stat row above the details table ── */
 function renderMiniCards(s) {
   if (!s) return;
-  var t = s.totals || {}, td = s.today || {};
-  var succRate = t.attempts > 0 ? (t.ok / t.attempts) : null;
+  var t = s.totals || {}, w = s.window || {};
   var cards = [
-    { label: "今日请求", value: fmtNum(td.attempts), sub: "累计 " + fmtNum(t.attempts) },
-    { label: "成功率", value: fmtPct(succRate), sub: "ok " + fmtNum(t.ok) },
-    { label: "平均耗时", value: fmtDur(t.avgDurationMs), sub: "首字 " + fmtDur(t.avgTtfbMs) },
-    { label: "缓存命中", value: fmtPct(t.hitRate), sub: fmtTokens(t.promptTokens || 0) + " 输入中命中 " + fmtTokens(t.cachedTokens || 0) },
-    { label: "消耗金额", value: fmtUsd(t.costUsd), sub: "按官网价估算" }
+    { label: "窗口请求", value: fmtNum(w.attempts), sub: "累计 " + fmtNum(t.attempts) },
+    { label: "窗口 Token", value: fmtTokens((w.promptTokens || 0) + (w.completionTokens || 0)), sub: "输入 " + fmtTokens(w.promptTokens) + " / 输出 " + fmtTokens(w.completionTokens) },
+    { label: "缓存命中", value: fmtPct(w.hitRate), sub: fmtTokens(w.promptTokens || 0) + " 输入中命中 " + fmtTokens(w.cachedTokens || 0) },
+    { label: "窗口费用", value: fmtUsd(w.costUsd), sub: "终身 " + fmtUsd(t.costUsd) + "（按官网价估算）" },
+    { label: "窗口成功率", value: fmtPct(w.attempts > 0 ? ((w.ok || 0) / w.attempts) : null), sub: "ok " + fmtNum(w.ok) + " / " + fmtNum(w.attempts) }
   ];
   el("mini-cards").innerHTML = cards.map(function (c) {
     return '<div class="mini-card"><div class="mc-label">' + c.label + '</div>' +
@@ -95,30 +94,31 @@ function renderAttempts(list) {
   var body = el("attempts-body");
   body.innerHTML = pageRows.map(function (a, i) {
     var p = a.promptTokens, c = a.cachedTokens, o = a.completionTokens;
-    // promptTokens already includes cached; hit rate is cached / prompt.
+    // promptTokens already includes cached; net input = prompt - cached
+    var net = (p == null) ? null : p - (c || 0);
     var hit = (p || 0) > 0 ? ((c || 0) / p * 100) : null;
-    var hitTxt = (p == null && c == null) ? "未知" : (hit == null ? "无输入" : fmtTokens(p) + " 输入, 命中 " + hit.toFixed(1) + "%");
-    if (a.cacheCreationTokens != null && a.cacheCreationTokens > 0) {
-      hitTxt += " · 缓存创建 " + fmtTokens(a.cacheCreationTokens);
-    }
-    var pTxt = (p == null) ? "?" : fmtNum(p);
+    var hitTxt = (p == null && c == null) ? "未知" : (hit == null ? "无输入" : "命中 " + fmtTokens(c) + "（" + hit.toFixed(1) + "%）");
+    var pTxt = (net == null) ? "?" : fmtNum(net);
     var oTxt = (o == null) ? "?" : fmtNum(o);
-    /* the ledger deliberately stores the request id, never the API key */
     var rid = a.reqId || "—";
-    var ridShow = rid.length > 16 ? rid.slice(0, 16) + "…" : rid;
+    var ridShow = rid.length > 6 ? rid.slice(0, 6) + "…" : rid;
     var wire = (a.wire || "?").toUpperCase();
     var streamTxt = a.stream ? "流式" : "非流式";
     var lat = (a.ttfbMs != null ? "首字 " + fmtDur(a.ttfbMs) : "首字 —") + " / " +
               (a.durationMs != null ? "总耗时 " + fmtDur(a.durationMs) : "总耗时 —");
-    var retry = (a.attempt || 1) > 1 ? '<span class="muted" title="第 ' + a.attempt + ' 次尝试">x' + a.attempt + '</span>' : "";
-    return '<tr>' +
+    var retry = (a.attempts || 1) > 1 ? '<span class="muted" title="' + a.attempts + ' 次尝试">x' + a.attempts + '</span>' : "";
+    var costTxt = a.costUsd != null ? fmtUsd(a.costUsd) : "—";
+    var statusCell = '<span class="badge ' + esc(a.status || "") + '">' + esc(a.status || "?") + '</span>';
+    if (a.errorTag) statusCell += '<small class="err-tag" title="' + esc(a.errorTag) + '">' + esc(a.errorTag) + '</small>';
+    return '<tr class="req-row" data-req="' + esc(rid) + '">' +
       '<td class="muted">' + (start + i + 1) + '</td>' +
-      '<td title="' + esc(rid) + '">' + esc(ridShow) + '</td>' +
+      '<td class="rid-cell" title="' + esc(rid) + '">' + esc(ridShow) + '</td>' +
       '<td title="' + esc(a.model) + '">' + esc(a.model) + '</td>' +
       '<td>' + wire + '</td>' +
       '<td>' + streamTxt + '</td>' +
-      '<td><span class="badge ' + esc(a.status || "") + '">' + esc(a.status || "?") + '</span></td>' +
+      '<td>' + statusCell + '</td>' +
       '<td class="tokens-cell"><b class="down">↓' + pTxt + '</b> <b class="up">↑' + oTxt + '</b><small>' + hitTxt + '</small></td>' +
+      '<td class="cost-cell">' + costTxt + '</td>' +
       '<td class="lat-cell">' + lat + '</td>' +
       '<td>' + fmtTime(a.ts) + '</td>' +
       '<td>' + retry + '</td>' +
@@ -135,4 +135,102 @@ function renderAttempts(list) {
     return '<option value="' + esc(m) + '">' + esc(m) + '</option>';
   }).join("");
   sel.value = cur;
+  wireRowClicks();
+  /* the 2s poll re-renders rows; keep the open drawer fresh on the same req */
+  if (openReqId) {
+    var match = state.attempts.find(function (a) { return a.reqId === openReqId; });
+    if (match && !el("req-drawer").hidden) openDrawer(match);
+  }
+}
+
+/* ── request detail drawer ── */
+
+/* Rows are re-rendered by the 2s poll; remember the open request so the
+   drawer can be re-opened on the row that was clicked, and the re-render
+   never closes it (R7: the list scroll position is untouched anyway because
+   the drawer is an overlay, not a re-layout). */
+var openReqId = null;
+
+function wireRowClicks() {
+  var rows = document.querySelectorAll("#attempts-body .req-row");
+  rows.forEach(function (tr) {
+    tr.addEventListener("click", function () {
+      var rid = tr.getAttribute("data-req");
+      openReqId = rid;
+      var match = state.attempts.find(function (a) { return a.reqId === rid; });
+      if (match) openDrawer(match);
+    });
+  });
+  if (openReqId) {
+    var sel2 = "#attempts-body .req-row[data-req=\"" + String(openReqId).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + "\"]";
+    var cur = document.querySelector(sel2);
+    if (cur) cur.classList.add("selected");
+  }
+}
+
+function openDrawer(a) {
+  var drawer = el("req-drawer");
+  drawer.hidden = false;
+  el("drawer-body").innerHTML = drawerHtml(a);
+}
+
+function closeDrawer() {
+  el("req-drawer").hidden = true;
+  openReqId = null;
+}
+
+function drawerHtml(a) {
+  var cb = a.costBreakdown || {};
+  var rows = [
+    '<h3>请求 ' + esc(a.reqId || "—") + '</h3>',
+    '<table class="drawer-table">',
+    '<tr><td>模型</td><td>' + esc(a.model || "—") + '</td></tr>',
+    '<tr><td>端点</td><td>' + esc((a.wire || "?").toUpperCase()) + '</td></tr>',
+    '<tr><td>类型</td><td>' + (a.stream ? "流式" : "非流式") + '</td></tr>',
+    '<tr><td>时间</td><td>' + fmtTime(a.ts) + '</td></tr>',
+    '<tr><td>状态</td><td><span class="badge ' + esc(a.status || "") + '">' + esc(a.status || "?") + '</span>' +
+      (a.errorTag ? ' <small class="err-tag">' + esc(a.errorTag) + '</small>' : "") + '</td></tr>',
+    '</table>'
+  ].join("");
+
+  /* token block: net input / output / cache read */
+  var net = (a.promptTokens == null) ? "?" : fmtNum((a.promptTokens || 0) - (a.cachedTokens || 0));
+  var hit = (a.promptTokens || 0) > 0 ? ((a.cachedTokens || 0) / a.promptTokens * 100).toFixed(1) + "%" : "—";
+  rows += '<h4>Token</h4><div class="drawer-tokens">' +
+    '<div><span>净输入</span><b>' + net + '</b></div>' +
+    '<div><span>输出</span><b>' + fmtNum(a.completionTokens) + '</b></div>' +
+    '<div><span>缓存读取</span><b>' + fmtNum(a.cachedTokens) + '（' + hit + '）</b></div>' +
+    (a.cacheCreationTokens ? '<div><span>缓存创建</span><b>' + fmtNum(a.cacheCreationTokens) + '</b></div>' : "") +
+    '</div>';
+
+  /* cost formula (R4: every part of the amount is shown) */
+  var usd = function (v) { return (v == null || isNaN(v)) ? "—" : "$" + Number(v).toFixed(6); };
+  rows += '<h4>费用 <small>按官网峰/谷价估算</small></h4>' +
+    '<table class="drawer-table cost-formula">' +
+    '<tr><td>未缓存输入</td><td>' + usd(cb.uncached) + '</td></tr>' +
+    '<tr><td>缓存读取</td><td>' + usd(cb.cached) + '</td></tr>' +
+    (cb.cacheCreation ? '<tr><td>缓存创建</td><td>' + usd(cb.cacheCreation) + '</td></tr>' : "") +
+    '<tr><td>输出完成</td><td>' + usd(cb.completion) + '</td></tr>' +
+    '<tr class="drawer-total"><td>合计</td><td>' + (a.costUsd != null ? "$" + Number(a.costUsd).toFixed(4) : "—") + '</td></tr>' +
+    '</table>';
+
+  /* retry chain (R6) */
+  var det = a.attemptsDetail || [];
+  if (det.length > 1) {
+    rows += '<h4>尝试链 <small>' + det.length + ' 次</small></h4><ol class="attempt-chain">' +
+      det.map(function (d) {
+        return '<li><span class="badge ' + esc(d.status || "") + '">' + esc(d.status || "?") + '</span>' +
+          (d.errorTag ? ' <small class="err-tag">' + esc(d.errorTag) + '</small>' : "") +
+          '<span class="muted">' + fmtTime(d.ts) + '</span>' +
+          (d.durationMs != null ? ' · ' + fmtDur(d.durationMs) : "") + '</li>';
+      }).join("") + '</ol>';
+  }
+
+  /* tools */
+  var tools = a.tools || [];
+  if (tools.length) {
+    rows += '<h4>工具 <small>' + tools.length + '</small></h4><div class="drawer-tools">' +
+      tools.map(function (t) { return '<span class="tool-chip">' + esc(t) + '</span>'; }).join("") + '</div>';
+  }
+  return rows;
 }

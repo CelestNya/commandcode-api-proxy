@@ -57,8 +57,9 @@ pub fn init(level: &str) {
 }
 
 /// Point the logger at `path`, appending, rotating at `limit` bytes (FIFO,
-/// [`ROTATE_KEEP`] generations). A failure is reported on the console but
-/// never fatal: losing the log file must not stop the proxy from serving.
+/// three generations: current + `.1` + `.2`, older deleted). A failure is
+/// reported on the console but never fatal: losing the log file must not
+/// stop the proxy from serving.
 pub fn init_file(path: &std::path::Path, limit: u64) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -157,10 +158,7 @@ fn emit(tag: &str, msg: &str, to_stderr: bool) {
                 if let Some(file) = t.file.as_mut() {
                     // Size-based rotation: once the live file reaches the
                     // limit, drop the handle, shift generations and reopen.
-                    let too_big = file
-                        .metadata()
-                        .map(|m| m.len() >= t.limit)
-                        .unwrap_or(false);
+                    let too_big = file.metadata().map(|m| m.len() >= t.limit).unwrap_or(false);
                     if too_big {
                         t.file = None; // close the handle so rename can proceed
                         rotate(&t.path);
@@ -234,11 +232,18 @@ mod tests {
             info("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd");
         }
         let live = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        assert!(live < 2 * 128, "live={live} must stay under two lines of the limit");
-        let p1 = std::fs::metadata(rot_path(&path, 1)).map(|m| m.len()).unwrap_or(0);
+        assert!(
+            live < 2 * 128,
+            "live={live} must stay under two lines of the limit"
+        );
+        let p1 = std::fs::metadata(rot_path(&path, 1))
+            .map(|m| m.len())
+            .unwrap_or(0);
         assert!(p1 > 0, "one rotated generation must exist");
         // The third generation exists too (FIFO shift ran many times).
-        let p2 = std::fs::metadata(rot_path(&path, 2)).map(|m| m.len()).unwrap_or(0);
+        let p2 = std::fs::metadata(rot_path(&path, 2))
+            .map(|m| m.len())
+            .unwrap_or(0);
         assert!(p2 > 0, "second rotated generation must exist");
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -11,29 +11,24 @@ function renderStats(s, animate) {
 }
 
 /* Everything in the overview except the trend chart. The live stream calls
-   this on every snapshot regardless of the selected trend window — lifetime
-   and today numbers are window-independent, and freezing the spend chip and
-   mini-cards for up to 30s just because the user picked 近7天 is wrong. */
+   this on every snapshot regardless of the selected window — lifetime
+   numbers are window-independent; the window cards follow the picker. */
 function renderSummary(s) {
-  var t = s.totals || {}, td = s.today || {};
+  var t = s.totals || {}, w = s.window || {};
   // AI SDK accounting: promptTokens already includes cached tokens and
   // completionTokens already includes reasoning tokens, so the totals are
   // prompt + completion; cached is shown as a subset of input.
   var tTok = (t.promptTokens || 0) + (t.completionTokens || 0);
-  var tTokIn = t.promptTokens || 0;
-  var dTok = (td.promptTokens || 0) + (td.completionTokens || 0);
+  var wTok = (w.promptTokens || 0) + (w.completionTokens || 0);
   var fail = (t.error || 0) + (t.aborted || 0) + (t.interrupted || 0);
-  var succRate = t.attempts > 0 ? (t.ok / t.attempts) : null;
 
   var cards = [
-    { label: "今日请求", value: fmtNum(td.attempts), sub: "总计: " + fmtNum(t.attempts), cls: "" },
-    { label: "今日 Token", value: fmtTokens(dTok), sub: "输入 " + fmtTokens(td.promptTokens) + "（含缓存 " + fmtTokens(td.cachedTokens) + "）/ 输出 " + fmtTokens(td.completionTokens), cls: "" },
-    { label: "累计 Token", value: fmtTokens(tTok), sub: "输入 " + fmtTokens(tTokIn) + "（含缓存 " + fmtTokens(t.cachedTokens) + "）/ 输出 " + fmtTokens(t.completionTokens), cls: "accent" },
-    { label: "成功率", value: fmtPct(succRate), sub: "失败 " + fmtNum(fail) + " 次", cls: (succRate == null || succRate >= 0.95) ? "ok" : "warn" },
-    { label: "平均响应", value: fmtDur(t.avgDurationMs), sub: "总耗时", cls: "" },
-    { label: "平均首字", value: fmtDur(t.avgTtfbMs), sub: "首字节延迟", cls: "" },
-    { label: "缓存命中率", value: fmtPct(t.hitRate), sub: "缓存命中 / 输入", cls: "" },
-    { label: "总尝试", value: fmtNum(t.attempts), sub: "成功 " + fmtNum(t.ok) + " / 失败 " + fmtNum(fail), cls: "accent" }
+    { label: "窗口请求", value: fmtNum(w.attempts), sub: "总计: " + fmtNum(t.attempts), cls: "" },
+    { label: "窗口 Token", value: fmtTokens(wTok), sub: "输入 " + fmtTokens(w.promptTokens) + "（含缓存 " + fmtTokens(w.cachedTokens) + "）/ 输出 " + fmtTokens(w.completionTokens), cls: "" },
+    { label: "累计 Token", value: fmtTokens(tTok), sub: "输入 " + fmtTokens(t.promptTokens) + "（含缓存 " + fmtTokens(t.cachedTokens) + "）/ 输出 " + fmtTokens(t.completionTokens), cls: "accent" },
+    { label: "费用", value: fmtUsd(w.costUsd), sub: "终身 " + fmtUsd(t.costUsd), cls: "accent" },
+    { label: "缓存命中率", value: fmtPct(w.hitRate), sub: "窗口内命中 / 输入", cls: "" },
+    { label: "总尝试", value: fmtNum(t.attempts), sub: "成功 " + fmtNum(t.ok) + " / 失败 " + fmtNum(fail), cls: "" }
   ];
   el("metric-cards").innerHTML = cards.map(function (c) {
     return '<div class="mcard ' + c.cls + '"><div class="mlabel">' + c.label + '</div>' +
@@ -58,8 +53,9 @@ function renderSummary(s) {
       '<div class="sbr-track"><div class="sbr-fill" style="width:' + pct.toFixed(1) + '%;background:' + st.c + '"></div></div></div>';
   }).join("");
 
-  /* top-bar consumption chip */
-  el("chip-cost").textContent = fmtUsd(t.costUsd);
+  /* top-bar consumption chip follows the selected window (the money number
+     the user is looking at) */
+  el("chip-cost").textContent = fmtUsd(w.costUsd != null ? w.costUsd : t.costUsd);
   renderMiniCards(s);
 }
 
@@ -93,7 +89,7 @@ function renderTrend(raw, animate) {
     { key: "prompt", name: "Input", color: "var(--primary)" },
     { key: "completion", name: "Output", color: "var(--ok)" },
     { key: "cached", name: "Cache Read", color: "var(--aborted)" },
-    { key: "hitRate", name: "Cache Hit Rate", color: "var(--chart-hit)" }
+    { key: "costUsd", name: "Cost", color: "var(--chart-6)" }
   ];
   el("trend-legend").innerHTML = LEG.map(function (l) {
     return '<span><i style="background:' + l.color + '"></i>' + l.name + '</span>';
@@ -111,14 +107,16 @@ function renderTrend(raw, animate) {
     svg.innerHTML = '<text x="' + (W / 2) + '" y="150" fill="var(--muted)" font-size="13" text-anchor="middle">暂无数据</text>';
     return;
   }
-  var maxTok = 0;
+  var maxTok = 0, maxCost = 0;
   trend.forEach(function (d) {
     maxTok = Math.max(maxTok, (d.prompt || 0), (d.completion || 0), (d.cached || 0));
+    if (d.costUsd != null) maxCost = Math.max(maxCost, d.costUsd);
   });
   if (maxTok <= 0) maxTok = 1;
+  if (maxCost <= 0) maxCost = 1;
   function x(i) { return ML + (trend.length === 1 ? pw / 2 : pw * i / (trend.length - 1)); }
   function yTok(v) { return MT + ph - (v / maxTok) * ph; }
-  function yPct(v) { return MT + ph - (v == null ? 0 : v) * ph; }
+  function yCost(v) { return MT + ph - ((v == null ? 0 : v) / maxCost) * ph; }
   var out = "";
   for (var g = 0; g <= 4; g++) {
     var gy = MT + ph * g / 4;
@@ -126,9 +124,11 @@ function renderTrend(raw, animate) {
     out += '<line x1="' + ML + '" y1="' + gy + '" x2="' + (W - MR) + '" y2="' + gy + '" stroke="var(--outline-variant)" stroke-width="1"/>';
     out += '<text x="' + (ML - 8) + '" y="' + (gy + 4) + '" fill="var(--muted)" font-size="10" text-anchor="end">' + fmtTokens(Math.round(val)) + '</text>';
   }
-  for (var p = 0; p <= 5; p++) {
-    var py = MT + ph * p / 5;
-    out += '<text x="' + (W - MR + 8) + '" y="' + (py + 4) + '" fill="var(--muted)" font-size="10">' + Math.round(100 - p * 20) + '%</text>';
+  /* right axis: cost, 0 → maxCost across the window */
+  for (var p = 0; p <= 4; p++) {
+    var py = MT + ph * p / 4;
+    var cv = maxCost * (1 - p / 4);
+    out += '<text x="' + (W - MR + 8) + '" y="' + (py + 4) + '" fill="var(--chart-6)" font-size="10">' + fmtUsd(cv) + '</text>';
   }
   var step = Math.max(1, Math.ceil(trend.length / 8));
   trend.forEach(function (d, i) {
@@ -213,12 +213,12 @@ function renderTrend(raw, animate) {
     return d;
   }
   var sIn = pts("prompt", yTok), sOut = pts("completion", yTok), sCa = pts("cached", yTok);
-  var sHr = pts("hitRate", yPct);
+  var sCost = pts("costUsd", yCost);
   /* Lines are drawn in a fixed order and each carries its series name in a
      data attribute, so a CSS stagger can animate them one after another and
      the legend could highlight them later. */
   var SERIES = [
-    { pts: sHr, color: "var(--chart-hit)", width: 1.6, name: "hitRate" },
+    { pts: sCost, color: "var(--chart-6)", width: 1.8, name: "costUsd" },
     { pts: sOut, color: "var(--ok)", width: 2, name: "completion" },
     { pts: sCa, color: "var(--aborted)", width: 2, name: "cached" },
     { pts: sIn, color: "var(--primary)", width: 2, name: "prompt" }
@@ -229,10 +229,10 @@ function renderTrend(raw, animate) {
            'd="' + d + '" fill="none" stroke="' + se.color + '" stroke-width="' + se.width + '" ' +
            'stroke-linejoin="round" stroke-linecap="round"/>';
   });
-  /* data points, denser for short windows (7d) and sampled for long ones */
+  /* data points, denser for short windows and sampled for long ones */
   var dotStep = Math.max(1, Math.ceil(trend.length / 14));
   SERIES.forEach(function (se, si) {
-    var r = se.name === "hitRate" ? 2 : 2.6;
+    var r = se.name === "costUsd" ? 2 : 2.6;
     se.pts.forEach(function (pt, idx) {
       if (idx % dotStep !== 0 && idx !== se.pts.length - 1) return;
       out += '<circle class="trend-dot" style="--i:' + si + '" cx="' + pt[0].toFixed(1) + '" cy="' + pt[1].toFixed(1) + '" r="' + r + '" fill="' + se.color + '" stroke="var(--bg)" stroke-width="1"/>';

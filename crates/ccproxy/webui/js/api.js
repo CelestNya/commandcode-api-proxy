@@ -16,8 +16,16 @@ function attemptsLimit() { return Math.max(state.pageSize, 200); }
    响应本身;animate=true 是刻意的动作(切窗口/首帧/刷新),总是重画。 */
 var statsSig = "", attemptsSig = "";
 
+/* 时段窗口参数。秒级 UTC ISO；to 由后端补右闭边界后缀。 */
+function windowQuery(w) {
+  var parts = [];
+  if (w && w.from) parts.push("from=" + encodeURIComponent(w.from));
+  if (w && w.to) parts.push("to=" + encodeURIComponent(w.to));
+  return parts.length ? "&" + parts.join("&") : "";
+}
+
 function fetchStats(animate) {
-  return fetch("/webui/api/stats?days=" + state.days).then(function (r) { return r.json(); })
+  return fetch("/webui/api/stats?x=1" + windowQuery(state.window)).then(function (r) { return r.json(); })
     .then(function (s) {
       setLiveChip(true);
       var sig = JSON.stringify(s);
@@ -28,7 +36,7 @@ function fetchStats(animate) {
     .catch(function () { setLiveChip(false); /* next poll retries */ });
 }
 function fetchAttempts() {
-  return fetch("/webui/api/attempts?limit=" + attemptsLimit()).then(function (r) { return r.json(); })
+  return fetch("/webui/api/attempts?limit=" + attemptsLimit() + windowQuery(state.aWindow)).then(function (r) { return r.json(); })
     .then(function (list) {
       state.attempts = Array.isArray(list) ? list : [];
       var sig = JSON.stringify(list);
