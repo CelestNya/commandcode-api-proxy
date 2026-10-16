@@ -675,9 +675,13 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
         // re-merged per bucket in Rust (the price table rates the aggregate).
         // Sparse windows simply have fewer points — an empty hour/day is
         // absent, not zero-inflated.
+        // `to` carries the right-closed "Z999" suffix, which julianday cannot
+        // parse (NULL → the 24h fallback → every window buckets hourly, so a
+        // 7-day view looks identical to the 24h one). Truncate both edges to
+        // the ISO-second prefix before computing the span.
         let span_hours: f64 = conn
             .query_row(
-                "select (julianday(?2) - julianday(?1)) * 24.0",
+                "select (julianday(substr(?2, 1, 19)) - julianday(substr(?1, 1, 19))) * 24.0",
                 [from_ts, to_ts],
                 |row| row.get::<_, f64>(0),
             )
@@ -742,24 +746,68 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
                 }
             }
         }
-        let mut out: Vec<Value> = Vec::new();
-        for (bucket, r) in by_bucket {
-            let hit_rate = if r.prompt > 0 {
-                Some(r.cached as f64 / r.prompt as f64)
-            } else {
-                None
-            };
-            out.push(json!({
-                "date": bucket,
-                "attempts": r.attempts,
-                "prompt": r.prompt,
-                "cached": r.cached,
-                "completion": r.completion,
-                "hitRate": hit_rate,
-                "costUsd": if r.priced { Some(r.cost) } else { None },
-            }));
+        // Full bucket axis for the window, holes included: a 7-day view must
+        // still draw a 7-day x-axis when traffic only fills two days, or the
+        // trend for 7d/30d renders identically and the picker looks dead.
+        // Bucket keys are local-time stamps ('localtime' in the aggregation);
+        // the axis starts from the window's `from` bucket and steps by the
+        // same grain, so keys line up. Recursion is capped so an absurd
+        // custom range cannot stall the page.
+        let axis_sql = if span_hours <= 48.0 {
+            "with recursive seq(b) as (
+                 select strftime('%Y-%m-%dT%H:00', substr(?1, 1, 19), 'localtime')
+                 union all
+                 select strftime('%Y-%m-%dT%H:00', datetime(b, '+1 hour'), 'localtime')
+                 from seq
+                 where b < strftime('%Y-%m-%dT%H:00', substr(?2, 1, 19), 'localtime')
+             ) select b from seq limit 1200"
+        } else {
+            "with recursive seq(b) as (
+                 select strftime('%Y-%m-%d', substr(?1, 1, 19), 'localtime')
+                 union all
+                 select date(b, '+1 day')
+                 from seq
+                 where b < strftime('%Y-%m-%d', substr(?2, 1, 19), 'localtime')
+             ) select b from seq limit 1200"
+        };
+        let mut axis: Vec<String> = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(axis_sql) {
+            if let Ok(rows) = stmt.query_map([from_ts, to_ts], |r| r.get::<_, String>(0)) {
+                for row in rows.flatten() {
+                    axis.push(row);
+                }
+            }
         }
-        out // oldest → newest (BTreeMap key order)
+        let mut out: Vec<Value> = Vec::new();
+        for b in axis {
+            if let Some(r) = by_bucket.get(&b) {
+                let hit_rate = if r.prompt > 0 {
+                    Some(r.cached as f64 / r.prompt as f64)
+                } else {
+                    None
+                };
+                out.push(json!({
+                    "date": b,
+                    "attempts": r.attempts,
+                    "prompt": r.prompt,
+                    "cached": r.cached,
+                    "completion": r.completion,
+                    "hitRate": hit_rate,
+                    "costUsd": if r.priced { Some(r.cost) } else { None },
+                }));
+            } else {
+                out.push(json!({
+                    "date": b,
+                    "attempts": 0,
+                    "prompt": 0,
+                    "cached": 0,
+                    "completion": 0,
+                    "hitRate": null,
+                    "costUsd": null,
+                }));
+            }
+        }
+        out // oldest → newest (axis order)
     };
 
     let platforms = {
@@ -1502,9 +1550,11 @@ mod tests {
         let s = stats_json(&conn, &test_from(), &test_to());
         let trend = s["trend"].as_array().unwrap();
         // Adaptive sampling: the wide test window falls into daily buckets and
-        // only buckets with traffic appear (sparse hours/days are absent, not
-        // zero-inflated).
-        assert_eq!(trend.len(), 2);
+        // the axis is now complete (holes zero-filled), so the chart shows the
+        // whole 90-day span instead of collapsing to two dots (inclusive of
+        // both edges = 91 calendar days).
+        assert_eq!(trend.len(), 91);
+        assert_eq!(trend[0]["attempts"], 0); // leading hole
         let date_before = &day_before[..10];
         let date_y = &yesterday[..10];
         let i15 = trend.iter().position(|d| d["date"] == date_before).unwrap();
@@ -1522,6 +1572,46 @@ mod tests {
         assert_eq!(platforms[0]["wire"], "openai");
         assert_eq!(platforms[0]["attempts"], 2);
         assert_eq!(platforms[0]["cached"], 10);
+    }
+
+    #[test]
+    fn a_z999_to_edge_keeps_daily_buckets_for_wide_windows() {
+        // Regression: the window-span probe fed `to` straight to julianday,
+        // where the right-closed "Z999" suffix parses to NULL; the 24h
+        // fallback then bucketed every window hourly, so a 7-day view was
+        // visually identical to the 24h one. Truncating to the ISO-second
+        // prefix keeps the span honest.
+        let now = crate::now_epoch_secs();
+        let yesterday = crate::time::iso8601_secs(now - 86_400);
+        let conn = ledger(&[(
+            yesterday.as_str(),
+            "openai",
+            "gpt-4o",
+            "ok",
+            100,
+            0,
+            0,
+            100,
+            1,
+            0,
+        )]);
+        let from = crate::time::iso8601_secs(now.saturating_sub(7 * 86_400));
+        let mut to = crate::time::iso8601_secs(now);
+        to.push_str("Z999"); // exactly what parse_window emits for a 19-char to
+        let s = stats_json(&conn, &from, &to);
+        let trend = s["trend"].as_array().unwrap();
+        // Full 7-day axis (inclusive of both edges = 8 calendar days), one
+        // traffic day, seven zero-filled holes.
+        assert_eq!(trend.len(), 8);
+        assert_eq!(trend[0]["attempts"], 0);
+        assert_eq!(trend[7]["attempts"], 0);
+        // Daily bucket shape: 10-char date, not hourly `T`-suffixed stamp.
+        let hit = trend
+            .iter()
+            .position(|d| d["date"].as_str().unwrap() == &yesterday[..10])
+            .unwrap();
+        assert_eq!(trend[hit]["attempts"], 1);
+        assert_eq!(&trend[hit]["date"].as_str().unwrap()[..10], &yesterday[..10]);
     }
 
     #[test]
