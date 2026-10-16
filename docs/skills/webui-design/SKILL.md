@@ -23,9 +23,10 @@ description: 优化 cc-proxy 的 WebUI 控制面板（crates/ccproxy/webui）—
 
 ### 字体与数字
 
-- **数字一律等宽**（`font-variant-numeric: tabular-nums`），让 token/延迟/费用列对齐可读——这是控制面板最重要的字体决策。**现状缺口已确认**：`tokens.css` 的 body 字体栈未设 `font-variant-numeric`，表格数字列是比例数字——优化时在 `tokens.css` 加一个 `--num` 工具类或直接设于 `body`。
+- **数字一律等宽**（`font-variant-numeric: tabular-nums`），让 token/延迟/费用列对齐可读——**已落地**：`tokens.css` 的 `body` 已设（此前缺口记录已过时），指标卡 `.mvalue/.msub`、chip、表格数字列均继承。
 - 中英混排字体栈保持现状（`-apple-system, "Segoe UI", "Microsoft YaHei", system-ui` 系统栈即可），**不要引入 Inter/Arial 等通用西文**，也不要为控制面板引入装饰字体。
 - 字号层级：指标卡数值 > 面板标题 > 表格正文 > 辅助说明，层级差 ≥2px。
+- 坐标轴刻度是高频"丑点"：Token 轴必须带单位（1.8K/900），Cost 轴去尾零且位数统一（`$0.044` 而不是 `$0.0440` 与 `$1.00` 混排）；x 轴时间标签禁止机器格式（小时桶显示 `10-16 15:00`，不要 `10-16T15:00`）。
 
 ### 配色与状态语义
 
@@ -42,8 +43,10 @@ description: 优化 cc-proxy 的 WebUI 控制面板（crates/ccproxy/webui）—
 ### 图表可读性（现有 SVG 手绘图）
 
 - 趋势图：网格线弱化、数据线强化；时间轴刻度采样（不要每点都标）；范围切换（7/14/30 天）保持当前图状态。
+- **趋势时间轴必须真实反映窗口跨度**：空桶补零出完整轴（7d 出 8 个天桶、30d 出 31 个），否则 7d/30d 在数据稀疏时视觉一致、选取器形同虚设。轴步进的时区陷阱：桶 key 是 localtime 字符串（无 Z），递归 `datetime(b,'+1 hour')` 会把它按 UTC 再 +8h 转回 → 每步 +9h；**全程 UTC 步进、末端才 `strftime(...,'localtime')`**（webui.rs 已有回归测试 `an_hourly_window_keeps_an_hourly_axis`）。
 - 环形图：扇区按值降序；过小扇区合入「其他」并在 tooltip 给明细。
 - 状态分布：条状图 + 数值标注，颜色与状态语义一致。
+- 空态：给 SVG 示意（折线 + 文案），不要孤零零一行字；不用 emoji。
 
 ### 交互反馈
 
