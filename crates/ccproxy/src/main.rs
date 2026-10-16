@@ -46,7 +46,10 @@ fn main() {
     // The proxy keeps its own file so a hand-started run has a log too; the
     // tray's lifecycle lines go to a separate file, so the two never
     // interleave in one stream.
-    ccproxy::log::init_file(&ccproxy::config::log_path());
+    ccproxy::log::init_file(
+        &ccproxy::config::log_path(),
+        ccproxy::log::PROXY_LOG_LIMIT_BYTES,
+    );
 
     // Resolve the outbound proxy before anything dials out. This is where the
     // Rust build previously diverged from the Node one: it went direct while

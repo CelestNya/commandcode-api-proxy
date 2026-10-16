@@ -24,7 +24,7 @@ use super::log::LogFile;
 /// - `CC_LOG_DIR`：托盘自身状态目录，保证「打开代理日志」菜单打开的就是
 ///   代理真实写入的文件（否则日志落到 `/usr/bin/logs` 写失败被丢弃）。
 pub fn start_proxy(proxy: &Path, port: u16, log: &LogFile) {
-    log.append("[tray] 菜单：启动代理");
+    log.debug("[tray] 菜单：启动代理");
     let mut cmd = Command::new(proxy);
     cmd.arg("start")
         .env("PORT", port.to_string())
@@ -40,8 +40,8 @@ pub fn start_proxy(proxy: &Path, port: u16, log: &LogFile) {
         cmd.env(ccproxy::config::LOG_DIR_ENV, super::settings::state_dir());
     }
     match cmd.spawn() {
-        Ok(_) => log.append("[tray] 代理启动进程已拉起（确认 /health 请用 status）"),
-        Err(e) => log.append(&format!("[tray] 启动代理失败：{e}")),
+        Ok(_) => log.info("[tray] 代理启动进程已拉起（确认 /health 请用 status）"),
+        Err(e) => log.error(&format!("[tray] 启动代理失败：{e}")),
     }
 }
 
@@ -64,7 +64,7 @@ fn packaged_webui_dir(proxy_dir: &Path) -> Option<std::path::PathBuf> {
 
 /// 停止代理：`ccproxy stop`（读 PID 文件发 SIGTERM，等待端口释放）。
 pub fn stop_proxy(proxy: &Path, log: &LogFile) {
-    log.append("[tray] 菜单：停止代理");
+    log.debug("[tray] 菜单：停止代理");
     match Command::new(proxy).arg("stop").output() {
         Ok(out) => {
             let status = if out.status.success() {
@@ -72,9 +72,9 @@ pub fn stop_proxy(proxy: &Path, log: &LogFile) {
             } else {
                 "失败"
             };
-            log.append(&format!("[tray] 停止代理{status}"));
+            log.info(&format!("[tray] 停止代理{status}"));
         }
-        Err(e) => log.append(&format!("[tray] 停止代理失败：{e}")),
+        Err(e) => log.error(&format!("[tray] 停止代理失败：{e}")),
     }
 }
 
@@ -82,7 +82,7 @@ pub fn stop_proxy(proxy: &Path, log: &LogFile) {
 pub fn xdg_open(target: &str, log: &LogFile) {
     match Command::new("xdg-open").arg(target).spawn() {
         Ok(_) => {}
-        Err(e) => log.append(&format!("[tray] xdg-open 失败（{target}）：{e}")),
+        Err(e) => log.warn(&format!("[tray] xdg-open 失败（{target}）：{e}")),
     }
 }
 
@@ -105,11 +105,11 @@ pub fn toggle_autostart(exec: &str, log: &LogFile) -> bool {
     if file.is_file() {
         match std::fs::remove_file(&file) {
             Ok(()) => {
-                log.append("[tray] 已禁用开机自启");
+                log.info("[tray] 已禁用开机自启");
                 false
             }
             Err(e) => {
-                log.append(&format!("[tray] 禁用开机自启失败：{e}"));
+                log.warn(&format!("[tray] 禁用开机自启失败：{e}"));
                 true
             }
         }
@@ -125,17 +125,17 @@ pub fn toggle_autostart(exec: &str, log: &LogFile) -> bool {
         );
         if let Some(parent) = file.parent() {
             if std::fs::create_dir_all(parent).is_err() {
-                log.append("[tray] 创建 autostart 目录失败");
+                log.warn("[tray] 创建 autostart 目录失败");
                 return false;
             }
         }
         match std::fs::write(&file, content) {
             Ok(()) => {
-                log.append("[tray] 已启用开机自启（XDG autostart）");
+                log.info("[tray] 已启用开机自启（XDG autostart）");
                 true
             }
             Err(e) => {
-                log.append(&format!("[tray] 启用开机自启失败：{e}"));
+                log.warn(&format!("[tray] 启用开机自启失败：{e}"));
                 false
             }
         }

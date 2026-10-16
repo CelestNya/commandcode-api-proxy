@@ -12,14 +12,37 @@ use std::sync::Mutex;
 
 use crate::settings;
 
-/// A rotating line log. Personal scale, so rotation is a truncate.
+/// A rotating line log (UX 0.7.0 D8: size-based FIFO, three generations).
+/// Lines carry a level tag (UX 0.7.0 D12: menu actions → DEBUG, state → INFO,
+/// failures → WARN/ERROR) so the WebUI can filter by level.
 pub struct LogFile {
     path: PathBuf,
     max_bytes: u64,
 }
 
+/// Level tag written into the line; the file keeps everything (filtering is
+/// the WebUI's job).
+#[derive(Clone, Copy)]
+pub enum Level {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Level {
+    fn tag(self) -> &'static str {
+        match self {
+            Level::Debug => "[DEBUG]",
+            Level::Info => "[INFO]",
+            Level::Warn => "[WARN]",
+            Level::Error => "[ERROR]",
+        }
+    }
+}
+
 impl LogFile {
-    const MAX_BYTES: u64 = 2 * 1024 * 1024;
+    const MAX_BYTES: u64 = 1024 * 1024;
 
     #[must_use]
     pub fn new(dir: &Path) -> Self {
@@ -38,11 +61,27 @@ impl LogFile {
         &self.path
     }
 
-    /// Append one line, timestamped to the second.
-    pub fn append(&self, line: &str) {
+    pub fn debug(&self, line: &str) {
+        self.append_level(Level::Debug, line);
+    }
+
+    pub fn info(&self, line: &str) {
+        self.append_level(Level::Info, line);
+    }
+
+    pub fn warn(&self, line: &str) {
+        self.append_level(Level::Warn, line);
+    }
+
+    pub fn error(&self, line: &str) {
+        self.append_level(Level::Error, line);
+    }
+
+    /// Append one line, timestamped to the second, tagged with its level.
+    pub fn append_level(&self, level: Level, line: &str) {
         if let Ok(meta) = std::fs::metadata(&self.path) {
-            if meta.len() > self.max_bytes {
-                let _ = std::fs::write(&self.path, "");
+            if meta.len() >= self.max_bytes {
+                self.rotate();
             }
         }
         let stamp = ccproxy::now_iso8601();
@@ -51,9 +90,25 @@ impl LogFile {
             .append(true)
             .open(&self.path)
         {
-            let _ = writeln!(file, "{stamp} {line}");
+            let _ = writeln!(file, "{stamp} {} {line}", level.tag());
         }
     }
+
+    /// Shift `tray.log` → `tray.log.1` → `tray.log.2`, dropping the oldest.
+    /// Each append opens and closes its own handle, so the live file is never
+    /// held open when the rename runs (Windows would refuse it otherwise).
+    fn rotate(&self) {
+        let p1 = rot_path(&self.path, 1);
+        let p2 = rot_path(&self.path, 2);
+        let _ = std::fs::remove_file(&p2);
+        let _ = std::fs::rename(&p1, &p2);
+        let _ = std::fs::rename(&self.path, &p1);
+    }
+}
+
+/// `path` with a numeric suffix appended (`tray.log` → `tray.log.1`).
+fn rot_path(path: &Path, n: u32) -> PathBuf {
+    PathBuf::from(format!("{}.{}", path.display(), n))
 }
 
 /// The proxy child, with the lifecycle the tray must enforce.
@@ -131,10 +186,10 @@ impl ProxyProcess {
         }
         if let Some(url) = settings::resolve_proxy_url() {
             cmd.env("HTTPS_PROXY", &url).env("HTTP_PROXY", &url);
-            self.log.append(&format!("[tray] 出站代理: {url}"));
+            self.log.debug(&format!("[tray] 出站代理: {url}"));
         } else {
             self.log
-                .append("[tray] 出站代理: 直连（系统代理未开或 CC_PROXY=off）");
+                .debug("[tray] 出站代理: 直连（系统代理未开或 CC_PROXY=off）");
         }
         // A namespaced instance must not write into the production ledger.
         let ns = settings::namespace();
@@ -166,18 +221,18 @@ impl ProxyProcess {
                     // outlives this call.
                     let handle = std::os::windows::io::AsRawHandle::as_raw_handle(&child);
                     if !job.assign(handle.cast()) {
-                        self.log.append(
+                        self.log.warn(
                             "[tray] 警告：挂入 Job Object 失败，托盘退出后可能留下孤儿进程",
                         );
                     }
                 }
                 self.log
-                    .append(&format!("[tray] 代理已启动 pid={}", child.id()));
+                    .info(&format!("[tray] 代理已启动 pid={}", child.id()));
                 self.child = Some(child);
                 true
             }
             Err(err) => {
-                self.log.append(&format!("[tray] 代理启动失败: {err}"));
+                self.log.error(&format!("[tray] 代理启动失败: {err}"));
                 false
             }
         }
@@ -209,7 +264,7 @@ impl ProxyProcess {
         };
         if exited {
             self.child = None;
-            self.log.append("[tray] 代理意外退出 —— 3 秒后自动重启");
+            self.log.warn("[tray] 代理意外退出 —— 3 秒后自动重启");
         }
         exited
     }

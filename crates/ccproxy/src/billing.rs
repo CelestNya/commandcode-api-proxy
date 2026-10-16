@@ -108,6 +108,10 @@ pub struct AttemptRecord {
     pub reasoning_tokens: Option<u64>,
     pub duration_ms: u64,
     pub ttfb_ms: Option<u64>,
+    /// The tools the client sent with this request, as a compact JSON array of
+    /// names (e.g. `["bash","read"]`). `None` when the client sent none, or the
+    /// row predates the column. Stored per attempt; retries repeat it.
+    pub tools: Option<String>,
 }
 
 /// Bumped when the on-disk layout changes. Recorded via `pragma user_version`
@@ -129,7 +133,8 @@ create table if not exists billing (
   completionTokens   integer,
   reasoningTokens    integer,
   durationMs         integer,
-  ttfbMs             integer
+  ttfbMs             integer,
+  tools              text
 );
 create index if not exists billing_ts on billing (ts);
 create index if not exists billing_reqId on billing (reqId);
@@ -316,15 +321,16 @@ fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     // Adding the column is idempotent (checked first), and old rows are NULL,
     // which the aggregations treat as "no cache creation" — exactly right for
     // history recorded before the field existed.
-    migrate_column(&conn, "cacheCreationTokens")?;
+    migrate_column(&conn, "cacheCreationTokens", "integer")?;
+    migrate_column(&conn, "tools", "text")?;
     // Drop rows past the retention window at startup.
     prune_old_rows(&conn);
     Ok(conn)
 }
 
-/// Add `column` to `billing` when it is missing. Idempotent and cheap: the
-/// pragma query runs once per open; the alter is a no-op once applied.
-fn migrate_column(conn: &Connection, column: &str) -> rusqlite::Result<()> {
+/// Add `column` of `ty` to `billing` when it is missing. Idempotent and cheap:
+/// the pragma query runs once per open; the alter is a no-op once applied.
+fn migrate_column(conn: &Connection, column: &str, ty: &str) -> rusqlite::Result<()> {
     let mut stmt = conn.prepare("pragma table_info(billing)")?;
     let names: Vec<String> = stmt
         .query_map([], |row| row.get::<_, String>(1))?
@@ -332,7 +338,7 @@ fn migrate_column(conn: &Connection, column: &str) -> rusqlite::Result<()> {
     if names.iter().any(|n| n == column) {
         return Ok(());
     }
-    conn.execute_batch(&format!("alter table billing add column {column} integer"))
+    conn.execute_batch(&format!("alter table billing add column {column} {ty}"))
 }
 
 /// Open the ledger database in `dir`, creating the directory and schema.
@@ -569,6 +575,7 @@ fn import_jsonl_file(conn: &Connection, path: &Path) -> usize {
             reasoning_tokens: None,
             duration_ms: 0,
             ttfb_ms: None,
+            tools: None,
         });
     }
     if records.is_empty() {
@@ -644,8 +651,8 @@ fn insert_batch(conn: &Connection, batch: &[AttemptRecord]) -> rusqlite::Result<
             "insert into billing
                (ts, reqId, model, wire, stream, attempt, status, errorTag,
                 promptTokens, cachedTokens, cacheCreationTokens,
-                completionTokens, reasoningTokens, durationMs, ttfbMs)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                completionTokens, reasoningTokens, durationMs, ttfbMs, tools)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         )?;
         for record in batch {
             stmt.execute(rusqlite::params![
@@ -689,6 +696,7 @@ fn insert_batch(conn: &Connection, batch: &[AttemptRecord]) -> rusqlite::Result<
                     .flatten(),
                 i64::try_from(record.duration_ms).unwrap_or(i64::MAX),
                 record.ttfb_ms.map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
+                record.tools,
             ])?;
         }
         Ok(())
@@ -808,6 +816,9 @@ pub struct RequestLedger {
     /// Set once an attempt's outcome has been recorded, so the caller does not
     /// also record a success for a turn that already ended in failure.
     settled: AtomicBool,
+    /// Tools of this client request, injected by the server once the body is
+    /// parsed; stamped on every attempt row of the request.
+    tools: Mutex<Option<String>>,
 }
 
 impl RequestLedger {
@@ -821,6 +832,15 @@ impl RequestLedger {
             started_at: Instant::now(),
             first_byte_at: Mutex::new(None),
             settled: AtomicBool::new(false),
+            tools: Mutex::new(None),
+        }
+    }
+
+    /// Attach the request's tool list (JSON array of names) so every attempt
+    /// row of this request carries it. Idempotent; call once per request.
+    pub fn set_tools(&self, tools: Option<String>) {
+        if let Ok(mut slot) = self.tools.lock() {
+            *slot = tools;
         }
     }
 
@@ -913,6 +933,7 @@ impl RequestLedger {
                 .ok()
                 .and_then(|slot| *slot)
                 .map(|first| millis(first.saturating_duration_since(self.started_at))),
+            tools: self.tools.lock().ok().and_then(|slot| slot.clone()),
         });
     }
 }
@@ -983,6 +1004,7 @@ mod tests {
             reasoning_tokens: None,
             duration_ms: 1,
             ttfb_ms: None,
+            tools: None,
         }
     }
 

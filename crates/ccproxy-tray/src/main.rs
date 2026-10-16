@@ -95,7 +95,7 @@ fn windows_main() {
     // The ownership thread must exist before anything else: it both admits this
     // instance and defines which side of a handover we are on.
     let Some(created_new) = win::mutex::init(&settings::ns_name("cc-proxy-tray")) else {
-        log.append("[tray] 无法建立所有权线程");
+        log.error("[tray] 无法建立所有权线程");
         return;
     };
     let role = owner::Role::from_lock_acquired(created_new);
@@ -110,7 +110,7 @@ fn windows_main() {
 
     let job = win::job::KillOnClose::create().map(Rc::new);
     if job.is_none() {
-        log.append("[tray] 警告：无法创建 Job Object，托盘退出后子进程可能成为孤儿");
+        log.warn("[tray] 警告：无法创建 Job Object，托盘退出后子进程可能成为孤儿");
     }
     let actions_job = job.clone();
     let tick_job = job.clone();
@@ -123,7 +123,7 @@ fn windows_main() {
     ));
 
     if role == owner::Role::Successor {
-        log.append("交接：请求现任让位");
+        log.info("交接：请求现任让位");
         win::event::set(win::event::Which::Standby);
         win::event::reset(win::event::Which::Commit);
         win::event::reset(win::event::Which::Abort);
@@ -131,7 +131,7 @@ fn windows_main() {
             // The incumbent did not stand down — probably a version that does
             // not know the protocol. Give up quietly: forcing the takeover
             // risks two servers, which is worse than a failed update.
-            log.append("交接失败：现任未在期限内让位，本次启动中止");
+            log.warn("交接失败：现任未在期限内让位，本次启动中止");
             win::event::reset(win::event::Which::Standby);
             win::message_box(
                 "已有实例未能让位，本次启动已取消。\n请在托盘菜单中选择「退出」后重试。",
@@ -139,7 +139,7 @@ fn windows_main() {
             );
             return;
         }
-        log.append("交接：已取得所有权，启动服务");
+        log.info("交接：已取得所有权，启动服务");
     } else {
         win::event::reset(win::event::Which::Standby);
     }
@@ -208,7 +208,7 @@ fn windows_main() {
                 .map(|mut p| p.take_unexpected_exit())
                 .unwrap_or(false);
             if tick_supervision.borrow_mut().tick(Instant::now(), crashed) {
-                tick_log.append("[tray] 代理意外退出，正在重启");
+                tick_log.warn("[tray] 代理意外退出，正在重启");
                 if let Ok(mut p) = tick_proxy.lock() {
                     let _ = p.start(tick_job.as_deref());
                 }
@@ -259,7 +259,7 @@ fn dispatch(
             // after this action, so without it a manual quit and a silent
             // crash look identical in tray.log (which is how the 2026-09-26
             // disappearance stayed ambiguous).
-            log.append("[tray] 手动退出（停止代理并释放端口）");
+            log.info("[tray] 手动退出（停止代理并释放端口）");
         }
         tray::Action::None => {}
     }
@@ -327,7 +327,7 @@ fn shell_open(target: &win::Wide, log: &process::LogFile) {
     };
     // ShellExecuteW returns a value > 32 on success; <= 32 is an error code.
     if rc as isize <= 32 {
-        log.append(&format!("[tray] 无法打开：code={}", rc as isize));
+        log.warn(&format!("[tray] 无法打开：code={}", rc as isize));
     }
 }
 
@@ -357,7 +357,7 @@ fn handover_loop(
             health::port_serving(port, None)
         });
         if serving {
-            log.append("交接成功：端口已有代理应答 /health，通知现任退出");
+            log.info("交接成功：端口已有代理应答 /health，通知现任退出");
             win::event::set(Which::Commit);
         } else {
             // Roll back FOR REAL: the incumbent can only resume if it can
@@ -369,7 +369,7 @@ fn handover_loop(
             // things about the port.) Stand down the same way a commit does —
             // stop the child, hand back the lock, let the UI loop end this
             // process — and the incumbent's rollback resumes cleanly.
-            log.append(
+            log.warn(
                 "交接失败：未能在期限内提供可应答的 /health —— 回滚：停止本方代理，交还现任",
             );
             if let Ok(mut p) = proxy.lock() {
@@ -401,7 +401,7 @@ fn handover_loop(
         win::event::reset(Which::Commit);
         win::event::reset(Which::Abort);
 
-        log.append("交接：收到让位请求，暂停服务并释放所有权");
+        log.info("交接：收到让位请求，暂停服务并释放所有权");
         if let Ok(mut p) = proxy.lock() {
             p.stop();
         }
@@ -415,12 +415,12 @@ fn handover_loop(
                 start.elapsed(),
             ) {
                 Some(owner::Verdict::Commit) => {
-                    log.append("交接完成：继任者已接班，本实例退出");
+                    log.info("交接完成：继任者已接班，本实例退出");
                     stood_down.store(true, std::sync::atomic::Ordering::Relaxed);
                     return;
                 }
                 Some(owner::Verdict::Abort) | Some(owner::Verdict::TimedOut) => {
-                    log.append("交接回滚：重新取得所有权并恢复服务");
+                    log.warn("交接回滚：重新取得所有权并恢复服务");
                     if win::mutex::try_acquire(Duration::from_secs(15)) {
                         win::event::reset(Which::Commit);
                         win::event::reset(Which::Standby);
@@ -435,7 +435,7 @@ fn handover_loop(
                     // against the port it still holds (that exact loop fired once,
                     // two proxies restarting every 3s). Retry the acquisition
                     // instead; the events are reset so the next verdict is fresh.
-                    log.append("交接回滚：所有权仍在继任者手中，待其退出后重试接管");
+                    log.warn("交接回滚：所有权仍在继任者手中，待其退出后重试接管");
                     win::event::reset(Which::Commit);
                     win::event::reset(Which::Standby);
                     std::thread::sleep(Duration::from_millis(500));
@@ -491,7 +491,7 @@ fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
 
 #[cfg(windows)]
 fn fatal(log: &process::LogFile, message: &str) {
-    log.append(&format!("[tray] {message}"));
+    log.error(&format!("[tray] {message}"));
     win::message_box(message, false);
 }
 
@@ -504,21 +504,21 @@ fn linux_main() {
     let port = linux::settings::instance_port();
     // Arc：事件回调（'static 闭包）与主线程共享日志句柄。
     let log = std::sync::Arc::new(linux::log::LogFile::new(linux::settings::tray_log_path()));
-    log.append("[tray] 启动（Linux / SNI）");
+    log.info("[tray] 启动（Linux / SNI）");
 
     // 单实例锁：KDE 重复启动会注册多个 SNI 图标。pid 锁文件 + /proc 存活
     // 检查（残留可覆盖），见 linux/single_instance.rs。
     if let Err(e) = linux::single_instance::acquire(&linux::settings::namespace()) {
-        log.append(&format!("[tray] 退出：{e}"));
+        log.warn(&format!("[tray] 退出：{e}"));
         return;
     }
-    log.append("[tray] 单实例锁已取得");
+    log.info("[tray] 单实例锁已取得");
 
     let Some(proxy) = linux::settings::proxy_binary() else {
-        log.append("[tray] 找不到 ccproxy 二进制（设置 CC_PROXY_BIN，或放在托盘同级）");
+        log.error("[tray] 找不到 ccproxy 二进制（设置 CC_PROXY_BIN，或放在托盘同级）");
         return;
     };
-    log.append(&format!("[tray] 代理二进制：{}", proxy.display()));
+    log.debug(&format!("[tray] 代理二进制：{}", proxy.display()));
 
     // 初始状态：探测 /health（不主动拉起服务——菜单里启动）。
     let running = health::port_serving(port, None);
@@ -532,7 +532,7 @@ fn linux_main() {
         "Commandcode Proxy — {state_word} (:{port}) v{}",
         env!("CARGO_PKG_VERSION")
     );
-    log.append(&format!("[tray] 端口 {port} 状态：{state_word}"));
+    log.info(&format!("[tray] 端口 {port} 状态：{state_word}"));
 
     let cache = ("24h 缓存率：—".to_string(), " ".to_string());
     let menu = build_menu(
@@ -549,9 +549,9 @@ fn linux_main() {
     })) {
         // 无会话总线（无桌面会话）等场景：记录原因而不是静默退出，否则
         // 安装后点了图标没反应却没有任何线索可查。
-        log.append(&format!("[tray] 托盘后端启动失败：{e}"));
+        log.error(&format!("[tray] 托盘后端启动失败：{e}"));
     }
-    log.append("[tray] 退出");
+    log.info("[tray] 退出");
 }
 
 /// Linux 菜单事件分发。
@@ -587,7 +587,7 @@ fn linux_dispatch(
             linux::actions::toggle_autostart(&exec, log);
         }
         TrayEvent::Quit => {
-            log.append("[tray] 手动退出（停止代理请用菜单「停止代理」或 ccproxy stop）")
+            log.info("[tray] 手动退出（停止代理请用菜单「停止代理」或 ccproxy stop）")
         }
     }
 }

@@ -1,24 +1,74 @@
-//! Linux 托盘日志：简单追加写，与 Windows `process::LogFile` 对应。
+//! Linux 托盘日志：按大小 FIFO 轮转（UX 0.7.0 D8），带级别 tag
+//! （UX 0.7.0 D12：menu 动作→DEBUG，state→INFO，失败→WARN/ERROR），与
+//! Windows `process::LogFile` 语义一致。
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// 生命周期日志文件（`tray.log`）。
+/// 生命周期日志文件（`tray.log`），保留 3 代（当前 + `.1` + `.2`）。
 #[derive(Clone)]
 pub struct LogFile {
     path: PathBuf,
+    max_bytes: u64,
+}
+
+/// 级别 tag；文件全量保留，过滤是 WebUI 的事。
+#[derive(Clone, Copy)]
+pub enum Level {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Level {
+    fn tag(self) -> &'static str {
+        match self {
+            Level::Debug => "[DEBUG]",
+            Level::Info => "[INFO]",
+            Level::Warn => "[WARN]",
+            Level::Error => "[ERROR]",
+        }
+    }
 }
 
 impl LogFile {
+    const MAX_BYTES: u64 = 1024 * 1024;
+
     #[must_use]
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            max_bytes: Self::MAX_BYTES,
+        }
     }
 
-    /// 追加一行带时间戳的日志。失败静默（日志失败不阻断托盘）。
-    pub fn append(&self, line: &str) {
+    pub fn debug(&self, line: &str) {
+        self.append_level(Level::Debug, line);
+    }
+
+    pub fn info(&self, line: &str) {
+        self.append_level(Level::Info, line);
+    }
+
+    pub fn warn(&self, line: &str) {
+        self.append_level(Level::Warn, line);
+    }
+
+    pub fn error(&self, line: &str) {
+        self.append_level(Level::Error, line);
+    }
+
+    /// 追加一行带时间戳和级别 tag 的日志，超限先轮转。失败静默（日志失败
+    /// 不阻断托盘）。
+    pub fn append_level(&self, level: Level, line: &str) {
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(meta) = std::fs::metadata(&self.path) {
+            if meta.len() >= self.max_bytes {
+                self.rotate();
+            }
         }
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -26,9 +76,24 @@ impl LogFile {
             .open(&self.path)
         {
             let ts = timestamp();
-            let _ = writeln!(f, "{ts} {line}");
+            let _ = writeln!(f, "{ts} {} {line}", level.tag());
         }
     }
+
+    /// 移位 `tray.log` → `.1` → `.2`，丢弃最老一代。append 每次开新句柄后即
+    /// 关闭，轮转时无占用问题。
+    fn rotate(&self) {
+        let p1 = rot_path(&self.path, 1);
+        let p2 = rot_path(&self.path, 2);
+        let _ = std::fs::remove_file(&p2);
+        let _ = std::fs::rename(&p1, &p2);
+        let _ = std::fs::rename(&self.path, &p1);
+    }
+}
+
+/// `path` 追加数字后缀（`tray.log` → `tray.log.1`）。
+fn rot_path(path: &Path, n: u32) -> PathBuf {
+    PathBuf::from(format!("{}.{}", path.display(), n))
 }
 
 /// UTC RFC3339 形状时间戳（`2026-10-15T04:00:00Z`），与 ccproxy 日志口径

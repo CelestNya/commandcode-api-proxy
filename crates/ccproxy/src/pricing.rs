@@ -45,6 +45,26 @@ pub struct RateSet {
     pub cache_read: f64,
 }
 
+/// The billed parts of one ledger row, in USD. `total` is the sum of the
+/// parts; a detail view renders each line so the user can verify the total.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CostBreakdown {
+    pub uncached: f64,
+    pub cached: f64,
+    pub cache_creation: f64,
+    pub completion: f64,
+    pub total: f64,
+}
+
+impl CostBreakdown {
+    /// Sum the parts into `total`. Kept separate so the parts can never drift
+    /// from the number reported as the row's cost.
+    pub fn with_total(mut self) -> Self {
+        self.total = self.uncached + self.cached + self.cache_creation + self.completion;
+        self
+    }
+}
+
 /// USD per million tokens for one model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelPrice {
@@ -241,6 +261,39 @@ impl Pricing {
                 + r.output * completion_n)
                 / 1e6,
         )
+    }
+
+    /// Cost of one ledger row split into its billed parts: uncached input,
+    /// cache-read hits, cache writes and completion output — the numbers a
+    /// detail view shows to explain how a total was reached. Same semantics
+    /// and inputs as [`Self::cost`], which it stays in lockstep with.
+    pub fn cost_breakdown(
+        &self,
+        model: &str,
+        prompt: i64,
+        cached: i64,
+        cache_creation: i64,
+        completion: i64,
+        utc_minute_of_day: u32,
+    ) -> Option<CostBreakdown> {
+        let m = self.price(model)?;
+        let r = m.rate_at(utc_minute_of_day);
+        let creation_n = cache_creation.max(0) as f64;
+        let cached_n = cached.max(0) as f64;
+        let uncached = prompt
+            .saturating_sub(cached)
+            .saturating_sub(cache_creation)
+            .max(0) as f64;
+        let completion_n = completion.max(0) as f64;
+        let write_rate = m.cache_write.unwrap_or(r.input);
+        let parts = CostBreakdown {
+            uncached: r.input * uncached / 1e6,
+            cached: r.cache_read * cached_n / 1e6,
+            cache_creation: write_rate * creation_n / 1e6,
+            completion: r.output * completion_n / 1e6,
+            total: 0.0,
+        };
+        Some(parts.with_total())
     }
 
     fn stale(&self) -> bool {

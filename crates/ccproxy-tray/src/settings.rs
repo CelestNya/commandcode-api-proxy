@@ -246,18 +246,18 @@ pub fn autostart_enabled() -> bool {
 pub fn toggle_autostart(root: &Path, log: &crate::process::LogFile) {
     if autostart_enabled() {
         if crate::win::registry::delete_value(RUN_KEY, RUN_VALUE) {
-            log.append("[tray] 已关闭开机自启");
+            log.info("[tray] 已关闭开机自启");
         } else {
-            log.append("[tray] 关闭开机自启失败");
+            log.warn("[tray] 关闭开机自启失败");
         }
         return;
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| root.join("CCProxyTray.exe"));
     let quoted = format!("\"{}\"", exe.display());
     if crate::win::registry::write_string(RUN_KEY, RUN_VALUE, &quoted) {
-        log.append(&format!("[tray] 已开启开机自启：{quoted}"));
+        log.info(&format!("[tray] 已开启开机自启：{quoted}"));
     } else {
-        log.append("[tray] 开启开机自启失败");
+        log.warn("[tray] 开启开机自启失败");
     }
 }
 

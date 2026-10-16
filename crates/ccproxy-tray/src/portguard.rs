@@ -110,7 +110,7 @@ pub fn ensure_available(
             Decision::Proceed
         }
         Decision::Proceed => {
-            log.append(&format!(
+            log.info(&format!(
                 "[tray] 端口 {port} 被我方残留进程(PID {pid})占用，结束它"
             ));
             terminate(pid);
@@ -119,12 +119,12 @@ pub fn ensure_available(
             }) {
                 Decision::Proceed
             } else {
-                log.append(&format!("[tray] 结束我方旧进程后端口 {port} 仍未释放"));
+                log.warn(&format!("[tray] 结束我方旧进程后端口 {port} 仍未释放"));
                 Decision::Refuse
             }
         }
         Decision::Refuse => {
-            log.append(&format!(
+            log.error(&format!(
                 "[tray] 端口 {port} 已被其他程序占用(PID {pid})，拒绝启动"
             ));
             crate::win::message_box(

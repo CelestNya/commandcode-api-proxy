@@ -609,6 +609,7 @@ fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, c
         D::wire(),
         is_stream,
     ));
+    ledger.set_tools(tools_names_json(&raw));
     let opts = upstream_options(state, &api_key, ledger.clone());
     let stream = match generate::send_with_model_discovery(
         &state.catalog,
@@ -766,34 +767,56 @@ fn dump_failed_request(
     );
 }
 
+/// The tool names a request offers, from either dialect's shape: OpenAI puts
+/// them under `tools[].function.name`, Anthropic under `tools[].name`.
+/// `None` when the client sent no tools at all (an empty array counts as none).
+pub fn tools_names_json(raw: &Value) -> Option<String> {
+    let arr = raw.get("tools").and_then(Value::as_array)?;
+    if arr.is_empty() {
+        return None;
+    }
+    let names: Vec<&str> = arr
+        .iter()
+        .filter_map(|t| {
+            t.pointer("/function/name")
+                .or_else(|| t.get("name"))
+                .and_then(Value::as_str)
+        })
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    serde_json::to_string(&names).ok()
+}
+
 /// The per-request tool summary the Node handler logs. Two facts only — the
 /// model and whether tools were offered — because that is what makes a
 /// "the model ignored my tool" report diagnosable from the log alone.
+///
+/// UX 0.7.0 (D11/R9): three lines collapsed to one INFO line; the full tool
+/// list moved to DEBUG — the names repeat every request and are rarely the
+/// signal, and the ledger now carries them for the detail sidebar.
 fn log_incoming_request(ctx: &RequestId, raw: &Value, requested: &str) {
     let tools = raw.get("tools").and_then(Value::as_array);
-    log::info(&format!(
-        "[{}] [Incoming Request] Model: {requested}",
-        ctx.id
-    ));
     let count = tools.map_or(0, Vec::len);
     log::info(&format!(
-        "[{}] [Incoming Request] Tools count: {count}",
+        "[{}] [Incoming Request] Model: {requested} · Tools: {count}",
         ctx.id
     ));
-    if let Some(names) = tools.filter(|t| !t.is_empty()) {
-        let list: Vec<&str> = names
+    if count > 0 {
+        let list: Vec<&str> = tools
             .iter()
-            .filter_map(|t| t.pointer("/function/name").and_then(Value::as_str))
+            .flat_map(|arr| arr.iter())
+            .filter_map(|t| {
+                t.pointer("/function/name")
+                    .or_else(|| t.get("name"))
+                    .and_then(Value::as_str)
+            })
             .collect();
-        log::info(&format!(
-            "[{}] [Incoming Request] Tools list: {}",
+        log::debug(&format!(
+            "[{}] [Incoming Request] Tools: {}",
             ctx.id,
             list.join(", ")
-        ));
-    } else {
-        log::info(&format!(
-            "[{}] [Incoming Request] No tools were sent by the client!",
-            ctx.id
         ));
     }
 }

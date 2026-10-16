@@ -99,8 +99,9 @@ fn serve_static(req: Request, url_path: &str) {
 
 /// How many ledger rows the detail screen shows by default.
 const DEFAULT_LIMIT: i64 = 200;
-/// Default trend window (days) for the overview screen.
-const DEFAULT_TREND_DAYS: i64 = 14;
+/// Default stats window (hours) for the overview screen (UX 0.7.0: 24h by
+/// default, like the time picker's middle preset).
+const DEFAULT_WINDOW_HOURS: u64 = 24;
 const MAX_LIMIT: i64 = 1000;
 /// How many trailing lines of each log the log screen shows on first paint.
 const LOG_TAIL_LINES: usize = 500;
@@ -280,20 +281,25 @@ fn process_uptime_secs() -> Option<u64> {
     Some(now.saturating_sub(start))
 }
 
-/// `GET /webui/api/stats` — summary statistics for screen one.
+/// `GET /webui/api/stats?from=…&to=…` — summary statistics for screen one.
+///
+/// The window defaults to the last 24 hours (UX 0.7.0: the overview shows a
+/// 24h slice by default and re-aggregates when the time picker moves).
 pub fn handle_stats(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
-    let days = parse_days(req.url());
-    let body = with_ledger(|conn| stats_json(conn, days));
+    let (from, to) = parse_window(req.url());
+    let body = with_ledger(|conn| stats_json(conn, &from, &to));
     respond_json(req, &body);
 }
 
-/// `GET /webui/api/attempts?limit=N` — the recent ledger for screen two.
+/// `GET /webui/api/attempts?limit=N&from=…&to=…` — the recent ledger for
+/// screen two, grouped by client request.
 pub fn handle_attempts(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
     let limit = parse_limit(req.url());
+    let (from, to) = parse_window(req.url());
     let body = match billing::open_database(&billing::billing_dir()) {
-        Some(conn) => attempts_json(&conn, limit),
+        Some(conn) => attempts_json(&conn, &from, &to, limit),
         // No ledger yet (proxy never ran): an empty array keeps this
         // endpoint's array contract, which the page filters and paginates.
         None => json!([]),
@@ -493,26 +499,52 @@ fn parse_limit(url: &str) -> i64 {
     DEFAULT_LIMIT
 }
 
-fn parse_days(url: &str) -> i64 {
+/// The window `from`/`to` (ISO-8601, lexicographic in SQLite) for a stats or
+/// attempts query. Defaults to the last [`DEFAULT_WINDOW_HOURS`] when absent.
+/// Bound checks are lexical: the ledger's own timestamps are the same shape,
+/// so any prefix with `T` compares sanely.
+fn parse_window(url: &str) -> (String, String) {
     let query = url.split('?').nth(1).unwrap_or("");
+    let mut from: Option<String> = None;
+    let mut to: Option<String> = None;
     for pair in query.split('&') {
         let mut it = pair.split('=');
-        if it.next() == Some("days") {
-            if let Ok(n) = it.next().unwrap_or("").parse::<i64>() {
-                return n.clamp(1, 90);
-            }
+        let key = it.next();
+        let value = it.next().unwrap_or("").to_string();
+        match key {
+            Some("from") if !value.is_empty() => from = Some(value),
+            Some("to") if !value.is_empty() => to = Some(value),
+            _ => {}
         }
     }
-    DEFAULT_TREND_DAYS
+    let now = crate::time::now_epoch_secs();
+    let to = to.unwrap_or_else(|| crate::time::iso8601_secs(now));
+    let from = from.unwrap_or_else(|| {
+        crate::time::iso8601_secs(now.saturating_sub(DEFAULT_WINDOW_HOURS.saturating_mul(3600)))
+    });
+    (from, to)
 }
 
 // ── queries ────────────────────────────────────────────────────
 
-/// Screen-one payload: lifetime totals, today's totals and a 14-day trend.
+/// Accumulator for one trend bucket (hour or day), merged across the bucket's
+/// per-model rows once each has been priced at its own peak/off-peak rate.
+#[derive(Default)]
+struct BucketRow {
+    attempts: i64,
+    prompt: i64,
+    cached: i64,
+    completion: i64,
+    cost: f64,
+    priced: bool,
+}
+
+/// Screen-one payload: lifetime totals, the stats of the selected window
+/// (default 24h) and a trend over that window with adaptive sampling.
 ///
 /// Token columns are NULL when unknown (a failed attempt has no tokens) and
 /// must never be shown as 0 — every SUM is coalesced so the aggregate is real.
-fn stats_json(conn: &Connection, window: i64) -> Value {
+fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
     // Crawled price table; loads from disk and refreshes when stale (24h).
     let pricing = Pricing::load(&billing::billing_dir());
     let totals = conn
@@ -565,21 +597,22 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
         latest_ts,
     ) = totals;
 
-    let today = conn
+    let window = conn
         .query_row(
-            // The boundary must come out of strftime, not datetime(): the ts
-            // column holds T-separated ISO instants, and since 'T' > ' ' a
-            // space-formatted boundary would let every same-day row through
-            // regardless of its actual time (the old query silently dropped
-            // everything before 08:00 local in UTC+8).
             "select count(*),
+                    coalesce(sum(case when status = 'ok' then 1 else 0 end), 0),
+                    coalesce(sum(case when status = 'error' then 1 else 0 end), 0),
+                    coalesce(sum(case when status = 'aborted' then 1 else 0 end), 0),
+                    coalesce(sum(case when status = 'interrupted' then 1 else 0 end), 0),
                     coalesce(sum(promptTokens), 0),
                     coalesce(sum(cachedTokens), 0),
                     coalesce(sum(completionTokens), 0),
-                    coalesce(sum(reasoningTokens), 0)
+                    coalesce(sum(reasoningTokens), 0),
+                    coalesce(avg(durationMs), 0),
+                    coalesce(avg(ttfbMs), 0)
              from billing
-             where ts >= strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', 'start of day', 'utc')",
-            [],
+             where ts >= ?1 and ts <= ?2",
+            [from_ts, to_ts],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -587,79 +620,113 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, f64>(9)?,
+                    row.get::<_, f64>(10)?,
                 ))
             },
         )
-        .unwrap_or((0, 0, 0, 0, 0));
+        .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0));
 
     let trend = {
-        // The window is a strict calendar range: a recursive CTE materialises
-        // every day in it and left-joins the aggregated ledger, so the chart
-        // always shows `window` points and empty days read as zero tokens.
-        // A different window therefore visibly changes the curve. The filter
-        // boundary is strftime for the same T-format reason as `today` above;
-        // whole-day shifts are timezone-invariant, so UTC is exact here.
-        let stmt = conn
-            .prepare(
-                "with recursive seq(x) as (
-                        select 0
-                        union all
-                        select x + 1 from seq where x < ?1 - 1
-                     ),
-                     days(day) as (
-                        select date('now', 'localtime', '-' || x || ' days') from seq
-                     ),
-                     agg as (
-                        select strftime('%Y-%m-%d', ts, 'localtime') as day,
-                               count(*) as attempts,
-                               coalesce(sum(promptTokens), 0) as prompt,
-                               coalesce(sum(cachedTokens), 0) as cached,
-                               coalesce(sum(completionTokens), 0) as completion
-                        from billing
-                        where ts >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-' || ?2 || ' days')
-                        group by day
-                     )
-                 select d.day,
-                        coalesce(a.attempts, 0),
-                        coalesce(a.prompt, 0),
-                        coalesce(a.cached, 0),
-                        coalesce(a.completion, 0)
-                 from days d
-                 left join agg a on a.day = d.day
-                 order by d.day",
+        // Adaptive sampling over the selected window: hourly buckets when the
+        // window spans ≤ 48h, daily otherwise. Rows are bucketed by their own
+        // peak/off-peak period in SQL so each bucket's cost is exact, then
+        // re-merged per bucket in Rust (the price table rates the aggregate).
+        // Sparse windows simply have fewer points — an empty hour/day is
+        // absent, not zero-inflated.
+        let span_hours: f64 = conn
+            .query_row(
+                "select (julianday(?2) - julianday(?1)) * 24.0",
+                [from_ts, to_ts],
+                |row| row.get::<_, f64>(0),
             )
-            .ok();
-        let mut days: Vec<Value> = Vec::new();
+            .unwrap_or(24.0);
+        let bucket_expr = if span_hours <= 48.0 {
+            "strftime('%Y-%m-%dT%H:00', ts, 'localtime')"
+        } else {
+            "strftime('%Y-%m-%d', ts, 'localtime')"
+        };
+        let sql = format!(
+            "select {bucket_expr} as b,
+                    model,
+                    case when (
+                        (cast(strftime('%H', ts) as integer) * 60
+                         + cast(strftime('%M', ts) as integer)) between 60 and 239
+                        or (cast(strftime('%H', ts) as integer) * 60
+                         + cast(strftime('%M', ts) as integer)) between 360 and 599
+                    ) then 1 else 0 end as peak,
+                    count(*),
+                    coalesce(sum(promptTokens), 0),
+                    coalesce(sum(cachedTokens), 0),
+                    coalesce(sum(cacheCreationTokens), 0),
+                    coalesce(sum(completionTokens), 0)
+             from billing
+             where ts >= ?1 and ts <= ?2
+             group by b, model, peak
+             order by b, model, peak"
+        );
+        let stmt = conn.prepare(&sql).ok();
+        // bucket → per-model priceable parts, merged once every (bucket, model)
+        // row has been priced.
+        let mut by_bucket: std::collections::BTreeMap<String, BucketRow> =
+            std::collections::BTreeMap::new();
         if let Some(mut stmt) = stmt {
-            if let Ok(rows) = stmt.query_map([window, window], |row| {
+            if let Ok(rows) = stmt.query_map([from_ts, to_ts], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
                 ))
             }) {
                 for row in rows.flatten() {
-                    // promptTokens already counts cached tokens (AI SDK
-                    // accounting), so the hit rate is cached / prompt.
-                    let hit_rate = if row.2 > 0 {
-                        Some(row.3 as f64 / row.2 as f64)
-                    } else {
-                        None
-                    };
-                    days.push(json!({
-                        "date": row.0,
-                        "attempts": row.1,
-                        "prompt": row.2,
-                        "cached": row.3,
-                        "completion": row.4,
-                        "hitRate": hit_rate,
-                    }));
+                    // Rate period of this bucket: any minute inside the peak
+                    // window selects the same rate, so a representative one is
+                    // enough; minute 0 is off-peak.
+                    let minute = if row.2 == 1 { 120 } else { 0 };
+                    let cost = pricing.cost_breakdown(
+                        &row.1, row.4, row.5, row.6, row.7, minute,
+                    );
+                    let entry = by_bucket
+                        .entry(row.0.clone())
+                        .or_default();
+                    entry.attempts = entry.attempts.saturating_add(row.3);
+                    entry.prompt = entry.prompt.saturating_add(row.4);
+                    entry.cached = entry.cached.saturating_add(row.5);
+                    entry.completion = entry.completion.saturating_add(row.7);
+                    if let Some(c) = cost {
+                        entry.cost += c.total;
+                        entry.priced = true;
+                    }
                 }
             }
         }
-        days // oldest → newest for the chart
+        let mut out: Vec<Value> = Vec::new();
+        for (bucket, r) in by_bucket {
+            let hit_rate = if r.prompt > 0 {
+                Some(r.cached as f64 / r.prompt as f64)
+            } else {
+                None
+            };
+            out.push(json!({
+                "date": bucket,
+                "attempts": r.attempts,
+                "prompt": r.prompt,
+                "cached": r.cached,
+                "completion": r.completion,
+                "hitRate": hit_rate,
+                "costUsd": if r.priced { Some(r.cost) } else { None },
+            }));
+        }
+        out // oldest → newest (BTreeMap key order)
     };
 
     let platforms = {
@@ -671,13 +738,14 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         coalesce(sum(cachedTokens), 0),
                         coalesce(sum(completionTokens), 0)
                  from billing
+                 where ts >= ?1 and ts <= ?2
                  group by wire
                  order by count(*) desc",
             )
             .ok();
         let mut out: Vec<Value> = Vec::new();
         if let Some(mut stmt) = stmt {
-            if let Ok(rows) = stmt.query_map([], |row| {
+            if let Ok(rows) = stmt.query_map([from_ts, to_ts], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
@@ -727,6 +795,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
                         coalesce(sum(completionTokens), 0),
                         coalesce(sum(reasoningTokens), 0)
                  from billing
+                 where ts >= ?1 and ts <= ?2
                  group by model, peak
                  order by count(*) desc, 4 desc",
             )
@@ -746,7 +815,7 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
         let mut by_model: std::collections::BTreeMap<String, Row> =
             std::collections::BTreeMap::new();
         if let Some(mut stmt) = stmt {
-            if let Ok(rows) = stmt.query_map([], |row| {
+            if let Ok(rows) = stmt.query_map([from_ts, to_ts], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
@@ -827,6 +896,11 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
     } else {
         None
     };
+    let win_hit_rate = if window.5 > 0 {
+        Some(window.6 as f64 / window.5 as f64)
+    } else {
+        None
+    };
 
     json!({
         "totals": {
@@ -845,12 +919,20 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
             "latestTs": latest_ts,
             "costUsd": cost_total,
         },
-        "today": {
-            "attempts": today.0,
-            "promptTokens": today.1,
-            "cachedTokens": today.2,
-            "completionTokens": today.3,
-            "reasoningTokens": today.4,
+        "window": {
+            "attempts": window.0,
+            "ok": window.1,
+            "error": window.2,
+            "aborted": window.3,
+            "interrupted": window.4,
+            "promptTokens": window.5,
+            "cachedTokens": window.6,
+            "completionTokens": window.7,
+            "reasoningTokens": window.8,
+            "avgDurationMs": window.9,
+            "avgTtfbMs": window.10,
+            "hitRate": win_hit_rate,
+            "costUsd": cost_total,
         },
         "trend": trend,
         "platforms": platforms,
@@ -858,44 +940,172 @@ fn stats_json(conn: &Connection, window: i64) -> Value {
         "pricing": pricing_meta,
     })
 }
-/// Screen-two payload: the most recent attempts, newest first.
-fn attempts_json(conn: &Connection, limit: i64) -> Value {
+/// Screen-two payload: the most recent client requests within the window,
+/// newest first. One row per request (UX 0.7.0): retries collapse into the
+/// request, with the final attempt's status/latency shown and a `costUsd`
+/// priced per attempt at its own peak/off-peak rate.
+fn attempts_json(conn: &Connection, from_ts: &str, to_ts: &str, limit: i64) -> Value {
+    let pricing = Pricing::load(&billing::billing_dir());
     let mut stmt = match conn.prepare(
         "select ts, reqId, wire, model, stream, attempt, status, errorTag,
                 promptTokens, cachedTokens, cacheCreationTokens,
-                completionTokens, reasoningTokens, durationMs, ttfbMs
+                completionTokens, reasoningTokens, durationMs, ttfbMs, tools
          from billing
-         order by id desc
-         limit ?1",
+         where ts >= ?1 and ts <= ?2
+           and reqId in (
+               select reqId from billing
+               where ts >= ?1 and ts <= ?2
+               group by reqId
+               order by max(ts) desc
+               limit ?3
+           )
+         order by reqId, attempt",
     ) {
         Ok(stmt) => stmt,
         Err(_) => return json!([]),
     };
     let rows = stmt
-        .query_map([limit], |row| {
-            Ok(json!({
-                "ts": row.get::<_, String>(0)?,
-                "reqId": row.get::<_, Option<String>>(1)?,
-                "wire": row.get::<_, String>(2)?,
-                "model": row.get::<_, String>(3)?,
-                "stream": row.get::<_, bool>(4)?,
-                "attempt": row.get::<_, i64>(5)?,
-                "status": row.get::<_, String>(6)?,
-                "errorTag": row.get::<_, Option<String>>(7)?,
-                "promptTokens": row.get::<_, Option<i64>>(8)?,
-                "cachedTokens": row.get::<_, Option<i64>>(9)?,
-                "cacheCreationTokens": row.get::<_, Option<i64>>(10)?,
-                "completionTokens": row.get::<_, Option<i64>>(11)?,
-                "reasoningTokens": row.get::<_, Option<i64>>(12)?,
-                "durationMs": row.get::<_, Option<i64>>(13)?,
-                "ttfbMs": row.get::<_, Option<i64>>(14)?,
-            }))
-        })
+        .query_map(
+            rusqlite::params![from_ts, to_ts, limit],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, Option<i64>>(10)?,
+                    row.get::<_, Option<i64>>(11)?,
+                    row.get::<_, Option<i64>>(12)?,
+                    row.get::<_, Option<i64>>(13)?,
+                    row.get::<_, Option<i64>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                ))
+            },
+        )
         .ok();
-    let mut out = Vec::new();
-    if let Some(rows) = rows {
-        out.extend(rows.flatten());
+
+    // reqId -> aggregated request (BTreeMap keeps insertion order; the SQL
+    // orders by reqId, so a stable pass keeps attempts ascending).
+    struct Req {
+        ts: String,
+        model: String,
+        wire: String,
+        stream: bool,
+        attempts: i64,
+        status: String,
+        error_tag: Option<String>,
+        prompt: i64,
+        cached: i64,
+        cache_creation: i64,
+        completion: i64,
+        reasoning: i64,
+        duration_ms: Option<i64>,
+        ttfb_ms: Option<i64>,
+        cost: crate::pricing::CostBreakdown,
+        priced: bool,
+        tools: Option<Vec<String>>,
     }
+    let mut by_req: std::collections::BTreeMap<String, Req> = std::collections::BTreeMap::new();
+    if let Some(rows) = rows {
+        for r in rows.flatten() {
+            let entry = by_req.entry(r.1.clone()).or_insert_with(|| Req {
+                ts: r.0.clone(),
+                model: r.3.clone(),
+                wire: r.2.clone(),
+                stream: r.4,
+                attempts: 0,
+                status: r.6.clone(),
+                error_tag: r.7.clone(),
+                prompt: 0,
+                cached: 0,
+                cache_creation: 0,
+                completion: 0,
+                reasoning: 0,
+                duration_ms: r.13,
+                ttfb_ms: r.14,
+                cost: crate::pricing::CostBreakdown::default(),
+                priced: false,
+                tools: None,
+            });
+            entry.attempts = entry.attempts.saturating_add(1);
+            // The SQL orders attempts ascending, so the last row of a reqId is
+            // its final attempt: that status/tag/latency is the request's.
+            entry.ts = r.0.clone();
+            entry.status = r.6.clone();
+            entry.error_tag = r.7.clone();
+            entry.duration_ms = r.13;
+            entry.ttfb_ms = r.14;
+            if let Some(t) = r.8 {
+                entry.prompt = entry.prompt.saturating_add(t);
+            }
+            if let Some(t) = r.9 {
+                entry.cached = entry.cached.saturating_add(t);
+            }
+            if let Some(t) = r.10 {
+                entry.cache_creation = entry.cache_creation.saturating_add(t);
+            }
+            if let Some(t) = r.11 {
+                entry.completion = entry.completion.saturating_add(t);
+            }
+            if let Some(t) = r.12 {
+                entry.reasoning = entry.reasoning.saturating_add(t);
+            }
+            if entry.tools.is_none() {
+                entry.tools = r.15.and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok());
+            }
+            // Price this attempt at its own peak/off-peak period, so a
+            // peak-hour row keeps its peak price however late the page opens.
+            if let Some(minute) = crate::pricing::minute_of_day_from_iso8601(&r.0) {
+                if let Some(c) = pricing.cost_breakdown(&r.3, r.8.unwrap_or(0), r.9.unwrap_or(0), r.10.unwrap_or(0), r.11.unwrap_or(0), minute) {
+                    entry.cost.uncached += c.uncached;
+                    entry.cost.cached += c.cached;
+                    entry.cost.cache_creation += c.cache_creation;
+                    entry.cost.completion += c.completion;
+                    entry.cost.total += c.total;
+                    entry.priced = true;
+                }
+            }
+        }
+    }
+    let mut out: Vec<Value> = by_req
+        .into_iter()
+        .map(|(req_id, r)| {
+            json!({
+                "reqId": req_id,
+                "ts": r.ts,
+                "model": r.model,
+                "wire": r.wire,
+                "stream": r.stream,
+                "attempts": r.attempts,
+                "status": r.status,
+                "errorTag": r.error_tag,
+                "promptTokens": r.prompt,
+                "cachedTokens": r.cached,
+                "cacheCreationTokens": r.cache_creation,
+                "completionTokens": r.completion,
+                "reasoningTokens": r.reasoning,
+                "durationMs": r.duration_ms,
+                "ttfbMs": r.ttfb_ms,
+                "costUsd": if r.priced { Some(r.cost.total) } else { None },
+                "costBreakdown": {
+                    "uncached": r.cost.uncached,
+                    "cached": r.cost.cached,
+                    "cacheCreation": r.cost.cache_creation,
+                    "completion": r.cost.completion,
+                    "total": r.cost.total,
+                },
+                "tools": r.tools,
+            })
+        })
+        .collect();
+    // Newest first by last activity.
+    out.sort_by(|a, b| b.get("ts").and_then(|v| v.as_str()).cmp(&a.get("ts").and_then(|v| v.as_str())));
     json!(out)
 }
 
@@ -903,6 +1113,15 @@ fn attempts_json(conn: &Connection, limit: i64) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stats window wide enough to cover the fixtures, which are relative
+    /// to "now".
+    fn test_from() -> String {
+        crate::time::iso8601_secs(crate::time::now_epoch_secs().saturating_sub(90 * 86_400))
+    }
+    fn test_to() -> String {
+        crate::time::iso8601_secs(crate::time::now_epoch_secs())
+    }
 
     #[test]
     fn an_empty_read_means_nothing_new_and_never_resets() {
@@ -1010,11 +1229,13 @@ mod tests {
                 completionTokens integer,
                 reasoningTokens integer,
                 durationMs integer,
-                ttfbMs integer
+                ttfbMs integer,
+                tools text
             );",
         )
         .unwrap();
-        for (ts, wire, model, status, prompt, cached, completion, duration, attempt, stream) in rows
+        for (i, (ts, wire, model, status, prompt, cached, completion, duration, attempt, stream)) in
+            rows.iter().enumerate()
         {
             conn.execute(
                 "insert into billing (ts, reqId, model, wire, stream, attempt, status,
@@ -1022,7 +1243,7 @@ mod tests {
                                       reasoningTokens, durationMs)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, null, ?11)",
                 rusqlite::params![
-                    ts, "req", model, wire, stream, attempt, status, prompt, cached, completion,
+                    ts, format!("req-{i}"), model, wire, stream, attempt, status, prompt, cached, completion,
                     duration
                 ],
             )
@@ -1071,7 +1292,7 @@ mod tests {
                 1,
             ),
         ]);
-        let s = stats_json(&conn, 14);
+        let s = stats_json(&conn, &test_from(), &test_to());
         let t = &s["totals"];
         assert_eq!(t["attempts"], 3);
         assert_eq!(t["ok"], 2);
@@ -1100,7 +1321,7 @@ mod tests {
             1,
             0,
         )]);
-        let s = stats_json(&conn, 14);
+        let s = stats_json(&conn, &test_from(), &test_to());
         assert_eq!(s["totals"]["promptTokens"], 0); // NULLs summed to 0, not fabricated
         assert_eq!(s["totals"]["attempts"], 1);
         assert_eq!(s["totals"]["error"], 1);
@@ -1171,7 +1392,7 @@ mod tests {
             ),
         ];
         let conn = ledger(&rows);
-        let a = attempts_json(&conn, 3);
+        let a = attempts_json(&conn, &test_from(), &test_to(), 3);
         let arr = a.as_array().unwrap();
         assert_eq!(arr.len(), 3);
         assert_eq!(arr[0]["ts"], "2026-09-14T10:00:00Z"); // newest first
@@ -1215,11 +1436,12 @@ mod tests {
                 0,
             ),
         ]);
-        let s = stats_json(&conn, 14);
+        let s = stats_json(&conn, &test_from(), &test_to());
         let trend = s["trend"].as_array().unwrap();
-        // The window is a strict calendar range: every day is present so a
-        // different window visibly changes the curve, empty days read 0.
-        assert_eq!(trend.len(), 14);
+        // Adaptive sampling: the wide test window falls into daily buckets and
+        // only buckets with traffic appear (sparse hours/days are absent, not
+        // zero-inflated).
+        assert_eq!(trend.len(), 2);
         let date_before = &day_before[..10];
         let date_y = &yesterday[..10];
         let i15 = trend.iter().position(|d| d["date"] == date_before).unwrap();
@@ -1231,8 +1453,6 @@ mod tests {
         assert_eq!(trend[i16]["completion"], 0);
         assert_eq!(trend[i16]["hitRate"], 10.0 / 50.0); // cached / prompt (prompt includes cached)
         assert_eq!(trend[i15]["hitRate"], 0.0); // cached 0 with prompt > 0 is a real 0% hit
-        assert_eq!(trend[0]["attempts"], 0);
-        assert!(trend[0]["hitRate"].is_null());
         // platform aggregation
         let platforms = s["platforms"].as_array().unwrap();
         assert_eq!(platforms.len(), 1);
@@ -1281,7 +1501,7 @@ mod tests {
                 0,
             ),
         ]);
-        let s = stats_json(&conn, 14);
+        let s = stats_json(&conn, &test_from(), &test_to());
         let models = s["models"].as_array().unwrap();
         assert_eq!(models.len(), 2);
         assert_eq!(models[0]["model"], "gpt-4o"); // more attempts first
@@ -1309,11 +1529,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_days_clamps_to_known_bounds() {
-        assert_eq!(parse_days("/webui/api/stats"), DEFAULT_TREND_DAYS);
-        assert_eq!(parse_days("/webui/api/stats?days=30"), 30);
-        assert_eq!(parse_days("/webui/api/stats?days=999"), 90);
-        assert_eq!(parse_days("/webui/api/stats?days=abc"), DEFAULT_TREND_DAYS);
+    fn parse_window_defaults_to_24h_and_honours_both_edges() {
+        // No parameters: a 24h window ending now.
+        let (from, to) = parse_window("/webui/api/stats");
+        assert!(to > from, "to={to} from={from}");
+        // ISO-second shape, matching the ledger's own timestamps.
+        assert_eq!(from.len(), 19, "from={from}");
+        assert_eq!(to.len(), 19, "to={to}");
+        // Explicit edges are used verbatim (lexicographic ISO comparison).
+        let (f2, t2) = parse_window("/webui/api/stats?from=2026-10-01T00:00:00&to=2026-10-02T00:00:00");
+        assert_eq!(f2, "2026-10-01T00:00:00");
+        assert_eq!(t2, "2026-10-02T00:00:00");
+        // One edge missing falls back for that edge only.
+        let (f3, t3) = parse_window("/webui/api/stats?from=2026-10-01T00:00:00");
+        assert_eq!(f3, "2026-10-01T00:00:00");
+        assert!(t3 > f3);
     }
 
     #[test]
@@ -1360,31 +1590,103 @@ mod tests {
     }
 
     #[test]
-    fn today_window_compares_timestamps_in_the_same_format() {
-        // The ledger stores T-separated UTC instants; a space-formatted
-        // boundary sorts before every same-day ts because 'T' > ' ', which
-        // used to drop the local 00:00–08:00 requests from "today". Both
-        // probes derive from the very expression the query uses, so this is
-        // exact: only the after-midnight row may count as today.
-        let conn = ledger(&[]);
+    fn window_counts_only_rows_inside_the_range() {
+        // The window filter must be exact: a row outside [from, to] drops out
+        // of `window` but stays in `totals`.
+        let now = crate::time::now_epoch_secs();
+        let conn = ledger(&[
+            (
+                crate::time::iso8601_secs(now - 2 * 86_400).as_str(),
+                "openai",
+                "gpt-4o",
+                "ok",
+                10,
+                0,
+                5,
+                100,
+                1,
+                0,
+            ),
+            (
+                crate::time::iso8601_secs(now - 10 * 86_400).as_str(),
+                "openai",
+                "gpt-4o",
+                "ok",
+                20,
+                0,
+                5,
+                100,
+                1,
+                0,
+            ),
+        ]);
+        let s = stats_json(
+            &conn,
+            &crate::time::iso8601_secs(now - 5 * 86_400),
+            &crate::time::iso8601_secs(now),
+        );
+        assert_eq!(s["window"]["attempts"], 1, "only the newer row is in the 5-day window");
+        assert_eq!(s["window"]["promptTokens"], 10);
+        // Lifetime totals still count everything.
+        assert_eq!(s["totals"]["attempts"], 2);
+    }
+
+    #[test]
+    fn retries_merge_into_one_request() {
+        // UX 0.7.0: the detail screen groups by request — two attempts on the
+        // same reqId collapse into one row showing the final attempt's status.
+        let now = crate::time::now_epoch_secs();
+        let ts = crate::time::iso8601_secs(now - 3600);
+        let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "insert into billing (ts, reqId, model, wire, stream, attempt, status,
-                                  promptTokens, cachedTokens, completionTokens,
-                                  reasoningTokens, durationMs)
-             select strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', 'start of day', 'utc', '+1 seconds'),
-                    'req', 'gpt-4o', 'openai', 0, 1, 'ok', 10, 0, 5, null, 100;
-             insert into billing (ts, reqId, model, wire, stream, attempt, status,
-                                  promptTokens, cachedTokens, completionTokens,
-                                  reasoningTokens, durationMs)
-             select strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', 'start of day', 'utc', '-1 seconds'),
-                    'req', 'gpt-4o', 'openai', 0, 2, 'ok', 20, 0, 5, null, 100;",
+            "create table billing (
+                id integer primary key autoincrement,
+                ts text not null,
+                reqId text,
+                model text not null,
+                wire text not null,
+                stream integer not null,
+                attempt integer not null,
+                status text not null,
+                errorTag text,
+                promptTokens integer,
+                cachedTokens integer,
+                cacheCreationTokens integer,
+                completionTokens integer,
+                reasoningTokens integer,
+                durationMs integer,
+                ttfbMs integer,
+                tools text
+            );",
         )
         .unwrap();
-        let s = stats_json(&conn, 14);
-        assert_eq!(
-            s["today"]["attempts"], 1,
-            "only the after-midnight row is today"
-        );
+        for (attempt, status, prompt, cached, completion, duration) in [
+            (1, "ok", 100, 50, 30, 500),
+            (2, "ok", 160, 100, 40, 700),
+        ] {
+            conn.execute(
+                "insert into billing (ts, reqId, model, wire, stream, attempt, status,
+                                      promptTokens, cachedTokens, completionTokens,
+                                      reasoningTokens, durationMs)
+                 values (?1, 'same-req', 'gpt-4o', 'openai', 1, ?2, ?3, ?4, ?5, ?6, null, ?7)",
+                rusqlite::params![
+                    ts, attempt, status, prompt, cached, completion, duration
+                ],
+            )
+            .unwrap();
+        }
+        let a = attempts_json(&conn, &test_from(), &test_to(), 10);
+        let arr = a.as_array().unwrap();
+        assert_eq!(arr.len(), 1, "both attempts are one request");
+        assert_eq!(arr[0]["attempts"], 2);
+        assert_eq!(arr[0]["status"], "ok"); // final attempt
+        assert_eq!(arr[0]["durationMs"], 700); // final attempt's latency
+        assert_eq!(arr[0]["promptTokens"], 260); // summed across attempts
+        assert_eq!(arr[0]["cachedTokens"], 150);
+        assert_eq!(arr[0]["completionTokens"], 70);
+        // Priced only when the price table knows the model (tests run with an
+        // empty table); the breakdown shape must always be present.
+        assert!(arr[0]["costBreakdown"].is_object());
     }
 
     #[test]
@@ -1399,7 +1701,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let a = attempts_json(&conn, 10);
+        let a = attempts_json(&conn, &test_from(), &test_to(), 10);
         let row = &a.as_array().unwrap()[0];
         assert_eq!(row["cacheCreationTokens"], 100);
         assert_eq!(row["promptTokens"], 100);
