@@ -16,18 +16,22 @@ function attemptsLimit() { return Math.max(state.pageSize, 200); }
    响应本身;animate=true 是刻意的动作(切窗口/首帧/刷新),总是重画。 */
 var statsSig = "", attemptsSig = "";
 
-/* 时段窗口参数。秒级 UTC ISO；to 由后端补右闭边界后缀。 */
+/* 时段窗口参数。秒级 UTC ISO；to 由后端补右闭边界后缀。
+   不编码:ISO 时间戳只用 `T`/`:`/数字,都是 query 安全字符;encodeURIComponent
+   会把 `:` 变成 %3A,而后端按字面量比较会让窗口右边界失效(见 webui.rs
+   parse_window 的 percent_decode 注释)。 */
 function windowQuery(w) {
   var parts = [];
-  if (w && w.from) parts.push("from=" + encodeURIComponent(w.from));
-  if (w && w.to) parts.push("to=" + encodeURIComponent(w.to));
+  if (w && w.from) parts.push("from=" + w.from);
+  if (w && w.to) parts.push("to=" + w.to);
   return parts.length ? "&" + parts.join("&") : "";
 }
 
 function fetchStats(animate) {
-  return fetch("/webui/api/stats?x=1" + windowQuery(state.window)).then(function (r) { return r.json(); })
+  return fetch("/webui/api/stats?x=1" + windowQuery(currentWindow())).then(function (r) { return r.json(); })
     .then(function (s) {
       setLiveChip(true);
+      updateRangeLabel(); /* preset windows slide with the clock */
       var sig = JSON.stringify(s);
       if (animate !== true && sig === statsSig) return s;
       statsSig = sig;

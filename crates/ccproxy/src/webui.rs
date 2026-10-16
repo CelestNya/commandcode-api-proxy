@@ -501,6 +501,36 @@ fn parse_limit(url: &str) -> i64 {
 
 /// The window `from`/`to` (ISO-8601, lexicographic in SQLite) for a stats or
 /// attempts query. Defaults to the last [`DEFAULT_WINDOW_HOURS`] when absent.
+/// Minimal percent-decoding for query values (`%3A` → `:`, `%2F` → `/`, …).
+/// The web UI ships ISO timestamps via `encodeURIComponent`, which escapes the
+/// colon; without decoding, `2026-10-16T06%3A36%3A18` is compared as a literal
+/// and `'%' (0x25) < ':' (0x3A)` silently crushes the `to` edge below every
+/// real timestamp, zeroing the window. Raw (unencoded) values pass through.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(b.len());
+    let mut i = 0usize;
+    while i < b.len() {
+        let c = *b.get(i).unwrap_or(&b'?');
+        let hi = b
+            .get(i.wrapping_add(1))
+            .and_then(|&x| char::from(x).to_digit(16));
+        let lo = b
+            .get(i.wrapping_add(2))
+            .and_then(|&x| char::from(x).to_digit(16));
+        if c == b'%' {
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push(char::from_u32(h.wrapping_mul(16).wrapping_add(l)).unwrap_or('\u{FFFD}'));
+                i = i.wrapping_add(3);
+                continue;
+            }
+        }
+        out.push(char::from(c));
+        i = i.wrapping_add(1);
+    }
+    out
+}
+
 /// Bound checks are lexical: the ledger's own timestamps are the same shape,
 /// so any prefix with `T` compares sanely.
 fn parse_window(url: &str) -> (String, String) {
@@ -510,7 +540,7 @@ fn parse_window(url: &str) -> (String, String) {
     for pair in query.split('&') {
         let mut it = pair.split('=');
         let key = it.next();
-        let value = it.next().unwrap_or("").to_string();
+        let value = percent_decode(it.next().unwrap_or(""));
         match key {
             Some("from") if !value.is_empty() => from = Some(value),
             Some("to") if !value.is_empty() => to = Some(value),
@@ -1582,6 +1612,18 @@ mod tests {
         let (f3, t3) = parse_window("/webui/api/stats?from=2026-10-01T00:00:00");
         assert_eq!(f3, "2026-10-01T00:00:00");
         assert!(t3 > f3);
+        // Percent-encoded edges (the web UI ships encodeURIComponent'd ISO
+        // timestamps) must decode before the lexical bound checks; an encoded
+        // `to` otherwise compares `%` < `:` and zeroes the window.
+        let (f4, t4) = parse_window(
+            "/webui/api/stats?from=2026-10-16T05%3A36%3A42&to=2026-10-16T06%3A36%3A42",
+        );
+        assert_eq!(f4, "2026-10-16T05:36:42");
+        assert_eq!(t4, "2026-10-16T06:36:42Z999");
+        // Mixed/raw values pass through untouched.
+        assert_eq!(percent_decode("2026-10-16T05:36:42"), "2026-10-16T05:36:42");
+        assert_eq!(percent_decode("a%2Fb%20c"), "a/b c");
+        assert_eq!(percent_decode("100%"), "100%"); /* lone % is literal */
     }
 
     #[test]

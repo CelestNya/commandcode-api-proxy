@@ -29,6 +29,17 @@ function startDataPolling() {
 function isoNow() { return new Date().toISOString().slice(0, 19); }
 function isoAgo(hours) { return new Date(Date.now() - hours * 3600 * 1000).toISOString().slice(0, 19); }
 
+/* 窗口有两种模式：
+   - preset: 选"近1小时/24h/7天/30天"。窗口相对"现在"动态滑动——每次取数都
+     重算 from=(now-h, now)，曲线右端随轮询推进、旧点从左侧滑出，这才是
+     new-api 式实时趋势；固定 from/to 的窗口是死的（曲线永不随时间变化）。
+   - custom: 用户填了起止时间，窗口固定，轮询期间不滑动。
+   state.window 只存 custom 的固定边界；preset 存小时数。 */
+function currentWindow() {
+  if (state.windowMode === "preset") return { from: isoAgo(state.windowHours), to: isoNow() };
+  return state.window || { from: null, to: null };
+}
+
 /* state.window stores second-granular UTC ISO (no Z); the datetime-local
    inputs are local wall time. Convert both ways when syncing the picker. */
 function dtLocalFromIso(iso) {
@@ -47,14 +58,28 @@ function rangeText(from, to) {
   return from && to ? short(from) + " ~ " + short(to) : "";
 }
 
-/* Sync the two inputs + the range label to `state.window`, then refetch. */
+/* Sync the two inputs + the range label to the active window. */
 function syncWindowPickerUI() {
-  var w = state.window;
+  var w = currentWindow();
   el("w-from").value = w && w.from ? dtLocalFromIso(w.from) : "";
   el("w-to").value = w && w.to ? dtLocalFromIso(w.to) : "";
   el("window-range").textContent = rangeText(w && w.from, w && w.to);
 }
-function setOverviewWindow(from, to) {
+/* Poll-time refresh of the range label only (preset windows slide, so the
+   label should move with them); never touch the inputs mid-edit. */
+function updateRangeLabel() {
+  var w = currentWindow();
+  var txt = rangeText(w && w.from, w && w.to);
+  if (el("window-range").textContent !== txt) el("window-range").textContent = txt;
+}
+function selectPreset(h) {
+  state.windowMode = "preset";
+  state.windowHours = h;
+  syncWindowPickerUI();
+  fetchStats(true);
+}
+function applyCustom(from, to) {
+  state.windowMode = "custom";
   state.window = { from: from, to: to };
   syncWindowPickerUI();
   fetchStats(true);
@@ -65,7 +90,7 @@ function wireWindowPicker() {
       var h = Number(a.getAttribute("data-h"));
       document.querySelectorAll(".window-picker a[data-h]").forEach(function (x) { x.classList.remove("active"); });
       a.classList.add("active");
-      setOverviewWindow(isoAgo(h), isoNow());
+      selectPreset(h);
     });
   });
   el("w-apply").addEventListener("click", function () {
@@ -76,7 +101,7 @@ function wireWindowPicker() {
     var from = f ? new Date(f).toISOString().slice(0, 19) : null;
     var to = t ? new Date(t).toISOString().slice(0, 19) : null;
     document.querySelectorAll(".window-picker a[data-h]").forEach(function (x) { x.classList.remove("active"); });
-    setOverviewWindow(from, to);
+    applyCustom(from, to);
   });
 }
 
@@ -105,9 +130,11 @@ document.addEventListener("DOMContentLoaded", function () {
   route();
   wireWindowPicker();
   wireAttemptsWindow();
-  /* Default window (24h) matches the backend's DEFAULT_WINDOW_HOURS; sync the
-     picker inputs + range label so the selector looks done from first paint. */
-  if (!state.window.from) { state.window = { from: isoAgo(24), to: isoNow() }; }
+  /* Default: live 24h preset (matches the backend's DEFAULT_WINDOW_HOURS);
+     sync the picker inputs + range label so the selector looks done from
+     first paint. */
+  state.windowMode = "preset";
+  state.windowHours = 24;
   syncWindowPickerUI();
   ["f-model", "f-stream", "f-status"].forEach(function (id) {
     el(id).addEventListener("change", function () {
