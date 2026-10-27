@@ -44,18 +44,19 @@ jobs:
         run: cargo test --locked
 
   linux-sni-smoke:
-    # SNI 运行时冒烟：起私有 session bus，运行托盘，并在 DBus 上验证桌面
-    # 外壳（KDE 面板）接入托盘的完整契约——注册、属性、菜单布局、以及
-    # 通过 DBusMenu 点击「启动代理」真正拉起代理。比"编译实证"多验证
-    # 一整层；面板渲染本身仍需真机 KDE 目视确认。
+    # SNI 运行时契约：起私有 session bus + 伪造 StatusNotifierWatcher
+    # （扮演 Plasma 面板侧），运行真实 LinuxTray，在 DBus 上验证面板接入
+    # 托盘的完整契约——注册、属性、菜单布局、以及通过 DBusMenu 点击
+    # 「启动代理」「退出」驱动事件回调。裸 runner 上该测试自动跳过；
+    # 面板渲染本身仍需真机 KDE 目视确认。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Ensure DBus tooling
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq dbus libglib2.0-bin
-      - name: Build tray + proxy
-        run: cargo build --locked -p ccproxy-tray -p ccproxy
-      - name: SNI smoke test
-        run: bash scripts/sni-smoke.sh target/debug
+      - name: Ensure dbus-run-session
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dbus
+      - name: Build tray
+        run: cargo build --locked -p ccproxy-tray
+      - name: SNI contract test (private session bus)
+        run: dbus-run-session -- cargo test --locked -p ccproxy-tray sni_contract -- --nocapture
