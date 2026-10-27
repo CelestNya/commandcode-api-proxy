@@ -328,6 +328,50 @@ pub fn set_image_compress_key(text: &str, on: bool) -> String {
 /// on and the registered command is a tray exe in some other directory, it is
 /// rewritten to this exe. A command that is not a tray exe (a user's custom
 /// wrapper) is left alone, and autostart being off means nothing to sync.
+/// Adopt the previous install's `service/ccproxy.json` before starting the
+/// proxy. Takeover and upgrades unpack a fresh package whose config carries
+/// only zip defaults — notably no `imageCompress` — so without this a handover
+/// silently changes what gets re-encoded, which shifts the request prefix and
+/// drops the upstream prompt cache. The autostart entry names the incumbent
+/// install (kept in sync since 0.7.2), so it doubles as the migration source.
+/// Best effort in every direction: no registered command, same directory, or
+/// unreadable/unparseable source config all leave the local file untouched.
+pub fn inherit_config(root: &Path, log: &crate::process::LogFile) {
+    if !namespace().is_empty() {
+        return; // a test instance must not touch the production config
+    }
+    let Some(registered) = autostart_command() else {
+        return; // autostart is off; no previous install is named anywhere
+    };
+    let old_exe = PathBuf::from(registered.trim().trim_matches('"'));
+    let Some(old_root) = old_exe.parent() else {
+        return;
+    };
+    if old_root == root {
+        return; // same install restarting; nothing to inherit
+    }
+    let old_cfg = old_root.join("service").join("ccproxy.json");
+    let Ok(text) = std::fs::read_to_string(&old_cfg) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        log.append(&format!(
+            "[tray] 上一安装的配置无法解析（{old_cfg:?}），保留本安装配置"
+        ));
+        return;
+    };
+    let pretty = match serde_json::to_string_pretty(&value) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let new_cfg = root.join("service").join("ccproxy.json");
+    if std::fs::write(&new_cfg, pretty.as_bytes()).is_ok() {
+        log.append(&format!("[tray] 配置已继承自上一安装（{old_cfg:?}）"));
+    } else {
+        log.append("[tray] 配置继承写入失败（保留本安装配置）");
+    }
+}
+
 pub fn sync_autostart(root: &Path, log: &crate::process::LogFile) {
     if !namespace().is_empty() {
         return; // a test instance must not touch the production autostart

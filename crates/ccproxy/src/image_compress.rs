@@ -20,7 +20,12 @@
 //! * **Memoized.** PNG decode + JPEG encode of a 3 MB screenshot costs real
 //!   CPU, and the client resends the same images every turn; a bounded
 //!   SHA-256-keyed memo makes the resend a hash lookup. The memo is an
-//!   optimization only — it never changes the output bytes.
+//!   optimization only — it never changes the output bytes. It is
+//!   deliberately not persisted across restarts: encoding is deterministic,
+//!   so a cold memo reproduces the exact bytes a previous process produced
+//!   and the upstream cache prefix stays stable without carrying any state
+//!   over. Persisting it would only save CPU and would add a stale-output
+//!   hazard (the key does not include quality, which is process-fixed).
 //!
 //! Not a token saving: image tokens are billed from pixel dimensions, which
 //! are unchanged. Only the wire bytes shrink.
@@ -224,26 +229,54 @@ fn blend_over_white(c: u8, a: u8) -> u8 {
     ((prod + rest) / 255) as u8
 }
 
+/// Aggregate effect of one request's compression pass. Byte counts are the
+/// data-URL text lengths — what actually transits in the JSON body — so they
+/// are directly comparable with the ingress (`body: N bytes`) and forwarded
+/// log lines.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CompressStats {
+    pub images: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+}
+
+impl CompressStats {
+    #[must_use]
+    pub fn shrink_percent(&self) -> u64 {
+        if self.bytes_before == 0 {
+            return 0;
+        }
+        // checked arithmetic keeps the crate-wide `arithmetic_side_effects`
+        // lint happy without a panic path; bytes_after <= bytes_before always.
+        let kept = self
+            .bytes_after
+            .checked_mul(100)
+            .and_then(|v| v.checked_div(self.bytes_before))
+            .unwrap_or(0);
+        100u64.saturating_sub(kept)
+    }
+}
+
 /// Walk a translated CC request body and compress every
 /// `{"type": "image", "image": "data:image/png;base64,..."}` part in place.
-/// Returns how many images were replaced. Only image parts are touched — text
-/// that happens to contain the same URL string is left alone, so any prefix of
+/// Returns what was replaced. Only image parts are touched — text that
+/// happens to contain the same URL string is left alone, so any prefix of
 /// the body this module does not rewrite stays byte-identical.
 pub fn compress_cc_body(
     body: &mut serde_json::Value,
     cfg: &ImageCompressConfig,
     memo: &mut ImageMemo,
-) -> usize {
-    let mut count = 0usize;
-    walk(body, cfg, memo, &mut count);
-    count
+) -> CompressStats {
+    let mut stats = CompressStats::default();
+    walk(body, cfg, memo, &mut stats);
+    stats
 }
 
 fn walk(
     node: &mut serde_json::Value,
     cfg: &ImageCompressConfig,
     memo: &mut ImageMemo,
-    count: &mut usize,
+    stats: &mut CompressStats,
 ) {
     match node {
         serde_json::Value::Object(map) => {
@@ -252,18 +285,20 @@ fn walk(
                 if let Some(serde_json::Value::String(url)) = map.get("image") {
                     let owned = url.clone();
                     if let Some(new_url) = compress_data_url(&owned, cfg, memo) {
+                        stats.bytes_before = stats.bytes_before.saturating_add(owned.len() as u64);
+                        stats.bytes_after = stats.bytes_after.saturating_add(new_url.len() as u64);
+                        stats.images = stats.images.saturating_add(1);
                         map.insert("image".into(), serde_json::Value::String(new_url));
-                        *count = count.saturating_add(1);
                     }
                 }
             }
             for child in map.values_mut() {
-                walk(child, cfg, memo, count);
+                walk(child, cfg, memo, stats);
             }
         }
         serde_json::Value::Array(items) => {
             for item in items.iter_mut() {
-                walk(item, cfg, memo, count);
+                walk(item, cfg, memo, stats);
             }
         }
         _ => {}
@@ -400,8 +435,8 @@ mod tests {
                 ]},
             ]
         });
-        let n = compress_cc_body(&mut body, &cfg_on(), &mut ImageMemo::new());
-        assert_eq!(n, 1);
+        let stats = compress_cc_body(&mut body, &cfg_on(), &mut ImageMemo::new());
+        assert_eq!(stats.images, 1);
         // A text field holding the same URL string is untouched.
         assert_eq!(
             body["messages"][0]["content"][0]["text"].as_str().unwrap(),

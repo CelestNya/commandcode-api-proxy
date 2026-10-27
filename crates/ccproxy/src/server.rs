@@ -110,12 +110,25 @@ fn is_anthropic(req: &Request) -> bool {
 /// both dialect surfaces — the module itself guarantees passthrough-on-error,
 /// so a bad image can never fail the request here. A poisoned memo lock is
 /// recovered from: the memo is an optimization only.
-fn compress_body_images(state: &AppState, body: &mut Value) {
+fn compress_body_images(state: &AppState, body: &mut Value, thread_id: &str) {
     if !state.config.image_compress.enabled {
         return;
     }
     let mut memo = state.image_memo.lock().unwrap_or_else(|e| e.into_inner());
-    crate::image_compress::compress_cc_body(body, &state.config.image_compress, &mut memo);
+    let stats =
+        crate::image_compress::compress_cc_body(body, &state.config.image_compress, &mut memo);
+    // The ingress line shows the raw size and the forwarded line the final
+    // one; this is the step in between, named for what it is. Thread id ties
+    // it to the same request's other lines.
+    if stats.images > 0 {
+        log::info(&format!(
+            "image compress: {} image(s), {} -> {} bytes (-{}%) (thread {thread_id})",
+            stats.images,
+            stats.bytes_before,
+            stats.bytes_after,
+            stats.shrink_percent()
+        ));
+    }
 }
 
 /// `Authorization: Bearer <key>` or `x-api-key: <key>`; passthrough only.
@@ -508,7 +521,7 @@ impl DialectSurface for Openai {
             &state.tables,
             state.translate_env.no_tools_guard_off,
         );
-        compress_body_images(state, &mut body);
+        compress_body_images(state, &mut body, thread_id);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }
@@ -557,7 +570,7 @@ impl DialectSurface for Anthropic {
     fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value {
         let mut body =
             translate::anthropic_to_cc_with_env(raw, catalog, &state.tables, &state.translate_env);
-        compress_body_images(state, &mut body);
+        compress_body_images(state, &mut body, thread_id);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }

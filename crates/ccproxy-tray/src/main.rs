@@ -145,6 +145,9 @@ fn windows_main() {
     }
     // Ownership is settled, so this install is the one that must survive a
     // reboot: repoint autostart here if it still names an older install.
+    // Inheriting the config must happen first — the autostart entry is what
+    // names the previous install, and sync rewrites it.
+    settings::inherit_config(&root, &log);
     settings::sync_autostart(&root, &log);
 
     // Start the child before the UI, so the icon reflects reality immediately.
