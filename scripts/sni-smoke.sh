@@ -35,13 +35,15 @@ if [ "${1:-}" = "--session-inner" ]; then
     trap 'kill "$TRAY_PID" 2>/dev/null || true' EXIT
 
     # 1) registration: a StatusNotifierItem bus name must appear.
+    # `|| true` keeps set -e from killing the loop while the name has not
+    # appeared yet (grep no-match inside $() counts as a failing pipeline).
     name=""
     for _ in $(seq 1 30); do
         name=$(gdbus call --session --dest org.freedesktop.DBus \
             --object-path /org/freedesktop/DBus \
             --method org.freedesktop.DBus.ListNames 2>/dev/null \
             | tr ',' '\n' \
-            | grep -oE "org\.kde\.StatusNotifierItem-[0-9]+-[0-9]+" | head -1)
+            | grep -oE "org\.kde\.StatusNotifierItem-[0-9]+-[0-9]+" | head -1 || true)
         [ -n "$name" ] && break
         sleep 0.5
     done
@@ -61,7 +63,7 @@ if [ "${1:-}" = "--session-inner" ]; then
         || fail "GetLayout failed"
     echo "$layout" | grep -q "启动代理" || { echo "layout: $layout" >&2; fail "menu layout missing 启动代理"; }
     start_id=$(echo "$layout" | grep -oE "int32 [0-9]+, \{'[^}]*启动代理" \
-        | grep -oE "[0-9]+" | head -1)
+        | grep -oE "[0-9]+" | head -1 || true)
     [ -n "$start_id" ] || { echo "layout: $layout" >&2; fail "could not find start item id"; }
     echo "OK: menu layout carries 启动代理 (id $start_id)"
 
