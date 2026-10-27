@@ -444,7 +444,28 @@ mod sni_contract_tests {
         });
         println!("OK: 注册 {name}");
 
+        // —— 独立诊断探针：把链路每一跳单独打通验证 ——
         let conn = zbus::blocking::Connection::session().unwrap();
+        // 探针 A：客户端直调 watcher 的注册方法 → items 应立刻记录。
+        let watcher_probe = zbus::blocking::Proxy::new(
+            &conn,
+            "org.kde.StatusNotifierWatcher",
+            "/StatusNotifierWatcher",
+            "org.kde.StatusNotifierWatcher",
+        )
+        .unwrap();
+        let probe_result = watcher_probe.call_method(
+            "RegisterStatusNotifierItem",
+            &("org.kde.test.probe".to_string(),),
+        );
+        let probe_recorded = items
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|n| n == "org.kde.test.probe");
+        println!("PROBE watcher-dispatch: call={probe_result:?} recorded={probe_recorded}");
+
+        // 探针 B：客户端直读托盘 SNI 的 Id 属性 → 托盘对象服务应可访问。
         let sni = zbus::blocking::Proxy::new(
             &conn,
             name.as_str(),
