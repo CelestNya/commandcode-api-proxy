@@ -34,6 +34,10 @@ pub struct AppState {
     /// `ANTHROPIC_DEFAULT_MODEL` / `CC_NO_TOOLS_GUARD`, read once at startup.
     pub translate_env: crate::translate::Env,
     pub usage: Mutex<UsageTotals>,
+    /// SHA-256 memo for the image compressor (optimization only; the outputs
+    /// are deterministic without it). Shared across requests so a client's
+    /// per-turn image resends are a hash lookup, not a re-encode.
+    pub image_memo: Mutex<crate::image_compress::ImageMemo>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -45,6 +49,7 @@ pub fn new_state(config: Config) -> SharedState {
         tables: crate::translate::ModelTables::load(),
         translate_env: crate::translate::Env::from_process(),
         usage: Mutex::new(UsageTotals::default()),
+        image_memo: Mutex::new(crate::image_compress::ImageMemo::new()),
     })
 }
 
@@ -99,6 +104,18 @@ fn header_value<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
 
 fn is_anthropic(req: &Request) -> bool {
     header_value(req, "anthropic-version").is_some()
+}
+
+/// Run the image compressor over a translated CC body, when enabled. Shared by
+/// both dialect surfaces — the module itself guarantees passthrough-on-error,
+/// so a bad image can never fail the request here. A poisoned memo lock is
+/// recovered from: the memo is an optimization only.
+fn compress_body_images(state: &AppState, body: &mut Value) {
+    if !state.config.image_compress.enabled {
+        return;
+    }
+    let mut memo = state.image_memo.lock().unwrap_or_else(|e| e.into_inner());
+    crate::image_compress::compress_cc_body(body, &state.config.image_compress, &mut memo);
 }
 
 /// `Authorization: Bearer <key>` or `x-api-key: <key>`; passthrough only.
@@ -477,6 +494,7 @@ impl DialectSurface for Openai {
             &state.tables,
             state.translate_env.no_tools_guard_off,
         );
+        compress_body_images(state, &mut body);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }
@@ -525,6 +543,7 @@ impl DialectSurface for Anthropic {
     fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value {
         let mut body =
             translate::anthropic_to_cc_with_env(raw, catalog, &state.tables, &state.translate_env);
+        compress_body_images(state, &mut body);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }
@@ -972,32 +991,69 @@ const MAX_CONCURRENCY: usize = 64;
 const THREAD_STACK_BYTES: usize = 512 * 1024;
 
 pub fn serve(server: tiny_http::Server, state: SharedState) {
+    // `serve` keeps the historical contract: block until the server is shut
+    // down or the process exits. Callers that need a graceful stop (SIGTERM,
+    // CLI `stop`) use `serve_with_stop` instead.
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    serve_with_stop(server, state, &stop);
+}
+
+/// Serve until `stop` is set, then return. The listener is polled on a short
+/// timeout so a signal can take effect within ~200 ms instead of only when the
+/// next request arrives or the listener is unblocked.
+///
+/// This exists because `tiny_http::Server` is **not** `Clone`: a shutdown
+/// thread cannot hold an owned handle to unblock the accept loop, so the loop
+/// itself must notice the stop flag.
+pub fn serve_with_stop(
+    server: tiny_http::Server,
+    state: SharedState,
+    stop: &std::sync::atomic::AtomicBool,
+) {
     let in_flight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    for request in server.incoming_requests() {
-        let state = Arc::clone(&state);
-        let in_flight = Arc::clone(&in_flight);
-        let current = in_flight.load(std::sync::atomic::Ordering::Relaxed);
-        if current >= MAX_CONCURRENCY {
-            // Refuse rather than queue; the client sees a fast failure.
-            let _ = request.respond(
-                Response::from_string(
-                    "{\"error\":{\"message\":\"Server busy\",\"type\":\"proxy_error\"}}",
-                )
-                .with_status_code(503),
-            );
-            continue;
+    loop {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
         }
-        in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let counter = Arc::clone(&in_flight);
-        let spawned = std::thread::Builder::new()
-            .stack_size(THREAD_STACK_BYTES)
-            .spawn(move || {
-                handle(&state, request);
-                counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            });
-        if spawned.is_err() {
-            in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        match server.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(Some(request)) => spawn_handler(request, &state, &in_flight),
+            // Timeout: poll the stop flag again.
+            Ok(None) => {}
+            Err(_) => break,
         }
+    }
+}
+
+/// Handle one request on a bounded thread, refusing past the concurrency cap.
+/// Shared by `serve` and `serve_with_stop` so the two cannot drift.
+fn spawn_handler(
+    request: tiny_http::Request,
+    state: &SharedState,
+    in_flight: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let state = Arc::clone(state);
+    let in_flight = Arc::clone(in_flight);
+    let current = in_flight.load(std::sync::atomic::Ordering::Relaxed);
+    if current >= MAX_CONCURRENCY {
+        // Refuse rather than queue; the client sees a fast failure.
+        let _ = request.respond(
+            Response::from_string(
+                "{\"error\":{\"message\":\"Server busy\",\"type\":\"proxy_error\"}}",
+            )
+            .with_status_code(503),
+        );
+        return;
+    }
+    in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let counter = Arc::clone(&in_flight);
+    let spawned = std::thread::Builder::new()
+        .stack_size(THREAD_STACK_BYTES)
+        .spawn(move || {
+            handle(&state, request);
+            counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        });
+    if spawned.is_err() {
+        in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

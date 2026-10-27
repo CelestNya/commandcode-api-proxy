@@ -16,8 +16,33 @@ fn main() {
     }
 
     let mut config = ccproxy::config::load(&argv, &env);
-
     ccproxy::log::init(&config.log_level);
+
+    // Subcommands: the first non-flag argument names the command; with none the
+    // server starts (the pre-existing behaviour, so `ccproxy --port 9000`
+    // keeps working and the tray's flag-less launch is unchanged).
+    let command = argv
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("start");
+    match command {
+        "stop" => std::process::exit(ccproxy::cli::run_stop(&config)),
+        "status" => std::process::exit(ccproxy::cli::run_status(&config)),
+        "logs" => std::process::exit(ccproxy::cli::run_logs()),
+        "config" => {
+            println!("{}", ccproxy::cli::describe_config(&config));
+            std::process::exit(0);
+        }
+        "start" => {}
+        other => {
+            ccproxy::log::error(&format!(
+                "unknown command \"{other}\" (expected start | stop | status | logs | config)"
+            ));
+            std::process::exit(2);
+        }
+    }
+
     // The proxy keeps its own file so a hand-started run has a log too; the
     // tray's lifecycle lines go to a separate file, so the two never
     // interleave in one stream.
@@ -90,7 +115,44 @@ fn main() {
         config.cc_api_base
     ));
 
-    ccproxy::server::serve(server, state);
+    // The CLI's `stop` needs to know the instance: record the PID before
+    // serving. A failure to write it is not fatal — the service still runs.
+    if let Err(e) = ccproxy::cli::write_pid() {
+        ccproxy::log::warn(&format!(
+            "cannot write PID file at {}: {e} (stop via CLI will not work)",
+            ccproxy::cli::pid_file().display()
+        ));
+    }
+
+    // On Unix, SIGTERM/SIGINT are caught so `stop` (and `kill`/systemd stop)
+    // shut the server down gracefully: the flag makes `serve_with_stop` return,
+    // and the PID file is cleaned up below. No shutdown thread is needed —
+    // tiny_http::Server is not Clone, so the serve loop polls the flag itself.
+    #[cfg(unix)]
+    let stop_flag = install_signal_stop();
+    #[cfg(not(unix))]
+    let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    ccproxy::server::serve_with_stop(server, state, &stop_flag);
+
+    #[cfg(unix)]
+    if stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
+        ccproxy::log::info("shutdown signal received, stopping");
+    }
+    ccproxy::cli::remove_pid();
+}
+
+/// Catch SIGTERM/SIGINT into a flag that `serve_with_stop` polls.
+#[cfg(unix)]
+fn install_signal_stop() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let flag = Arc::new(AtomicBool::new(false));
+    let _ = signal_hook::flag::register(SIGTERM, Arc::clone(&flag));
+    let _ = signal_hook::flag::register(SIGINT, Arc::clone(&flag));
+    flag
 }
 
 /// Write a startup failure to a file beside the executable.

@@ -3,6 +3,8 @@ name = "ccproxy-tray"
 version.workspace = true
 edition.workspace = true
 publish = false
+description = "System tray companion for commandcode-proxy"
+license = "MIT"
 
 # Named to match the artifact the existing hot-swap folder and the handover
 # test look for, so the C# tray and this one are interchangeable during the
@@ -11,9 +13,30 @@ publish = false
 name = "CCProxyTray"
 path = "src/main.rs"
 
+# Debian packaging: separate tray package depending on the proxy package.
+# The binary is renamed to the release name; see LINUX-PORT-PLAN.md §5 T3.1.
+[package.metadata.deb]
+name = "commandcode-proxy-tray"
+maintainer = "CelestNya <celestnya@users.noreply.github.com>"
+copyright = "2026 CelestNya"
+section = "net"
+priority = "optional"
+depends = "commandcode-proxy"
+assets = [
+  ["target/release/CCProxyTray", "usr/bin/commandcode-proxy-tray", "755"],
+  ["pkg/commandcode-proxy-tray.desktop", "usr/share/applications/", "644"],
+  ["pkg/commandcode-proxy.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
+
 [dependencies]
 ccproxy = { path = "../ccproxy" }
 serde_json = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# zbus StatusNotifierItem 实现（零 GTK）。blocking feature 提供同步 API，
+# 避免引入 tokio 运行时（ksni readme 亦提示 zbus/tokio 依赖树的已知 panic
+# 场景——本项目无 tokio，直接走 blocking 最干净）。
+ksni = { version = "0.3", features = ["blocking"] }
 
 [target.'cfg(windows)'.dependencies]
 # Raw bindings rather than the typed `windows` crate: the surface below is a

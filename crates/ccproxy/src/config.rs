@@ -10,10 +10,24 @@ use std::path::Path;
 pub const DEFAULT_CC_VERSION: &str = "1.54.1";
 pub const DEFAULT_CC_API_BASE: &str = "https://api.commandcode.ai";
 
+/// Env overrides for packaged resource directories (D7). The packager injects
+/// the OS-appropriate locations into these variables; the code reads env first
+/// and falls back to the portable exe-adjacent layout. There is deliberately
+/// *no* platform detection here — the same variables work on Windows and Linux.
+pub const WEBUI_DIR_ENV: &str = "CC_WEBUI_DIR";
+pub const DATA_DIR_ENV: &str = "CC_DATA_DIR";
+pub const LOG_DIR_ENV: &str = "CC_LOG_DIR";
+pub const TRAY_LOG_DIR_ENV: &str = "CC_TRAY_LOG_DIR";
+
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u64 = 8787;
 const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
-const MAX_BODY_BYTES_MAX: u64 = 50 * 1024 * 1024;
+/// Upstream (CC API) hard limit measured in production: bodies of 30 MB are
+/// accepted, 32 MB is rejected with `413 Payload Too Large` ("Request body is
+/// 32.0 MB, over the 32 MB limit for one request (33554432 bytes)"). The
+/// ceiling must not exceed it, otherwise an allowed body would be rejected
+/// upstream with a confusing 413 after passing the proxy's own guard.
+const MAX_BODY_BYTES_MAX: u64 = 32 * 1024 * 1024;
 const TIMEOUT_MAX_MS: u64 = 30 * 60 * 1000;
 /// Default window in which a request must produce its first byte upstream
 /// before the attempt is discarded and re-sent.
@@ -44,6 +58,9 @@ pub struct Config {
     pub no_output_retries: u64,
     /// Maximum request body size in bytes (Content-Length pre-check + streaming guard).
     pub max_body_bytes: u64,
+    /// Inline-screenshot quality compression. Deterministic and cache-safe by
+    /// contract (`image_compress` module docs); off by default.
+    pub image_compress: crate::image_compress::ImageCompressConfig,
     /// Outbound proxy policy. `default` probes the system proxy and falls back
     /// to direct; `direct` never uses one; an explicit URL always does, with no
     /// fallback. See [`ProxySetting`].
@@ -78,6 +95,7 @@ impl Default for Config {
             no_output_timeout_ms: NO_OUTPUT_TIMEOUT_DEFAULT_MS,
             no_output_retries: NO_OUTPUT_RETRIES_DEFAULT,
             max_body_bytes: MAX_BODY_BYTES_DEFAULT,
+            image_compress: crate::image_compress::ImageCompressConfig::default(),
             proxy: ProxySetting::Default,
             no_proxy: Vec::new(),
         }
@@ -153,6 +171,9 @@ pub struct FileConfig {
     pub no_output_timeout_ms: Option<u64>,
     pub no_output_retries: Option<u64>,
     pub max_body_bytes: Option<u64>,
+    pub image_compress: Option<bool>,
+    pub image_compress_quality: Option<u64>,
+    pub image_compress_min_bytes: Option<u64>,
 }
 
 impl FileConfig {
@@ -179,6 +200,9 @@ impl FileConfig {
             no_output_timeout_ms: n("noOutputTimeoutMs"),
             no_output_retries: n("noOutputRetries"),
             max_body_bytes: n("maxBodyBytes"),
+            image_compress: v.get("imageCompress").and_then(serde_json::Value::as_bool),
+            image_compress_quality: n("imageCompressQuality"),
+            image_compress_min_bytes: n("imageCompressMinBytes"),
         }
     }
 }
@@ -270,12 +294,42 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
         |v| v.min(NO_OUTPUT_RETRIES_MAX),
     );
 
+    // Image compression: env > file > default (off). The bool accepts the
+    // usual words in the env ("true"/"1"/"on"...); the file uses JSON booleans.
+    let image_compress = crate::image_compress::ImageCompressConfig {
+        enabled: env("CC_IMAGE_COMPRESS")
+            .as_deref()
+            .and_then(parse_bool_word)
+            .or(file.image_compress)
+            .unwrap_or(false),
+        quality: resolve_u64(
+            env("CC_IMAGE_COMPRESS_QUALITY").as_deref(),
+            file.image_compress_quality,
+            u64::from(crate::image_compress::DEFAULT_QUALITY),
+            |v| v.floor() as u64,
+            |v| v.clamp(1, 100),
+        ) as u8,
+        min_input_bytes: file.image_compress_min_bytes.unwrap_or(
+            crate::image_compress::DEFAULT_MIN_BYTES,
+        ),
+    };
+
     // Proxy: env (CC_PROXY) > file (`proxy`) > default. The env override stays
     // honoured because it is what operators already use to force direct.
     let proxy_raw = non_empty(env("CC_PROXY").as_deref()).or_else(|| file.proxy.clone());
     let proxy = proxy_raw.map_or(ProxySetting::Default, |raw| ProxySetting::parse(&raw));
     let no_proxy =
         parse_no_proxy(non_empty(env("NO_PROXY").as_deref()).or_else(|| file.no_proxy.clone()));
+
+    // With compression enabled the translated body can only shrink, so the
+    // incoming guard must not veto screenshot-heavy requests before the
+    // translator ever sees them: raise the guard to the hard ceiling. The
+    // upstream 32 MB limit still bounds what actually goes out.
+    let max_body_bytes = if image_compress.enabled {
+        max_body_bytes.max(MAX_BODY_BYTES_MAX)
+    } else {
+        max_body_bytes
+    };
 
     Config {
         host,
@@ -289,8 +343,20 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
         no_output_timeout_ms,
         no_output_retries,
         max_body_bytes,
+        image_compress,
         proxy,
         no_proxy,
+    }
+}
+
+/// `1`/`true`/`yes`/`on` -> `Some(true)`; `0`/`false`/`no`/`off` ->
+/// `Some(false)`; anything else (including empty) -> `None`, so a typoed env
+/// value falls through to the file rather than silently disabling a feature.
+fn parse_bool_word(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 
@@ -373,77 +439,138 @@ fn non_empty(raw: Option<&str>) -> Option<String> {
     raw.filter(|v| !v.is_empty()).map(str::to_owned)
 }
 
-/// Where the proxy writes its own log: `logs/proxy.log` beside the binary,
-/// under a `test-<ns>` subdirectory for a namespaced (isolated) instance.
-///
-/// Mirrors the tray's layout so both files land in the same directory, and
-/// takes its inputs as parameters so the decision is testable without touching
-/// the process environment or the filesystem.
-#[must_use]
-pub fn log_path_from(exe_dir: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
-    let base = exe_dir.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
-    let logs = base.join("logs");
-    let dir = match ns.filter(|v| !v.trim().is_empty()) {
-        Some(ns) => logs.join(format!("test-{ns}")),
-        None => logs,
-    };
-    dir.join("proxy.log")
-}
-
-/// The proxy log path for this process: next to `current_exe`, namespaced when
-/// `CC_TRAY_NS` is set (same variable the ledger uses).
+/// The proxy log path for this process. `CC_LOG_DIR` (the packaged layout)
+/// names the log directory directly; otherwise the path is next to
+/// `current_exe`, namespaced when `CC_TRAY_NS` is set (same variable the
+/// ledger uses).
 #[must_use]
 pub fn log_path() -> std::path::PathBuf {
+    let env_dir = env_dir(LOG_DIR_ENV);
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
     let ns = std::env::var("CC_TRAY_NS").ok();
-    log_path_from(exe_dir.as_deref(), ns.as_deref())
+    log_path_with(exe_dir.as_deref(), ns.as_deref(), env_dir.as_deref())
 }
 
-/// The tray's own log: `logs/tray.log` under `root` (the package root, one
-/// level above the proxy when the shipped layout puts the proxy in `service/`).
-///
-/// Mirrors [`log_path_from`] for the same directory scheme, so the WebUI's log
-/// screen can offer the tray's lifecycle lines beside the proxy's own.
+/// The proxy log path with no env override — the legacy decision, kept for
+/// existing callers and tests.
 #[must_use]
-pub fn tray_log_path_from(root: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
-    let base = root.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
-    let logs = base.join("logs");
-    let dir = match ns.filter(|v| !v.trim().is_empty()) {
-        Some(ns) => logs.join(format!("test-{ns}")),
-        None => logs,
-    };
-    dir.join("tray.log")
+pub fn log_path_from(exe_dir: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
+    log_path_with(exe_dir, ns, None)
 }
 
-/// The tray log path for this process. The proxy runs from `<root>/service`,
-/// so the package root is its exe directory's parent; a proxy launched straight
-/// from the root has no separate tray log, and the path simply will not exist.
+/// The decision, with `env_dir` as the optional override. When set, `env_dir`
+/// *is* the log directory (no `logs/` suffix — the packager named it already);
+/// the namespace still nests under it so an isolated instance cannot read
+/// production's file or vice versa.
+fn log_path_with(
+    exe_dir: Option<&Path>,
+    ns: Option<&str>,
+    env_dir: Option<&Path>,
+) -> std::path::PathBuf {
+    match env_dir {
+        Some(dir) => match ns.filter(|v| !v.trim().is_empty()) {
+            Some(ns) => dir.join(format!("test-{ns}")).join("proxy.log"),
+            None => dir.join("proxy.log"),
+        },
+        None => {
+            let base = exe_dir.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+            let logs = base.join("logs");
+            let dir = match ns.filter(|v| !v.trim().is_empty()) {
+                Some(ns) => logs.join(format!("test-{ns}")),
+                None => logs,
+            };
+            dir.join("proxy.log")
+        }
+    }
+}
+
+/// The tray log path for this process. `CC_TRAY_LOG_DIR` (the packaged layout)
+/// names the tray log directory directly; otherwise the proxy runs from
+/// `<root>/service`, so the package root is its exe directory's parent; a proxy
+/// launched straight from the root has no separate tray log, and the path
+/// simply will not exist.
 #[must_use]
 pub fn tray_log_path() -> std::path::PathBuf {
+    let env_dir = env_dir(TRAY_LOG_DIR_ENV);
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
     let root = exe_dir.as_deref().and_then(Path::parent);
     let ns = std::env::var("CC_TRAY_NS").ok();
-    tray_log_path_from(root, ns.as_deref())
+    tray_log_path_with(root, ns.as_deref(), env_dir.as_deref())
 }
 
-/// The loose WebUI sources beside the executable: `webui/index.html`, if that
-/// directory exists.
+/// The tray log path with no env override — the legacy decision, kept for
+/// existing callers and tests.
+#[must_use]
+pub fn tray_log_path_from(root: Option<&Path>, ns: Option<&str>) -> std::path::PathBuf {
+    tray_log_path_with(root, ns, None)
+}
+
+/// The decision, with `env_dir` as the optional override; when set it *is* the
+/// log directory (no `logs/` suffix).
+fn tray_log_path_with(
+    root: Option<&Path>,
+    ns: Option<&str>,
+    env_dir: Option<&Path>,
+) -> std::path::PathBuf {
+    match env_dir {
+        Some(dir) => match ns.filter(|v| !v.trim().is_empty()) {
+            Some(ns) => dir.join(format!("test-{ns}")).join("tray.log"),
+            None => dir.join("tray.log"),
+        },
+        None => {
+            let base = root.map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+            let logs = base.join("logs");
+            let dir = match ns.filter(|v| !v.trim().is_empty()) {
+                Some(ns) => logs.join(format!("test-{ns}")),
+                None => logs,
+            };
+            dir.join("tray.log")
+        }
+    }
+}
+
+/// The loose WebUI sources: `CC_WEBUI_DIR` when set (the packaged layout
+/// injects it), else `webui/` beside the executable when that directory exists.
 ///
-/// The proxy ships the assembled page inside the binary, but a package may also
-/// carry the sources so a stylesheet can be edited and just reloaded (see
-/// `webui::page`). `None` means "no loose copy" — not an error, and the common
-/// case for a minimal install.
+/// The proxy serves the panel from disk (front-end split: nothing is compiled
+/// into the binary), so a stylesheet can be edited and just reloaded. `None`
+/// means "no webui available" — the panel routes 404, not an error.
 #[must_use]
 pub fn webui_site_dir() -> Option<std::path::PathBuf> {
+    let env_dir = env_dir(WEBUI_DIR_ENV);
     let exe_dir = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))?;
-    let dir = exe_dir.join("webui");
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    webui_site_dir_from(exe_dir.as_deref(), env_dir.as_deref())
+}
+
+/// The decision with inputs passed in, so it is testable without the process
+/// environment or the filesystem. The env override wins over the exe-adjacent
+/// fallback; either way the directory must actually contain `index.html`.
+#[must_use]
+pub fn webui_site_dir_from(
+    exe_dir: Option<&Path>,
+    env_dir: Option<&Path>,
+) -> Option<std::path::PathBuf> {
+    if let Some(dir) = env_dir {
+        if dir.join("index.html").is_file() {
+            return Some(dir.to_path_buf());
+        }
+    }
+    let dir = exe_dir?.join("webui");
     dir.join("index.html").is_file().then_some(dir)
+}
+
+/// Read a directory env var, treating empty/whitespace as absent.
+fn env_dir(key: &str) -> Option<std::path::PathBuf> {
+    std::env::var(key)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(std::path::PathBuf::from)
 }
 
 /// JS `Number()` for the subset of strings these env vars realistically carry.
@@ -512,6 +639,55 @@ mod tests {
         assert_eq!(c.upstream_timeout_ms, 600_000);
         assert_eq!(c.idle_timeout_ms, 120_000);
         assert_eq!(c.max_body_bytes, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn image_compress_resolves_env_then_file_then_default() {
+        use crate::image_compress::{DEFAULT_MIN_BYTES, DEFAULT_QUALITY};
+
+        // Default: off, stock quality.
+        let c = load(&[], &no_env);
+        assert!(!c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, DEFAULT_QUALITY);
+        assert_eq!(c.image_compress.min_input_bytes, DEFAULT_MIN_BYTES);
+
+        // File on, with a quality.
+        let file = FileConfig::parse(r#"{"imageCompress": true, "imageCompressQuality": 60}"#);
+        let c = load_with_file(&[], &no_env, &file);
+        assert!(c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, 60);
+
+        // Env wins over the file in either direction; a switch override leaves
+        // the file's quality alone.
+        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "off")]), &file);
+        assert!(!c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, 60);
+
+        // The env bool accepts words, and a typo falls through to the file
+        // rather than silently flipping to the default.
+        let on_file = FileConfig::parse(r#"{"imageCompress": true}"#);
+        let c = load_with_file(
+            &[],
+            &env_of(&[("CC_IMAGE_COMPRESS", "ture")]),
+            &on_file,
+        );
+        assert!(c.image_compress.enabled);
+
+        // Quality clamps into 1..=100 whichever source won.
+        let c = load_with_file(
+            &[],
+            &env_of(&[("CC_IMAGE_COMPRESS_QUALITY", "0")]),
+            &on_file,
+        );
+        assert_eq!(c.image_compress.quality, 1);
+
+        // Enabling the compressor raises the incoming body guard to the hard
+        // ceiling (the translated body only shrinks); disabling leaves the
+        // configured limit alone.
+        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "on")]), &FileConfig::default());
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_MAX);
+        let c = load_with_file(&[], &no_env, &FileConfig::default());
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_DEFAULT);
     }
 
     #[test]

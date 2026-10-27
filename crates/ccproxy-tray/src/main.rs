@@ -31,22 +31,41 @@
 )]
 
 mod health;
+#[cfg(unix)]
+mod linux;
+#[cfg(windows)]
 mod owner;
+#[cfg(windows)]
 mod portguard;
+#[cfg(windows)]
 mod process;
+#[cfg(windows)]
 mod settings;
+#[cfg(windows)]
 mod supervision;
+#[cfg(windows)]
 mod tray;
+// `tray_api` is the Linux-side contract layer; on Windows nothing outside the
+// tests references it, so silence dead-code there without relaxing it on Linux.
+#[cfg_attr(not(unix), allow(dead_code))]
+mod tray_api;
+#[cfg(windows)]
 mod win;
 
+#[cfg(windows)]
 use std::cell::RefCell;
+#[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::rc::Rc;
+#[cfg(windows)]
 use std::sync::Arc;
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
 /// Where the shipped package puts things: the proxy binary and `logs/` sit
 /// beside the tray exe.
+#[cfg(windows)]
 fn install_root() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -55,6 +74,14 @@ fn install_root() -> PathBuf {
 }
 
 fn main() {
+    #[cfg(windows)]
+    windows_main();
+    #[cfg(unix)]
+    linux_main();
+}
+
+#[cfg(windows)]
+fn windows_main() {
     let root = install_root();
     let ns = settings::namespace();
     let port = settings::instance_port();
@@ -203,6 +230,7 @@ fn main() {
 }
 
 /// Execute a menu choice.
+#[cfg(windows)]
 fn dispatch(
     action: tray::Action,
     proxy: &process::SharedProxy,
@@ -251,6 +279,7 @@ pub fn webui_url(port: u16) -> String {
 /// tray's own `logs/tray.log`: the tray file holds only two lifecycle lines,
 /// and a user who opens it sees no errors while the real ones sit next door.
 /// The path comes from the proxy's own resolver so the two cannot drift.
+#[cfg(windows)]
 fn open_log(root: &std::path::Path, log: &process::LogFile) {
     let path = settings::proxy_log_path(root, &settings::namespace());
     if !path.exists() {
@@ -260,6 +289,7 @@ fn open_log(root: &std::path::Path, log: &process::LogFile) {
 }
 
 /// Open the tray's own log in Notepad — the lifecycle file, not the proxy's.
+#[cfg(windows)]
 fn open_tray_log(log: &process::LogFile) {
     let path = log.path().to_path_buf();
     if !path.exists() {
@@ -273,11 +303,13 @@ fn open_tray_log(log: &process::LogFile) {
 /// The menu greys this out while the proxy is stopped, but the proxy can also
 /// die between the menu being built and the choice being taken; a failed launch
 /// is logged rather than swallowed so that case is diagnosable.
+#[cfg(windows)]
 fn open_webui(port: u16, log: &process::LogFile) {
     shell_open(&win::Wide::new(webui_url(port)), log);
 }
 
 /// Hand a string to the shell's `open` verb.
+#[cfg(windows)]
 fn shell_open(target: &win::Wide, log: &process::LogFile) {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     let verb = win::Wide::new("open");
@@ -307,6 +339,7 @@ fn shell_open(target: &win::Wide, log: &process::LogFile) {
 ///
 /// `stood_down` is raised on the one path that ends this process, so the UI
 /// loop (which owns the process's lifetime) can notice and exit.
+#[cfg(windows)]
 fn handover_loop(
     role: owner::Role,
     port: u16,
@@ -418,6 +451,7 @@ fn handover_loop(
 /// A `windows` subsystem binary has no console, so stdout is not available —
 /// the file is the only way to see this from a terminal. It must never take
 /// over from a running instance.
+#[cfg(windows)]
 fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
     use std::io::Write;
     let path = root.join("selfcheck.log");
@@ -455,9 +489,107 @@ fn selfcheck(root: &std::path::Path, port: u16, log: &process::LogFile) {
     }
 }
 
+#[cfg(windows)]
 fn fatal(log: &process::LogFile, message: &str) {
     log.append(&format!("[tray] {message}"));
     win::message_box(message, false);
+}
+
+/// Linux 入口：托盘经 zbus StatusNotifierItem（ksni）呈现，代理作为独立
+/// 服务由 CLI 启停（无 Job Object / 交接协议——Linux 服务化更标准）。
+#[cfg(unix)]
+fn linux_main() {
+    use tray_api::{build_menu, TrayBackend, TrayStatus};
+
+    let port = linux::settings::instance_port();
+    // Arc：事件回调（'static 闭包）与主线程共享日志句柄。
+    let log = std::sync::Arc::new(linux::log::LogFile::new(linux::settings::tray_log_path()));
+    log.append("[tray] 启动（Linux / SNI）");
+
+    // 单实例锁：KDE 重复启动会注册多个 SNI 图标。pid 锁文件 + /proc 存活
+    // 检查（残留可覆盖），见 linux/single_instance.rs。
+    if let Err(e) = linux::single_instance::acquire(&linux::settings::namespace()) {
+        log.append(&format!("[tray] 退出：{e}"));
+        return;
+    }
+    log.append("[tray] 单实例锁已取得");
+
+    let Some(proxy) = linux::settings::proxy_binary() else {
+        log.append("[tray] 找不到 ccproxy 二进制（设置 CC_PROXY_BIN，或放在托盘同级）");
+        return;
+    };
+    log.append(&format!("[tray] 代理二进制：{}", proxy.display()));
+
+    // 初始状态：探测 /health（不主动拉起服务——菜单里启动）。
+    let running = health::port_serving(port, None);
+    let status = if running {
+        TrayStatus::Running
+    } else {
+        TrayStatus::Stopped
+    };
+    let state_word = if running { "running" } else { "stopped" };
+    let tooltip = format!(
+        "Commandcode Proxy — {state_word} (:{port}) v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    log.append(&format!("[tray] 端口 {port} 状态：{state_word}"));
+
+    let cache = ("24h 缓存率：—".to_string(), " ".to_string());
+    let menu = build_menu(
+        running,
+        linux::settings::autostart_enabled(),
+        &cache,
+        env!("CARGO_PKG_VERSION"),
+    );
+
+    let mut tray = linux::tray::LinuxTray::new(status, menu, tooltip);
+    let log_cb = std::sync::Arc::clone(&log);
+    if let Err(e) = tray.start(Box::new(move |event| {
+        linux_dispatch(event, &proxy, port, &log_cb);
+    })) {
+        // 无会话总线（无桌面会话）等场景：记录原因而不是静默退出，否则
+        // 安装后点了图标没反应却没有任何线索可查。
+        log.append(&format!("[tray] 托盘后端启动失败：{e}"));
+    }
+    log.append("[tray] 退出");
+}
+
+/// Linux 菜单事件分发。
+#[cfg(unix)]
+fn linux_dispatch(
+    event: tray_api::TrayEvent,
+    proxy: &std::path::Path,
+    port: u16,
+    log: &linux::log::LogFile,
+) {
+    use tray_api::TrayEvent;
+    match event {
+        TrayEvent::Start => linux::actions::start_proxy(proxy, port, log),
+        TrayEvent::Stop => linux::actions::stop_proxy(proxy, log),
+        TrayEvent::OpenLog => linux::actions::open_proxy_log(log),
+        TrayEvent::OpenTrayLog => {
+            let p = linux::settings::tray_log_path();
+            if !p.is_file() {
+                let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
+                let _ = std::fs::File::create(&p);
+            }
+            linux::actions::xdg_open(&p.display().to_string(), log);
+        }
+        TrayEvent::OpenWebUi => {
+            linux::actions::xdg_open(&format!("http://127.0.0.1:{port}/webui"), log);
+        }
+        TrayEvent::ToggleAutostart => {
+            // 与 Windows 语义一致：开机自启拉起的是托盘（而非代理 CLI），
+            // 否则 systemd 服务 + autostart 同时跑代理会端口冲突。
+            let exec = std::env::current_exe()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| proxy.display().to_string());
+            linux::actions::toggle_autostart(&exec, log);
+        }
+        TrayEvent::Quit => {
+            log.append("[tray] 手动退出（停止代理请用菜单「停止代理」或 ccproxy stop）")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -473,6 +605,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn a_manual_quit_leaves_a_log_line_behind() {
         // The quit path never returns to the UI loop, so without a line here a
         // vanished tray is indistinguishable from a silent crash — exactly the

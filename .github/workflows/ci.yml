@@ -18,6 +18,14 @@ jobs:
       - run: cargo build --release --locked -p ccproxy
       - run: cargo test --locked -p ccproxy
       - run: cargo clippy --all-targets --all-features --locked -p ccproxy -- -D warnings
+      # Linux 编译实证：tray 的 zbus/ksni 后端只能在 ubuntu runner 验证
+      #（本机 Windows 无 Linux 交叉编译链）。
+      - name: Tray build (Linux compile proof)
+        run: cargo build --release --locked -p ccproxy-tray
+      - name: Tray tests (contract suite + linux units)
+        run: cargo test --locked -p ccproxy-tray
+      - name: Tray clippy
+        run: cargo clippy --all-targets --all-features --locked -p ccproxy-tray -- -D warnings
       - run: cargo fmt --check
       - name: Doc build (rustdoc, warnings as errors)
         run: cargo doc --no-deps --locked -p ccproxy

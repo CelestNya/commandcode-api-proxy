@@ -26,10 +26,12 @@
 
 pub mod billing;
 pub mod catalog;
+pub mod cli;
 pub mod cli_version;
 pub mod config;
 pub mod dump;
 pub mod generate;
+pub mod image_compress;
 pub mod log;
 pub mod models;
 pub mod ndjson;
