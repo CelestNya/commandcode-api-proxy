@@ -143,6 +143,9 @@ fn windows_main() {
     } else {
         win::event::reset(win::event::Which::Standby);
     }
+    // Ownership is settled, so this install is the one that must survive a
+    // reboot: repoint autostart here if it still names an older install.
+    settings::sync_autostart(&root, &log);
 
     // Start the child before the UI, so the icon reflects reality immediately.
     if let Ok(mut p) = proxy.lock() {

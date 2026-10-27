@@ -261,6 +261,74 @@ pub fn toggle_autostart(root: &Path, log: &crate::process::LogFile) {
     }
 }
 
+/// Repoint autostart at this install when it has drifted.
+///
+/// The Run entry is only written when the user toggles autostart, so the
+/// first handover that moves ownership to a new install directory leaves the
+/// entry naming the old one — and the next reboot rolls the service back to
+/// the old version. When this tray takes ownership it syncs: if autostart is
+/// on and the registered command is a tray exe in some other directory, it is
+/// rewritten to this exe. A command that is not a tray exe (a user's custom
+/// wrapper) is left alone, and autostart being off means nothing to sync.
+pub fn sync_autostart(root: &Path, log: &crate::process::LogFile) {
+    if !namespace().is_empty() {
+        return; // a test instance must not touch the production autostart
+    }
+    let Some(registered) = autostart_command() else {
+        return; // autostart is off; nothing can have drifted
+    };
+    let exe = std::env::current_exe().unwrap_or_else(|_| root.join("CCProxyTray.exe"));
+    let expected = format!("\"{}\"", exe.display());
+    if registered.trim() == expected {
+        return;
+    }
+    if !is_tray_command(&registered) {
+        log.append(&format!(
+            "[tray] 自启动指向非托盘命令（{registered}），不擅自改动"
+        ));
+        return;
+    }
+    if crate::win::registry::write_string(RUN_KEY, RUN_VALUE, &expected) {
+        log.append(&format!(
+            "[tray] 自启动路径已同步到当前安装（原：{registered}）"
+        ));
+    } else {
+        log.append("[tray] 自启动路径同步失败（保留原值）");
+    }
+}
+
+/// The registered autostart command, decoded from `REG_SZ` bytes.
+fn autostart_command() -> Option<String> {
+    let bytes = crate::win::registry::read_bytes(RUN_KEY, RUN_VALUE)?;
+    Some(reg_sz_to_string(&bytes))
+}
+
+/// Decode `REG_SZ` data: UTF-16LE code units, NUL-terminated, lenient on a
+/// truncated tail.
+#[must_use]
+fn reg_sz_to_string(bytes: &[u8]) -> String {
+    let units: Vec<u16> = bytes
+        .chunks(2)
+        .flat_map(|pair| match pair {
+            [lo, hi] => Some(u16::from_le_bytes([*lo, *hi])),
+            _ => None,
+        })
+        .take_while(|unit| *unit != 0)
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+/// Whether the command line names a tray exe — i.e. something this code wrote.
+/// A wrapper script or unrelated command is not ours to rewrite.
+#[must_use]
+fn is_tray_command(command: &str) -> bool {
+    let path = command.trim().trim_matches('"');
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("CCProxyTray.exe"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +340,34 @@ mod tests {
     /// this lock the namespace test intermittently saw an empty namespace when
     /// it raced the port test, and failed perhaps one run in three.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn reg_sz_decodes_utf16le_up_to_the_nul() {
+        let hello: Vec<u8> = "hello"
+            .encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        assert_eq!(reg_sz_to_string(&hello), "hello");
+        // An empty value (just the terminator) decodes to the empty string.
+        assert_eq!(reg_sz_to_string(&[0, 0]), "");
+        // A truncated tail is dropped, not panicked on.
+        assert_eq!(reg_sz_to_string(&[0x68, 0x00]), "h");
+        assert_eq!(reg_sz_to_string(&[0x68]), "");
+    }
+
+    #[test]
+    fn tray_command_recognition_is_narrow() {
+        assert!(is_tray_command(
+            r#""D:\somewhere\CCProxy-Release\CCProxy-v0.7.2-rust\CCProxyTray.exe""#
+        ));
+        assert!(is_tray_command(r#""D:\somewhere\ccproxytray.exe""#));
+        assert!(is_tray_command(r"D:\bare\CCProxyTray.exe"));
+        // Not ours to rewrite:
+        assert!(!is_tray_command(r#""D:\tools\my-wrapper.cmd" --flag"#));
+        assert!(!is_tray_command(r#""C:\Program Files\App\app.exe""#));
+        assert!(!is_tray_command(""));
+    }
 
     #[test]
     fn the_production_port_cannot_be_moved_by_the_environment() {
