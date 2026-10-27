@@ -509,7 +509,8 @@ mod sni_contract_tests {
             menu_path.as_str()
         );
 
-        // 3) DBusMenu 布局含关键条目。
+        // 3) DBusMenu 布局含关键条目，且 ksni 的位置索引与契约 cmd 语义
+        // 交叉一致（布局 id == build_menu 位置 + 1）。
         let menu_proxy = zbus::blocking::Proxy::new(
             &conn,
             name.as_str(),
@@ -517,20 +518,45 @@ mod sni_contract_tests {
             "com.canonical.dbusmenu",
         )
         .unwrap();
-        let reply = menu_proxy
-            .call_method("GetLayout", &(0i32, 3i32, Vec::<String>::new()))
-            .unwrap();
-        let layout_body = reply.body();
-        let layout: zbus::zvariant::Value = layout_body.deserialize().unwrap();
-        let layout_debug = format!("{layout:?}");
-        assert!(
-            layout_debug.contains("启动代理") && layout_debug.contains("退出"),
-            "menu layout 缺关键条目：{layout_debug}"
+        type LayoutTuple = (
+            i32,
+            std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+            Vec<zbus::zvariant::OwnedValue>,
         );
-        println!("OK: DBusMenu 布局可读，含关键条目");
+        fn label_of(
+            props: &std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+        ) -> Option<String> {
+            props
+                .get("label")
+                .and_then(|v| String::try_from(v.clone()).ok())
+        }
+        fn child_id(children: &[zbus::zvariant::OwnedValue], label: &str) -> Option<i32> {
+            children.iter().find_map(|c| {
+                let (id, props, _): LayoutTuple = c.clone().try_into().ok()?;
+                (label_of(&props).as_deref() == Some(label)).then_some(id)
+            })
+        }
+        let (_, root): (u32, LayoutTuple) = menu_proxy
+            .call("GetLayout", &(0i32, 2i32, Vec::<String>::new()))
+            .unwrap();
+        assert_eq!(root.0, 0, "布局根节点 id 应为 0");
+        let start_id =
+            child_id(&root.2, "启动代理").unwrap_or_else(|| panic!("menu layout 缺「启动代理」"));
+        let quit_id = child_id(&root.2, "退出（同时停止代理）")
+            .unwrap_or_else(|| panic!("menu layout 缺「退出」"));
+        assert_eq!(
+            start_id,
+            flat_id(&menu, "启动代理"),
+            "布局 id 与 build_menu 位置索引不一致"
+        );
+        assert_eq!(
+            quit_id,
+            flat_id(&menu, "退出（同时停止代理）"),
+            "布局 id 与 build_menu 位置索引不一致"
+        );
+        println!("OK: DBusMenu 布局可读，id 与契约交叉一致（start={start_id} quit={quit_id}）");
 
         // 4) 点击「启动代理」→ 事件回调收到 Start。
-        let start_id = flat_id(&menu, "启动代理");
         menu_proxy
             .call_method(
                 "Event",
@@ -547,7 +573,6 @@ mod sni_contract_tests {
         println!("OK: DBusMenu 点击「启动代理」→ TrayEvent::Start");
 
         // 5) 点击「退出」→ start 的事件循环退出，线程收尾。
-        let quit_id = flat_id(&menu, "退出（同时停止代理）");
         menu_proxy
             .call_method(
                 "Event",
