@@ -22,7 +22,12 @@ pub const TRAY_LOG_DIR_ENV: &str = "CC_TRAY_LOG_DIR";
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u64 = 8787;
 const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
-const MAX_BODY_BYTES_MAX: u64 = 50 * 1024 * 1024;
+/// Upstream (CC API) hard limit measured in production: bodies of 30 MB are
+/// accepted, 32 MB is rejected with `413 Payload Too Large` ("Request body is
+/// 32.0 MB, over the 32 MB limit for one request (33554432 bytes)"). The
+/// ceiling must not exceed it, otherwise an allowed body would be rejected
+/// upstream with a confusing 413 after passing the proxy's own guard.
+const MAX_BODY_BYTES_MAX: u64 = 32 * 1024 * 1024;
 const TIMEOUT_MAX_MS: u64 = 30 * 60 * 1000;
 /// Default window in which a request must produce its first byte upstream
 /// before the attempt is discarded and re-sent.
@@ -315,6 +320,16 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
     let proxy = proxy_raw.map_or(ProxySetting::Default, |raw| ProxySetting::parse(&raw));
     let no_proxy =
         parse_no_proxy(non_empty(env("NO_PROXY").as_deref()).or_else(|| file.no_proxy.clone()));
+
+    // With compression enabled the translated body can only shrink, so the
+    // incoming guard must not veto screenshot-heavy requests before the
+    // translator ever sees them: raise the guard to the hard ceiling. The
+    // upstream 32 MB limit still bounds what actually goes out.
+    let max_body_bytes = if image_compress.enabled {
+        max_body_bytes.max(MAX_BODY_BYTES_MAX)
+    } else {
+        max_body_bytes
+    };
 
     Config {
         host,
@@ -665,6 +680,14 @@ mod tests {
             &on_file,
         );
         assert_eq!(c.image_compress.quality, 1);
+
+        // Enabling the compressor raises the incoming body guard to the hard
+        // ceiling (the translated body only shrinks); disabling leaves the
+        // configured limit alone.
+        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "on")]), &FileConfig::default());
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_MAX);
+        let c = load_with_file(&[], &no_env, &FileConfig::default());
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_DEFAULT);
     }
 
     #[test]
