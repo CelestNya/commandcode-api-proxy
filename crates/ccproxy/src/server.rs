@@ -244,7 +244,13 @@ pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<Value, BodyError>
                 drain(req);
                 return Err(BodyError {
                     status: 413,
-                    message: "Request body too large".into(),
+                    // The size is the whole diagnosis for a 413: without it a
+                    // reject like the 2026-10-27 production one (a >32 MiB
+                    // /v1/chat/completions body) leaves nothing to reason about.
+                    message: format!(
+                        "Request body too large: declared {} bytes (limit {})",
+                        declared as u64, max_bytes
+                    ),
                 });
             }
         }
@@ -260,7 +266,12 @@ pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<Value, BodyError>
         drain(req);
         return Err(BodyError {
             status: 413,
-            message: "Request body too large".into(),
+            // `take` stops at limit+1, so the count is a floor, not the size.
+            message: format!(
+                "Request body too large: at least {} bytes (limit {})",
+                raw.len(),
+                max_bytes
+            ),
         });
     }
     if raw.is_empty() {

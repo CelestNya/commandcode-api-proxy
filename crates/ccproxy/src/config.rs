@@ -28,6 +28,15 @@ const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
 /// ceiling must not exceed it, otherwise an allowed body would be rejected
 /// upstream with a confusing 413 after passing the proxy's own guard.
 const MAX_BODY_BYTES_MAX: u64 = 32 * 1024 * 1024;
+/// Incoming-guard headroom when compression is on. The guard runs on the raw
+/// client body, before translation and compression; the upstream 32 MB ceiling
+/// applies to the *forwarded* body. Base64 inflates an image 4/3, so a few
+/// large screenshots alone clear 32 MB raw — and with compression on they
+/// re-encode to a fraction of that. 64 MB keeps those requests alive while
+/// bounding the one-shot memory a single request can pin. The forwarded body
+/// still obeys `MAX_BODY_BYTES_MAX` (upstream rejects anything larger with a
+/// plain 413, same as before).
+const COMPRESS_RAW_GUARD_MAX: u64 = 64 * 1024 * 1024;
 const TIMEOUT_MAX_MS: u64 = 30 * 60 * 1000;
 /// Default window in which a request must produce its first byte upstream
 /// before the attempt is discarded and re-sent.
@@ -337,10 +346,11 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
 
     // With compression enabled the translated body can only shrink, so the
     // incoming guard must not veto screenshot-heavy requests before the
-    // translator ever sees them: raise the guard to the hard ceiling. The
-    // upstream 32 MB limit still bounds what actually goes out.
+    // translator ever sees them: raise the guard well past the raw cost of a
+    // base64'd screenshot set. The upstream 32 MB limit still bounds what
+    // actually goes out.
     let max_body_bytes = if image_compress.enabled {
-        max_body_bytes.max(MAX_BODY_BYTES_MAX)
+        max_body_bytes.max(COMPRESS_RAW_GUARD_MAX)
     } else {
         max_body_bytes
     };
@@ -691,15 +701,16 @@ mod tests {
         );
         assert_eq!(c.image_compress.quality, 1);
 
-        // Enabling the compressor raises the incoming body guard to the hard
-        // ceiling (the translated body only shrinks); disabling leaves the
-        // configured limit alone.
+        // Enabling the compressor raises the incoming body guard past the
+        // upstream ceiling — the guard sees the raw base64-inflated body while
+        // the ceiling bounds the forwarded, already-shrunk one; disabling
+        // leaves the configured limit alone.
         let c = load_with_file(
             &[],
             &env_of(&[("CC_IMAGE_COMPRESS", "on")]),
             &FileConfig::default(),
         );
-        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_MAX);
+        assert_eq!(c.max_body_bytes, COMPRESS_RAW_GUARD_MAX);
         let c = load_with_file(&[], &no_env, &FileConfig::default());
         assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_DEFAULT);
     }
