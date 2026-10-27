@@ -413,7 +413,7 @@ mod sni_contract_tests {
         let conn = zbus::blocking::Connection::session().unwrap();
         let sni = zbus::blocking::Proxy::new(
             &conn,
-            &name,
+            name.as_str(),
             "/StatusNotifierItem",
             "org.kde.StatusNotifierItem",
         )
@@ -427,20 +427,24 @@ mod sni_contract_tests {
             status == "Active" || status == "Passive",
             "unexpected Status: {status}"
         );
-        let menu_path: zvariant::OwnedObjectPath = sni.get_property("Menu").unwrap();
+        let menu_path: zbus::zvariant::OwnedObjectPath = sni.get_property("Menu").unwrap();
         println!(
             "OK: Id/Status/Menu 可读（Status={status}, Menu={}）",
             menu_path.as_str()
         );
 
         // 3) DBusMenu 布局含关键条目。
-        let menu_proxy =
-            zbus::blocking::Proxy::new(&conn, &name, menu_path.as_str(), "com.canonical.dbusmenu")
-                .unwrap();
+        let menu_proxy = zbus::blocking::Proxy::new(
+            &conn,
+            name.as_str(),
+            menu_path.as_str(),
+            "com.canonical.dbusmenu",
+        )
+        .unwrap();
         let reply = menu_proxy
             .call_method("GetLayout", &(0i32, 3i32, Vec::<String>::new()))
             .unwrap();
-        let layout: zvariant::Value = reply.body().deserialize().unwrap();
+        let layout: zbus::zvariant::Value = reply.body().deserialize().unwrap();
         let layout_debug = format!("{layout:?}");
         assert!(
             layout_debug.contains("启动代理") && layout_debug.contains("退出"),
@@ -456,7 +460,7 @@ mod sni_contract_tests {
                 &(
                     start_id,
                     "clicked".to_string(),
-                    zvariant::Value::new(""),
+                    zbus::zvariant::Value::new(""),
                     0u32,
                 ),
             )
@@ -473,7 +477,7 @@ mod sni_contract_tests {
                 &(
                     quit_id,
                     "clicked".to_string(),
-                    zvariant::Value::new(""),
+                    zbus::zvariant::Value::new(""),
                     0u32,
                 ),
             )
