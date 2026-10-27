@@ -47,7 +47,7 @@ pub fn start_proxy(proxy: &Path, port: u16, log: &LogFile) {
 
 /// env 变量是否为空/未设置。
 fn env_empty(key: &str) -> bool {
-    std::env::var(key).ok().map_or(true, |v| v.trim().is_empty())
+    std::env::var(key).ok().is_none_or(|v| v.trim().is_empty())
 }
 
 /// 从代理二进制所在目录推导打包 webui 布局
