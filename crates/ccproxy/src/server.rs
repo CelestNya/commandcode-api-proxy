@@ -237,7 +237,7 @@ pub struct BodyError {
 /// Read the body with the two-stage guard: a Content-Length pre-check that
 /// rejects without reading, then a streaming cap. Never resets the connection —
 /// the golden's 413 cases keep using the same keep-alive socket afterwards.
-pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<Value, BodyError> {
+pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<(Value, u64), BodyError> {
     if let Some(len) = header_value(req, "content-length") {
         if let Ok(declared) = len.trim().parse::<f64>() {
             if declared.is_finite() && declared > max_bytes as f64 {
@@ -274,14 +274,17 @@ pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<Value, BodyError>
             ),
         });
     }
+    let raw_len = raw.len() as u64;
     if raw.is_empty() {
-        return Ok(Value::Null);
+        return Ok((Value::Null, 0));
     }
     let text = String::from_utf8_lossy(&raw);
-    serde_json::from_str(&text).map_err(|_| BodyError {
-        status: 400,
-        message: "Invalid JSON body".into(),
-    })
+    serde_json::from_str(&text)
+        .map(|v| (v, raw_len))
+        .map_err(|_| BodyError {
+            status: 400,
+            message: "Invalid JSON body".into(),
+        })
 }
 
 /// Consume whatever is left of the body so the connection stays usable.
@@ -597,7 +600,7 @@ impl DialectSurface for Anthropic {
 /// resolved by the surface, so a change to the pipeline lands here once
 /// instead of in two parallel handlers.
 fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, ctx: &RequestId) {
-    let raw = match parse_body(&mut req, state.config.max_body_bytes) {
+    let (raw, raw_len) = match parse_body(&mut req, state.config.max_body_bytes) {
         Ok(v) => v,
         Err(e) => {
             return D::respond_error(
@@ -610,6 +613,9 @@ fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, c
             );
         }
     };
+    // Body size is the first thing a 413/size investigation asks for; log it
+    // on every request so the answer is already in the log when it happens.
+    log::info(&format!("[{}] body: {} bytes", ctx.id, raw_len));
     if let Err(validation::ValidationError(msg)) = D::validate(&raw) {
         return D::respond_error(req, 400, D::validation_error_type(), &msg, state, ctx);
     }
@@ -711,7 +717,7 @@ fn handle_messages(state: &SharedState, req: Request, ctx: &RequestId) {
 }
 
 fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
-    let raw = match parse_body(&mut req, state.config.max_body_bytes) {
+    let (raw, raw_len) = match parse_body(&mut req, state.config.max_body_bytes) {
         Ok(v) => v,
         Err(e) => {
             let kind = if e.status == 413 {
@@ -722,6 +728,7 @@ fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
             return respond_anthropic_error(req, e.status, kind, &e.message, state, ctx);
         }
     };
+    log::info(&format!("[{}] body: {} bytes", ctx.id, raw_len));
     if let Err(validation::ValidationError(msg)) = validation::validate_count_tokens_request(&raw) {
         return respond_anthropic_error(req, 400, "invalid_request_error", &msg, state, ctx);
     }

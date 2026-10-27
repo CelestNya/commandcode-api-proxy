@@ -30,13 +30,13 @@ const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
 const MAX_BODY_BYTES_MAX: u64 = 32 * 1024 * 1024;
 /// Incoming-guard headroom when compression is on. The guard runs on the raw
 /// client body, before translation and compression; the upstream 32 MB ceiling
-/// applies to the *forwarded* body. Base64 inflates an image 4/3, so a few
-/// large screenshots alone clear 32 MB raw — and with compression on they
-/// re-encode to a fraction of that. 64 MB keeps those requests alive while
+/// applies to the *forwarded* body. Base64 inflates an image 4/3, so a
+/// screenshot-heavy turn clears 32 MB raw — and with compression on it
+/// re-encodes to a fraction of that. 128 MB keeps such requests alive while
 /// bounding the one-shot memory a single request can pin. The forwarded body
 /// still obeys `MAX_BODY_BYTES_MAX` (upstream rejects anything larger with a
 /// plain 413, same as before).
-const COMPRESS_RAW_GUARD_MAX: u64 = 64 * 1024 * 1024;
+const COMPRESS_RAW_GUARD_MAX: u64 = 128 * 1024 * 1024;
 const TIMEOUT_MAX_MS: u64 = 30 * 60 * 1000;
 /// Default window in which a request must produce its first byte upstream
 /// before the attempt is discarded and re-sent.
