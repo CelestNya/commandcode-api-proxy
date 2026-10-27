@@ -32,6 +32,7 @@ pub mod cmd {
     pub const QUIT: usize = 5;
     pub const OPEN_WEBUI: usize = 6;
     pub const OPEN_TRAY_LOG: usize = 7;
+    pub const IMAGE_COMPRESS: usize = 8;
     /// A read-only line, drawn greyed and never chosen.
     pub const LABEL: usize = 0;
     /// A separator.
@@ -47,6 +48,7 @@ pub enum Action {
     OpenTrayLog,
     OpenWebUi,
     ToggleAutostart,
+    ToggleImageCompress,
     Quit,
     None,
 }
@@ -59,6 +61,7 @@ fn action_from_id(id: usize) -> Action {
         cmd::OPEN_TRAY_LOG => Action::OpenTrayLog,
         cmd::OPEN_WEBUI => Action::OpenWebUi,
         cmd::AUTOSTART => Action::ToggleAutostart,
+        cmd::IMAGE_COMPRESS => Action::ToggleImageCompress,
         cmd::QUIT => Action::Quit,
         _ => Action::None,
     }
@@ -75,6 +78,9 @@ pub struct UiState {
     pub stats: Box<dyn Fn() -> Option<ccproxy::billing::DailyStats> + Send + Sync>,
     pub running: Box<dyn Fn() -> bool + Send + Sync>,
     pub autostart: Box<dyn Fn() -> bool + Send + Sync>,
+    /// Read on demand (the exe-adjacent ccproxy.json can change between menu
+    /// openings), the same way `autostart` is.
+    pub image_compress: Box<dyn Fn() -> bool + Send + Sync>,
     last_action: std::sync::atomic::AtomicU32,
 }
 
@@ -92,6 +98,7 @@ impl UiState {
         stats: impl Fn() -> Option<ccproxy::billing::DailyStats> + Send + Sync + 'static,
         running: impl Fn() -> bool + Send + Sync + 'static,
         autostart: impl Fn() -> bool + Send + Sync + 'static,
+        image_compress: impl Fn() -> bool + Send + Sync + 'static,
     ) -> Self {
         Self {
             port,
@@ -100,6 +107,7 @@ impl UiState {
             stats: Box::new(stats),
             running: Box::new(running),
             autostart: Box::new(autostart),
+            image_compress: Box::new(image_compress),
             last_action: std::sync::atomic::AtomicU32::new(0),
         }
     }
@@ -177,6 +185,7 @@ impl UiState {
             Action::OpenTrayLog => cmd::OPEN_TRAY_LOG,
             Action::OpenWebUi => cmd::OPEN_WEBUI,
             Action::ToggleAutostart => cmd::AUTOSTART,
+            Action::ToggleImageCompress => cmd::IMAGE_COMPRESS,
             Action::Quit => cmd::QUIT,
             Action::None => 0,
         };
@@ -203,6 +212,7 @@ impl UiState {
         let entries = menu_entries(
             running,
             (self.autostart)(),
+            (self.image_compress)(),
             &self.cache_lines(),
             &self.version,
         );
@@ -330,6 +340,7 @@ unsafe fn state_of(hwnd: HWND) -> Option<&'static UiState> {
 pub fn menu_entries(
     running: bool,
     autostart: bool,
+    image_compress: bool,
     cache: &(String, String),
     version: &str,
 ) -> Vec<(usize, String, bool)> {
@@ -337,6 +348,11 @@ pub fn menu_entries(
         "开机自启 ✓".to_string()
     } else {
         "开机自启".to_string()
+    };
+    let image_compress_line = if image_compress {
+        "图片压缩 ✓".to_string()
+    } else {
+        "图片压缩".to_string()
     };
     vec![
         (cmd::LABEL, cache.0.clone(), false),
@@ -352,6 +368,9 @@ pub fn menu_entries(
         (cmd::OPEN_LOG, "打开代理日志".into(), true),
         (cmd::OPEN_TRAY_LOG, "打开托盘日志".into(), true),
         (cmd::AUTOSTART, autostart_line, true),
+        // Toggling rewrites the exe-adjacent ccproxy.json and restarts the
+        // proxy, so the change applies without a manual stop/start.
+        (cmd::IMAGE_COMPRESS, image_compress_line, true),
         (cmd::SEPARATOR, String::new(), false),
         (cmd::QUIT, "退出（同时停止代理）".into(), true),
         (cmd::SEPARATOR, String::new(), false),
@@ -552,6 +571,10 @@ mod tests {
         assert_eq!(action_from_id(cmd::OPEN_WEBUI), Action::OpenWebUi);
         assert_eq!(action_from_id(cmd::OPEN_LOG), Action::OpenLog);
         assert_eq!(action_from_id(cmd::OPEN_TRAY_LOG), Action::OpenTrayLog);
+        assert_eq!(
+            action_from_id(cmd::IMAGE_COMPRESS),
+            Action::ToggleImageCompress
+        );
         assert_eq!(action_from_id(cmd::LABEL), Action::None);
         assert_eq!(action_from_id(cmd::SEPARATOR), Action::None);
     }
@@ -567,7 +590,7 @@ mod tests {
 
     fn webui_entry(running: bool) -> (String, bool) {
         let cache = ("24h 缓存率：—".to_string(), " ".to_string());
-        let entry = menu_entries(running, false, &cache, "0.5.2")
+        let entry = menu_entries(running, false, false, &cache, "0.5.2")
             .into_iter()
             .find(|(id, ..)| *id == cmd::OPEN_WEBUI)
             .expect("the WebUI entry is always present");
@@ -586,7 +609,7 @@ mod tests {
         // missing again; every actionable id must appear exactly once.
         let cache = ("24h 缓存率：—".to_string(), " ".to_string());
         for (running, autostart) in [(true, true), (true, false), (false, true), (false, false)] {
-            let ids: Vec<usize> = menu_entries(running, autostart, &cache, "0.5.2")
+            let ids: Vec<usize> = menu_entries(running, autostart, false, &cache, "0.5.2")
                 .into_iter()
                 .map(|(id, ..)| id)
                 .collect();
@@ -597,6 +620,7 @@ mod tests {
                 cmd::OPEN_TRAY_LOG,
                 cmd::OPEN_WEBUI,
                 cmd::AUTOSTART,
+                cmd::IMAGE_COMPRESS,
                 cmd::QUIT,
             ] {
                 assert_eq!(
@@ -614,7 +638,7 @@ mod tests {
         // whole point of splitting them is that a user can open either. If a
         // later edit collapses them, this names the regression.
         let cache = ("24h 缓存率：—".to_string(), " ".to_string());
-        let entries = menu_entries(true, false, &cache, "0.6.2");
+        let entries = menu_entries(true, false, false, &cache, "0.6.2");
         let label = |id: usize| {
             entries
                 .iter()
@@ -624,5 +648,21 @@ mod tests {
         assert_eq!(label(cmd::OPEN_LOG).as_deref(), Some("打开代理日志"));
         assert_eq!(label(cmd::OPEN_TRAY_LOG).as_deref(), Some("打开托盘日志"));
         assert_ne!(cmd::OPEN_LOG, cmd::OPEN_TRAY_LOG);
+    }
+
+    #[test]
+    fn the_image_compress_entry_carries_the_checkmark_state() {
+        // Same convention as 开机自启: the ✓ is the only state display the
+        // menu has, so it must track the setting both ways.
+        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
+        let label = |on: bool| {
+            menu_entries(true, false, on, &cache, "0.7.2")
+                .into_iter()
+                .find(|(id, ..)| *id == cmd::IMAGE_COMPRESS)
+                .map(|(_, text, _)| text)
+                .expect("the image-compress entry is always present")
+        };
+        assert_eq!(label(true), "图片压缩 ✓");
+        assert_eq!(label(false), "图片压缩");
     }
 }

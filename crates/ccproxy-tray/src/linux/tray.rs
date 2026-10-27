@@ -175,9 +175,38 @@ fn dot_icon(size: u32, r: u8, g: u8, b: u8) -> ksni::Icon {
 /// Linux 托盘后端。
 pub struct LinuxTray {
     state: Arc<Mutex<TrayState>>,
-    /// spawn 后的服务句柄（`start` 期间持有，状态更新时触发刷新）。
-    handle: Mutex<Option<ksni::blocking::Handle<Snitray>>>,
+    /// spawn 后的服务句柄（`start` 期间持有，状态更新时触发刷新）。Arc：
+    /// [`MenuToken`] 与之共享，让事件回调也能触发刷新。
+    handle: Arc<Mutex<Option<ksni::blocking::Handle<Snitray>>>>,
     quit: Arc<AtomicBool>,
+}
+
+/// 事件回调手里的菜单刷新句柄。
+///
+/// `start` 阻塞在事件循环上，回调无法通过 `&mut LinuxTray` 调 `set_menu`；
+/// 状态与句柄本就在锁后共享，因此暴露一个 `&self` 的窄句柄——切换类动作
+/// （开机自启 / 图片压缩）落盘后即可重建菜单，✓ 状态不用等托盘重启。
+#[derive(Clone)]
+pub struct MenuToken {
+    state: Arc<Mutex<TrayState>>,
+    handle: Arc<Mutex<Option<ksni::blocking::Handle<Snitray>>>>,
+}
+
+impl MenuToken {
+    /// 用新菜单替换当前菜单并触发 SNI 刷新。
+    pub fn update_menu(&self, items: Vec<MenuItem>) {
+        if let Ok(mut s) = self.state.lock() {
+            s.menu = items;
+        }
+        let handle_guard = match self.handle.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(handle) = handle_guard.as_ref() {
+            // update 触发通知；闭包只读共享状态（状态已在上层更新）。
+            let _ = handle.update(|_tray: &mut Snitray| {});
+        }
+    }
 }
 
 impl LinuxTray {
@@ -189,8 +218,17 @@ impl LinuxTray {
                 menu,
                 tooltip,
             })),
-            handle: Mutex::new(None),
+            handle: Arc::new(Mutex::new(None)),
             quit: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// 菜单刷新句柄，供 `start` 的事件回调使用。
+    #[must_use]
+    pub fn menu_token(&self) -> MenuToken {
+        MenuToken {
+            state: Arc::clone(&self.state),
+            handle: Arc::clone(&self.handle),
         }
     }
 }
@@ -401,6 +439,7 @@ mod sni_contract_tests {
         // item 侧（被测对象：真实 LinuxTray）。start 的结果要留证——
         // 注册失败时它给出失败原因而不是静默。
         let menu = build_menu(
+            false,
             false,
             false,
             &("24h 缓存率：—".to_string(), " ".to_string()),

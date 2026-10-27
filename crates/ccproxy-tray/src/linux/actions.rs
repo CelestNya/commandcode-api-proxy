@@ -39,6 +39,13 @@ pub fn start_proxy(proxy: &Path, port: u16, log: &LogFile) {
     if env_empty(ccproxy::config::LOG_DIR_ENV) {
         cmd.env(ccproxy::config::LOG_DIR_ENV, super::settings::state_dir());
     }
+    // 图片压缩偏好：显式注入（开）或移除（关），保证托盘开关对托盘拉起的
+    // 代理总是决定性的——即使外层 shell 带着陈旧的 CC_IMAGE_COMPRESS。
+    if super::settings::image_compress_enabled() {
+        cmd.env("CC_IMAGE_COMPRESS", "1");
+    } else {
+        cmd.env_remove("CC_IMAGE_COMPRESS");
+    }
     match cmd.spawn() {
         Ok(_) => log.append("[tray] 代理启动进程已拉起（确认 /health 请用 status）"),
         Err(e) => log.append(&format!("[tray] 启动代理失败：{e}")),
@@ -76,6 +83,23 @@ pub fn stop_proxy(proxy: &Path, log: &LogFile) {
         }
         Err(e) => log.append(&format!("[tray] 停止代理失败：{e}")),
     }
+}
+
+/// 切换图片压缩偏好并让运行中的代理生效。
+///
+/// 偏好写入托盘状态目录；代理若在跑，经 CLI stop + start 重启以重新读
+/// env（与 Windows 行为一致：改配置 → 重启生效）。
+pub fn toggle_image_compress(proxy: &Path, port: u16, log: &LogFile) {
+    let new_state = !super::settings::image_compress_enabled();
+    super::settings::set_image_compress(new_state);
+    log.append(&format!(
+        "[tray] 图片压缩 → {}（写入 {}）",
+        if new_state { "开" } else { "关" },
+        super::settings::image_compress_pref_file().display()
+    ));
+    // 无论如何都走一次 stop（幂等）+ start：停止中的代理由 start 带起新配置。
+    stop_proxy(proxy, log);
+    start_proxy(proxy, port, log);
 }
 
 /// 用 `xdg-open` 打开 URL 或文件路径。

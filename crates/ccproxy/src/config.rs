@@ -212,11 +212,29 @@ impl FileConfig {
 /// Returns an empty config when the file is absent or unreadable — a missing
 /// file is the normal case, not an error, and a broken one must not stop the
 /// proxy from serving (the environment still applies).
+/// The config file the proxy reads: `ccproxy.json` next to the executable.
+/// Exposed because the tray's image-compress toggle edits this same file.
+#[must_use]
+pub fn config_file_path() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("ccproxy.json")))
+}
+
+/// The image-compress default the tray menu should reflect, resolved exactly
+/// as `load` resolves it: a well-formed env value wins, an absent or malformed
+/// one falls through to the config file, and only both-missing means off.
+#[must_use]
+pub fn image_compress_resolved(env_raw: Option<&str>, file_value: Option<bool>) -> bool {
+    env_raw
+        .and_then(parse_bool_word)
+        .or(file_value)
+        .unwrap_or(false)
+}
+
 #[must_use]
 pub fn load_file_config() -> FileConfig {
-    let path = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("ccproxy.json")));
+    let path = config_file_path();
     let Some(path) = path else {
         return FileConfig::default();
     };
@@ -297,11 +315,7 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
     // Image compression: env > file > default (off). The bool accepts the
     // usual words in the env ("true"/"1"/"on"...); the file uses JSON booleans.
     let image_compress = crate::image_compress::ImageCompressConfig {
-        enabled: env("CC_IMAGE_COMPRESS")
-            .as_deref()
-            .and_then(parse_bool_word)
-            .or(file.image_compress)
-            .unwrap_or(false),
+        enabled: image_compress_resolved(env("CC_IMAGE_COMPRESS").as_deref(), file.image_compress),
         quality: resolve_u64(
             env("CC_IMAGE_COMPRESS_QUALITY").as_deref(),
             file.image_compress_quality,
@@ -783,6 +797,23 @@ mod tests {
         let file = FileConfig::parse(r#"{"idleTimeoutMs": 45000}"#);
         let c = load_with_file(&[], &env_of(&[("CC_IDLE_TIMEOUT_MS", "abc")]), &file);
         assert_eq!(c.idle_timeout_ms, 45000);
+    }
+
+    #[test]
+    fn image_compress_resolution_matches_the_tray_toggle() {
+        // The tray menu shows the same resolved state the proxy runs with;
+        // this pure resolver is the shared source, so pin its precedence.
+        use super::image_compress_resolved as resolved;
+        assert!(!resolved(None, None), "both missing = off");
+        assert!(resolved(Some("1"), None));
+        assert!(resolved(Some("true"), None));
+        assert!(!resolved(Some("0"), None));
+        assert!(!resolved(Some("off"), None));
+        // A malformed env value falls through to the file, exactly like load.
+        assert!(resolved(Some("banana"), Some(true)));
+        assert!(!resolved(Some("banana"), Some(false)));
+        // A well-formed env wins over the file.
+        assert!(!resolved(Some("0"), Some(true)));
     }
 
     #[test]

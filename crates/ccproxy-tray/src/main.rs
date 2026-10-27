@@ -178,6 +178,7 @@ fn windows_main() {
             move || proxy.lock().map(|mut p| p.is_running()).unwrap_or(false)
         },
         settings::autostart_enabled,
+        settings::image_compress_enabled,
     );
     // The automatic-restart policy is a small state machine (`supervision`),
     // so the crash/restart timing rules are testable in isolation from the
@@ -257,6 +258,20 @@ fn dispatch(
         tray::Action::OpenTrayLog => open_tray_log(log),
         tray::Action::OpenWebUi => open_webui(port, log),
         tray::Action::ToggleAutostart => settings::toggle_autostart(root, log),
+        tray::Action::ToggleImageCompress => {
+            let was_running = proxy.lock().map(|mut p| p.is_running()).unwrap_or(false);
+            settings::toggle_image_compress(log);
+            // The proxy reads its config once at startup, so a running one is
+            // restarted to apply the change; a stopped one picks the new
+            // value up on its next start.
+            if was_running {
+                if let Ok(mut p) = proxy.lock() {
+                    p.stop();
+                    let _ = p.start(job);
+                }
+                log.append("[tray] 配置已更新，代理已重启");
+            }
+        }
         tray::Action::Quit => {
             // The last line the tray ever writes: the UI loop breaks right
             // after this action, so without it a manual quit and a silent
@@ -541,14 +556,33 @@ fn linux_main() {
     let menu = build_menu(
         running,
         linux::settings::autostart_enabled(),
+        linux::settings::image_compress_enabled(),
         &cache,
         env!("CARGO_PKG_VERSION"),
     );
 
     let mut tray = linux::tray::LinuxTray::new(status, menu, tooltip);
     let log_cb = std::sync::Arc::clone(&log);
+    // 切换类事件落盘后重建菜单，✓ 状态即时跟随，不等托盘重启。
+    let menu_token = tray.menu_token();
+    let menu_cache = cache.clone();
+    let menu_version = env!("CARGO_PKG_VERSION").to_string();
+    let menu_port = port;
     if let Err(e) = tray.start(Box::new(move |event| {
         linux_dispatch(event, &proxy, port, &log_cb);
+        if matches!(
+            event,
+            tray_api::TrayEvent::ToggleAutostart | tray_api::TrayEvent::ToggleImageCompress
+        ) {
+            let menu = build_menu(
+                health::port_serving(menu_port, None),
+                linux::settings::autostart_enabled(),
+                linux::settings::image_compress_enabled(),
+                &menu_cache,
+                &menu_version,
+            );
+            menu_token.update_menu(menu);
+        }
     })) {
         // 无会话总线（无桌面会话）等场景：记录原因而不是静默退出，否则
         // 安装后点了图标没反应却没有任何线索可查。
@@ -588,6 +622,9 @@ fn linux_dispatch(
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|_| proxy.display().to_string());
             linux::actions::toggle_autostart(&exec, log);
+        }
+        TrayEvent::ToggleImageCompress => {
+            linux::actions::toggle_image_compress(proxy, port, log);
         }
         TrayEvent::Quit => {
             log.append("[tray] 手动退出（停止代理请用菜单「停止代理」或 ccproxy stop）")
