@@ -2,6 +2,9 @@
 
 # Command Code API Proxy — Personal Build
 
+[![release](https://img.shields.io/github/v/release/CelestNya/commandcode-api-proxy)](https://github.com/CelestNya/commandcode-api-proxy/releases/latest)
+[![license](https://img.shields.io/badge/license-MIT-blue)](#license)
+
 **把 [Command Code](https://commandcode.ai) 的订阅协议翻译成标准 OpenAI / Anthropic 接口。**
 
 装上之后，你已有的 Command Code 订阅就能直接给 OpenCode、Claude Code、ZCode
@@ -11,8 +14,11 @@
   `Authorization`，代理原样转发给上游。
 - **双击即用（Windows）** —— 托盘程序负责启动和看护代理；换新版本时新版自动接管
   旧版，交接期间服务不中断。
+- **长会话不炸（v0.7.0 起）** —— 内置截图压缩开关，把历史里反复重发的 PNG
+  截图原地压成同分辨率 JPEG，请求体积缩 5–8 倍，且不破坏上游提示词缓存。
 - **带一个实时面板** —— 打开 <http://127.0.0.1:8787/webui> 看请求、用量和日志。
-- **小而自包含** —— 两个原生程序（代理 + 托盘，合计约 3 MB），不需要 Node 运行时。
+- **小而自包含** —— 两个原生程序（代理 + 托盘，合计约 5 MB），不需要 Node 运行时；
+  Linux 侧提供 deb / AppImage / AUR。
 
 > 这是个人版，只服务本机。原版的 key 托管与 `--setup-*` 引导已移除。
 
@@ -28,12 +34,12 @@ Command Code 有两套接口，能用哪套取决于你的订阅：
 本代理对上走 `/alpha/generate`，对外提供标准 OpenAI / Anthropic 接口 ——
 所以**普通订阅**就能从任意工具使用。
 
-## 快速开始
+## 运行代理
 
 ### Windows：下载即用（推荐）
 
 1. 从 [Releases](https://github.com/CelestNya/commandcode-api-proxy/releases/latest)
-   下载 `CCProxy-v<版本>.zip`，解压到任意目录。
+   下载 `commandcode-proxy-v<版本>-windows-x86_64.zip`，解压到任意目录。
 2. 双击 `CCProxyTray.exe`。托盘图标出现，代理随即在
    `http://127.0.0.1:8787` 上服务。
 3. 右键托盘图标：启动/停止代理、打开 WebUI、打开代理日志、打开托盘日志、
@@ -41,13 +47,19 @@ Command Code 有两套接口，能用哪套取决于你的订阅：
 
 不需要装 Rust，也不需要命令行。日志和配置都在解压出来的目录里，绿色免安装。
 
-### 命令行（任意平台）
+### Linux：deb / AppImage / AUR
+
+Release 附件里有 `commandcode-proxy` 与 `commandcode-proxy-tray` 两个 deb
+（后者依赖前者，带托盘）、一个 AppImage，以及 `commandcode-proxy-bin` 的
+AUR 源。systemd 单元与桌面入口随 deb 安装。
+
+### 命令行（任意平台，从源码）
 
 ```bash
 git clone https://github.com/CelestNya/commandcode-api-proxy.git
 cd commandcode-api-proxy
 cargo build --release --locked
-target/release/ccproxy.exe
+target/release/ccproxy    # Windows 上是 ccproxy.exe
 ```
 
 需要 Rust stable（Windows 上是 MSVC 工具链）。自己构建的话没有托盘，代理直接
@@ -147,6 +159,40 @@ curl http://127.0.0.1:8787/v1/messages \
 
 每个接口都要求请求头带 key（透传给上游）；缺失则本地 `401`。
 
+## 截图压缩（v0.7.0）
+
+长会话里，客户端每个回合都会把**整个对话历史**重发一遍 —— 其中反复出现的
+PNG 截图是请求膨胀的大头（一张 2560×1440 的 IDE 截图约 2–3 MB），攒几张就会
+撞上请求体上限（上游硬顶 **32 MB**）。
+
+代理内置一个**可选**的压缩开关，在转发前把请求里的 PNG 截图原地重编码为
+**同分辨率** JPEG（默认质量 80，alpha 通道平铺到白底）：
+
+- **信息量保留**：只压质量、不改分辨率，视觉上基本无差；
+- **确定性**：同一张图永远压出逐字节相同的结果 —— 历史里重发的同一张截图
+  压缩后前缀完全一致，上游提示词缓存的 ~99% 命中率不受影响；
+- **只会更小**：解码失败、非 PNG、小于门槛（默认 300 KB）或压完反而变大的
+  图片一律原样透传，压缩永远不会导致请求失败；
+- **不影响 token 计费**：图片 token 按像素面积计，分辨率不变则 token 不变 ——
+  这个开关治的是**请求体积（413）**，不是账单。
+
+开启方式（二选一）：
+
+```jsonc
+// service/ccproxy.json
+{ "imageCompress": true, "imageCompressQuality": 80 }
+```
+
+```bash
+# 或环境变量（优先级高于文件）
+CC_IMAGE_COMPRESS=1
+CC_IMAGE_COMPRESS_QUALITY=80   # 1-100，默认 80
+```
+
+> 启用瞬间，**已在跑的**旧会话会经历一次性的缓存重建（历史里未压缩的图和新
+> 压缩字节失配），之后恢复稳定；新会话从第一回合就是前缀一致的。
+> 治本的另一半在客户端：历史过长时用 `/compact` 压缩对话。
+
 ## 模型别名
 
 除了 CC 的完整模型名，还能用这些短名（完整对照表内置于代理，是唯一事实来源）：
@@ -233,7 +279,7 @@ curl http://127.0.0.1:8787/v1/messages \
 
 | 标签 | 含义 |
 | --- | --- |
-| `http-429`、`http-403` …… | 上游用 HTTP 状态码回答了问题 |
+| `http-429`、`http-403`、`http-413` …… | 上游用 HTTP 状态码回答了问题 |
 | `transport-connect-timeout` | 连不上（TCP/TLS 握手超时）—— 查网络/出站代理 |
 | `transport-header-timeout` | 连上了但上游迟迟不给响应（超过约 30s）—— 通常是上游排队/过载 |
 | `transport-refused` | 连接被拒绝 |
@@ -248,6 +294,11 @@ curl http://127.0.0.1:8787/v1/messages \
 分类是按错误的**结构**判定的，不受系统语言影响；同一个标签也出现在面板的
 `errorTag` 列，两处写法一致。完整词表与设计缘由见
 [`docs/adr/0001`](docs/adr/0001-transport-failure-classification.md)。
+
+**遇到 413 怎么办？** 请求体超限。上限有两层：代理本地（默认 10 MiB）和上游
+硬顶（32 MB）。历史里反复重发的截图是大头 —— 开启[截图压缩](#截图压缩v070)、
+或在客户端用 `/compact` 压缩对话历史；也可以用 `CC_MAX_BODY_BYTES` /
+`"maxBodyBytes"` 调本地上限（最高 32 MiB，对齐上游）。
 
 **出站代理（Clash 等）怎么配？** 默认 `"default"`：启动时探测 Windows 系统代理，
 真正能通才用，不通自动回退直连。写在代理同目录的 `service/ccproxy.json`：
@@ -292,12 +343,17 @@ curl http://127.0.0.1:8787/v1/messages \
 | `CC_IDLE_TIMEOUT_MS` | 流已开始出字后，两个数据块之间允许的最大间隔（默认 `120000` / 2 分钟）。`0` 关闭 |
 | `CC_NO_OUTPUT_TIMEOUT_MS` | 一个尝试**完全无字节**超过多久就丢弃重发（默认 `30000` / 30 秒）。只在首字节前生效；`0` 关闭 |
 | `CC_NO_OUTPUT_RETRIES` | 无输出尝试最多重发几次（默认 `3`，上限 `10`）。`0` 关闭 |
-| `CC_MAX_BODY_BYTES` | 请求体上限（默认 `10 MiB`，上限 `50 MiB`）。大图/PDF 场景调大 |
+| `CC_MAX_BODY_BYTES` | 请求体上限（默认 `10 MiB`，**上限 `32 MiB`** —— 对齐上游硬顶）。大图/PDF 场景调大 |
+| `CC_IMAGE_COMPRESS` | 截图压缩开关（`1`/`true`/`on` 开启，默认关）。见[截图压缩](#截图压缩v070) |
+| `CC_IMAGE_COMPRESS_QUALITY` | 压缩质量 `1`–`100`（默认 `80`） |
 | `CC_NO_TOOLS_GUARD` | 设为 `off` 可关闭给无工具会话注入的"工具已禁用"提示 |
 | `CC_PROXY` | 仅托盘：`off` 强制直连，`<url>` 覆盖自动探测的系统代理 |
 | `CC_TRAY_NS` | 仅托盘：给第二个隔离实例起命名空间（互斥量/事件/日志/数据目录）。生产留空 |
 | `LOG_LEVEL` | 日志级别（`debug` / `info` / `warn` / `error`） |
 | `CORS_ORIGIN` | `Access-Control-Allow-Origin` 的值，默认 `*`；空字符串关闭 CORS |
+
+配置文件（`service/ccproxy.json`）用小驼峰对应同名项：`maxBodyBytes`、
+`imageCompress`、`imageCompressQuality`、`imageCompressMinBytes` 等。
 
 > **关于两个静默超时**：`CC_IDLE_TIMEOUT_MS` 与 `CC_NO_OUTPUT_TIMEOUT_MS` 共用
 > 同一个 socket 读超时，所以"等上游响应头"的实际上限是两者中**较小的那个**
