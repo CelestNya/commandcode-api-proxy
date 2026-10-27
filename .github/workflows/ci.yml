@@ -42,3 +42,20 @@ jobs:
         run: cargo build --release --locked
       - name: Run the full suite (proxy + tray)
         run: cargo test --locked
+
+  linux-sni-smoke:
+    # SNI 运行时冒烟：起私有 session bus，运行托盘，并在 DBus 上验证桌面
+    # 外壳（KDE 面板）接入托盘的完整契约——注册、属性、菜单布局、以及
+    # 通过 DBusMenu 点击「启动代理」真正拉起代理。比"编译实证"多验证
+    # 一整层；面板渲染本身仍需真机 KDE 目视确认。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Ensure DBus tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dbus libglib2.0-bin
+      - name: Build tray + proxy
+        run: cargo build --locked -p ccproxy-tray -p ccproxy
+      - name: SNI smoke test
+        run: bash scripts/sni-smoke.sh target/debug
