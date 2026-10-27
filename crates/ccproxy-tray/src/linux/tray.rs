@@ -104,6 +104,17 @@ impl ksni::Tray for Snitray {
             .unwrap_or_default();
         menu_items(&menu, self.tx.clone())
     }
+
+    // 默认实现同样返回 true（保持服务存活）；覆写只为把原因写进日志——
+    // watcher 离线/上线在真实桌面上（如 Plasma 重启）也会发生，留痕有价值。
+    fn watcher_offline(&self, reason: ksni::OfflineReason) -> bool {
+        eprintln!("[ksni] watcher offline: {reason:?}");
+        true
+    }
+
+    fn watcher_online(&self) {
+        eprintln!("[ksni] watcher online（重新注册由 ksni 内部执行）");
+    }
 }
 
 /// 契约层菜单 → ksni 菜单。activate 闭包在 DBus 线程执行，把事件发到
@@ -412,19 +423,29 @@ mod sni_contract_tests {
             *start_slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
         });
 
-        // 1) 注册：watcher 必须在超时内收到一个 SNI item 名。
-        let name = (0..40).find_map(|_| {
-            items
+        // 1) 注册：watcher 必须在超时内收到一个 SNI item 名。进度每 5s
+        // 打一次，失败时能看到注册是「从未发生」还是「迟到」。
+        let mut name: Option<String> = None;
+        for tick in 0..50 {
+            if let Some(n) = items
                 .lock()
                 .unwrap()
                 .iter()
                 .find(|n| n.starts_with("org.kde.StatusNotifierItem-"))
                 .cloned()
-                .or_else(|| {
-                    std::thread::sleep(Duration::from_millis(250));
-                    None
-                })
-        });
+            {
+                name = Some(n);
+                break;
+            }
+            if tick % 20 == 0 {
+                let count = items.lock().unwrap().len();
+                println!(
+                    "等待注册… tick={tick} items={count} tray_thread_alive={}",
+                    tray_thread.is_finished() == false
+                );
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
         let name = name.unwrap_or_else(|| {
             let started = start_result
                 .lock()
