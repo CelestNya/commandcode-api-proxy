@@ -371,16 +371,14 @@ mod sni_contract_tests {
                 },
             )
             .unwrap()
-            .build()
-            .unwrap();
-        watcher_conn
-            .object_server()
             .serve_at(
                 "/org/kde/StatusNotifierWatcher",
                 FakeWatcher {
                     items: Arc::clone(&items),
                 },
             )
+            .unwrap()
+            .build()
             .unwrap();
         // 连接必须活着服务到测试结束；绑定后仅供存活。
         let _keep_watcher = watcher_conn;
@@ -428,9 +426,7 @@ mod sni_contract_tests {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .take();
-            panic!(
-                "watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}"
-            )
+            panic!("watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}")
         });
         println!("OK: 注册 {name}");
 
