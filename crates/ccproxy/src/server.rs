@@ -34,6 +34,10 @@ pub struct AppState {
     /// `ANTHROPIC_DEFAULT_MODEL` / `CC_NO_TOOLS_GUARD`, read once at startup.
     pub translate_env: crate::translate::Env,
     pub usage: Mutex<UsageTotals>,
+    /// SHA-256 memo for the image compressor (optimization only; the outputs
+    /// are deterministic without it). Shared across requests so a client's
+    /// per-turn image resends are a hash lookup, not a re-encode.
+    pub image_memo: Mutex<crate::image_compress::ImageMemo>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -45,6 +49,7 @@ pub fn new_state(config: Config) -> SharedState {
         tables: crate::translate::ModelTables::load(),
         translate_env: crate::translate::Env::from_process(),
         usage: Mutex::new(UsageTotals::default()),
+        image_memo: Mutex::new(crate::image_compress::ImageMemo::new()),
     })
 }
 
@@ -99,6 +104,18 @@ fn header_value<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
 
 fn is_anthropic(req: &Request) -> bool {
     header_value(req, "anthropic-version").is_some()
+}
+
+/// Run the image compressor over a translated CC body, when enabled. Shared by
+/// both dialect surfaces — the module itself guarantees passthrough-on-error,
+/// so a bad image can never fail the request here. A poisoned memo lock is
+/// recovered from: the memo is an optimization only.
+fn compress_body_images(state: &AppState, body: &mut Value) {
+    if !state.config.image_compress.enabled {
+        return;
+    }
+    let mut memo = state.image_memo.lock().unwrap_or_else(|e| e.into_inner());
+    crate::image_compress::compress_cc_body(body, &state.config.image_compress, &mut memo);
 }
 
 /// `Authorization: Bearer <key>` or `x-api-key: <key>`; passthrough only.
@@ -477,6 +494,7 @@ impl DialectSurface for Openai {
             &state.tables,
             state.translate_env.no_tools_guard_off,
         );
+        compress_body_images(state, &mut body);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }
@@ -525,6 +543,7 @@ impl DialectSurface for Anthropic {
     fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value {
         let mut body =
             translate::anthropic_to_cc_with_env(raw, catalog, &state.tables, &state.translate_env);
+        compress_body_images(state, &mut body);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }

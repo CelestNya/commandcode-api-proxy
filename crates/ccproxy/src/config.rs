@@ -53,6 +53,9 @@ pub struct Config {
     pub no_output_retries: u64,
     /// Maximum request body size in bytes (Content-Length pre-check + streaming guard).
     pub max_body_bytes: u64,
+    /// Inline-screenshot quality compression. Deterministic and cache-safe by
+    /// contract (`image_compress` module docs); off by default.
+    pub image_compress: crate::image_compress::ImageCompressConfig,
     /// Outbound proxy policy. `default` probes the system proxy and falls back
     /// to direct; `direct` never uses one; an explicit URL always does, with no
     /// fallback. See [`ProxySetting`].
@@ -87,6 +90,7 @@ impl Default for Config {
             no_output_timeout_ms: NO_OUTPUT_TIMEOUT_DEFAULT_MS,
             no_output_retries: NO_OUTPUT_RETRIES_DEFAULT,
             max_body_bytes: MAX_BODY_BYTES_DEFAULT,
+            image_compress: crate::image_compress::ImageCompressConfig::default(),
             proxy: ProxySetting::Default,
             no_proxy: Vec::new(),
         }
@@ -162,6 +166,9 @@ pub struct FileConfig {
     pub no_output_timeout_ms: Option<u64>,
     pub no_output_retries: Option<u64>,
     pub max_body_bytes: Option<u64>,
+    pub image_compress: Option<bool>,
+    pub image_compress_quality: Option<u64>,
+    pub image_compress_min_bytes: Option<u64>,
 }
 
 impl FileConfig {
@@ -188,6 +195,9 @@ impl FileConfig {
             no_output_timeout_ms: n("noOutputTimeoutMs"),
             no_output_retries: n("noOutputRetries"),
             max_body_bytes: n("maxBodyBytes"),
+            image_compress: v.get("imageCompress").and_then(serde_json::Value::as_bool),
+            image_compress_quality: n("imageCompressQuality"),
+            image_compress_min_bytes: n("imageCompressMinBytes"),
         }
     }
 }
@@ -279,6 +289,26 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
         |v| v.min(NO_OUTPUT_RETRIES_MAX),
     );
 
+    // Image compression: env > file > default (off). The bool accepts the
+    // usual words in the env ("true"/"1"/"on"...); the file uses JSON booleans.
+    let image_compress = crate::image_compress::ImageCompressConfig {
+        enabled: env("CC_IMAGE_COMPRESS")
+            .as_deref()
+            .and_then(parse_bool_word)
+            .or(file.image_compress)
+            .unwrap_or(false),
+        quality: resolve_u64(
+            env("CC_IMAGE_COMPRESS_QUALITY").as_deref(),
+            file.image_compress_quality,
+            u64::from(crate::image_compress::DEFAULT_QUALITY),
+            |v| v.floor() as u64,
+            |v| v.clamp(1, 100),
+        ) as u8,
+        min_input_bytes: file.image_compress_min_bytes.unwrap_or(
+            crate::image_compress::DEFAULT_MIN_BYTES,
+        ),
+    };
+
     // Proxy: env (CC_PROXY) > file (`proxy`) > default. The env override stays
     // honoured because it is what operators already use to force direct.
     let proxy_raw = non_empty(env("CC_PROXY").as_deref()).or_else(|| file.proxy.clone());
@@ -298,8 +328,20 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
         no_output_timeout_ms,
         no_output_retries,
         max_body_bytes,
+        image_compress,
         proxy,
         no_proxy,
+    }
+}
+
+/// `1`/`true`/`yes`/`on` -> `Some(true)`; `0`/`false`/`no`/`off` ->
+/// `Some(false)`; anything else (including empty) -> `None`, so a typoed env
+/// value falls through to the file rather than silently disabling a feature.
+fn parse_bool_word(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 
@@ -582,6 +624,47 @@ mod tests {
         assert_eq!(c.upstream_timeout_ms, 600_000);
         assert_eq!(c.idle_timeout_ms, 120_000);
         assert_eq!(c.max_body_bytes, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn image_compress_resolves_env_then_file_then_default() {
+        use crate::image_compress::{DEFAULT_MIN_BYTES, DEFAULT_QUALITY};
+
+        // Default: off, stock quality.
+        let c = load(&[], &no_env);
+        assert!(!c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, DEFAULT_QUALITY);
+        assert_eq!(c.image_compress.min_input_bytes, DEFAULT_MIN_BYTES);
+
+        // File on, with a quality.
+        let file = FileConfig::parse(r#"{"imageCompress": true, "imageCompressQuality": 60}"#);
+        let c = load_with_file(&[], &no_env, &file);
+        assert!(c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, 60);
+
+        // Env wins over the file in either direction; a switch override leaves
+        // the file's quality alone.
+        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "off")]), &file);
+        assert!(!c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, 60);
+
+        // The env bool accepts words, and a typo falls through to the file
+        // rather than silently flipping to the default.
+        let on_file = FileConfig::parse(r#"{"imageCompress": true}"#);
+        let c = load_with_file(
+            &[],
+            &env_of(&[("CC_IMAGE_COMPRESS", "ture")]),
+            &on_file,
+        );
+        assert!(c.image_compress.enabled);
+
+        // Quality clamps into 1..=100 whichever source won.
+        let c = load_with_file(
+            &[],
+            &env_of(&[("CC_IMAGE_COMPRESS_QUALITY", "0")]),
+            &on_file,
+        );
+        assert_eq!(c.image_compress.quality, 1);
     }
 
     #[test]

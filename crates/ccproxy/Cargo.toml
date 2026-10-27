@@ -62,6 +62,13 @@ tiny_http = { workspace = true }
 ureq = { workspace = true }
 uuid = { workspace = true }
 sysinfo = { version = "0.35", default-features = false, features = ["system"] }
+# Inline-screenshot quality compression (image_compress.rs): pure-Rust,
+# no-unsafe crates only — this crate forbids unsafe_code. base64 for the data
+# URLs, png for decode, jpeg-encoder for re-encode, sha2 as the memo key.
+base64 = "0.22"
+jpeg-encoder = "0.6"
+png = "0.17"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 # Reading the Windows system proxy for `proxy = "default"`. A safe wrapper over
