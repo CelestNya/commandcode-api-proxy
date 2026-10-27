@@ -383,10 +383,11 @@ mod sni_contract_tests {
             env!("CARGO_PKG_VERSION"),
         );
         let (tx, rx) = mpsc::channel();
+        let menu_for_tray = menu.clone();
         let tray_thread = std::thread::spawn(move || {
             let mut tray = LinuxTray::new(
                 TrayStatus::Stopped,
-                menu.clone(),
+                menu_for_tray,
                 "Commandcode Proxy — SNI smoke".to_string(),
             );
             tray.start(Box::new(move |ev| {
@@ -444,7 +445,8 @@ mod sni_contract_tests {
         let reply = menu_proxy
             .call_method("GetLayout", &(0i32, 3i32, Vec::<String>::new()))
             .unwrap();
-        let layout: zbus::zvariant::Value = reply.body().deserialize().unwrap();
+        let layout_body = reply.body();
+        let layout: zbus::zvariant::Value = layout_body.deserialize().unwrap();
         let layout_debug = format!("{layout:?}");
         assert!(
             layout_debug.contains("启动代理") && layout_debug.contains("退出"),
