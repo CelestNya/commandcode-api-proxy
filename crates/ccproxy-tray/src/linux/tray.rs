@@ -357,7 +357,8 @@ mod sni_contract_tests {
             return;
         }
 
-        // watcher 侧（扮演 Plasma）。
+        // watcher 侧（扮演 Plasma）。规范路径是 /StatusNotifierWatcher，
+        // 为防 ksni 用另一惯例路径调用，两个路径都服务同一接口。
         let items = Arc::new(Mutex::new(Vec::<String>::new()));
         let watcher_conn = zbus::blocking::connection::Builder::session()
             .unwrap()
@@ -372,16 +373,29 @@ mod sni_contract_tests {
             .unwrap()
             .build()
             .unwrap();
+        watcher_conn
+            .object_server()
+            .serve_at(
+                "/org/kde/StatusNotifierWatcher",
+                FakeWatcher {
+                    items: Arc::clone(&items),
+                },
+            )
+            .unwrap();
         // 连接必须活着服务到测试结束；绑定后仅供存活。
         let _keep_watcher = watcher_conn;
 
-        // item 侧（被测对象：真实 LinuxTray）。
+        // item 侧（被测对象：真实 LinuxTray）。start 的结果要留证——
+        // 注册失败时它给出失败原因而不是静默。
         let menu = build_menu(
             false,
             false,
             &("24h 缓存率：—".to_string(), " ".to_string()),
             env!("CARGO_PKG_VERSION"),
         );
+        let start_result: Arc<Mutex<Option<Result<(), crate::tray_api::TrayError>>>> =
+            Arc::new(Mutex::new(None));
+        let start_slot = Arc::clone(&start_result);
         let (tx, rx) = mpsc::channel();
         let menu_for_tray = menu.clone();
         let tray_thread = std::thread::spawn(move || {
@@ -390,9 +404,10 @@ mod sni_contract_tests {
                 menu_for_tray,
                 "Commandcode Proxy — SNI smoke".to_string(),
             );
-            tray.start(Box::new(move |ev| {
+            let result = tray.start(Box::new(move |ev| {
                 let _ = tx.send(ev);
-            }))
+            }));
+            *start_slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
         });
 
         // 1) 注册：watcher 必须在超时内收到一个 SNI item 名。
@@ -408,7 +423,15 @@ mod sni_contract_tests {
                     None
                 })
         });
-        let name = name.unwrap_or_else(|| panic!("watcher 未收到 StatusNotifierItem 注册"));
+        let name = name.unwrap_or_else(|| {
+            let started = start_result
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take();
+            panic!(
+                "watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}"
+            )
+        });
         println!("OK: 注册 {name}");
 
         let conn = zbus::blocking::Connection::session().unwrap();
