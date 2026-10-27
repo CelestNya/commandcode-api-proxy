@@ -97,4 +97,4 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
     chmod 700 "$XDG_RUNTIME_DIR"
 fi
 
-dbus-run-session -- "$0" --session-inner "$TRAY" "$PROXY"
+dbus-run-session -- bash "$0" --session-inner "$TRAY" "$PROXY"
