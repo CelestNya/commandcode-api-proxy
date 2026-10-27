@@ -309,9 +309,9 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
             |v| v.floor() as u64,
             |v| v.clamp(1, 100),
         ) as u8,
-        min_input_bytes: file.image_compress_min_bytes.unwrap_or(
-            crate::image_compress::DEFAULT_MIN_BYTES,
-        ),
+        min_input_bytes: file
+            .image_compress_min_bytes
+            .unwrap_or(crate::image_compress::DEFAULT_MIN_BYTES),
     };
 
     // Proxy: env (CC_PROXY) > file (`proxy`) > default. The env override stays
@@ -666,11 +666,7 @@ mod tests {
         // The env bool accepts words, and a typo falls through to the file
         // rather than silently flipping to the default.
         let on_file = FileConfig::parse(r#"{"imageCompress": true}"#);
-        let c = load_with_file(
-            &[],
-            &env_of(&[("CC_IMAGE_COMPRESS", "ture")]),
-            &on_file,
-        );
+        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "ture")]), &on_file);
         assert!(c.image_compress.enabled);
 
         // Quality clamps into 1..=100 whichever source won.
@@ -684,7 +680,11 @@ mod tests {
         // Enabling the compressor raises the incoming body guard to the hard
         // ceiling (the translated body only shrinks); disabling leaves the
         // configured limit alone.
-        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "on")]), &FileConfig::default());
+        let c = load_with_file(
+            &[],
+            &env_of(&[("CC_IMAGE_COMPRESS", "on")]),
+            &FileConfig::default(),
+        );
         assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_MAX);
         let c = load_with_file(&[], &no_env, &FileConfig::default());
         assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_DEFAULT);

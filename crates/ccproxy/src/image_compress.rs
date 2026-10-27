@@ -121,7 +121,9 @@ pub fn compress_data_url(
     if u64::try_from(payload.len()).unwrap_or(u64::MAX) < cfg.min_input_bytes {
         return None;
     }
-    let png = base64::engine::general_purpose::STANDARD.decode(payload).ok()?;
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .ok()?;
 
     let mut hasher = Sha256::new();
     hasher.update(&png);
@@ -377,7 +379,10 @@ mod tests {
             0, 0, 255, 0, // fully transparent -> white
             0, 0, 0, 128, // half black over white -> 127 gray
         ];
-        assert_eq!(flatten_rgba(&rgba), vec![255, 0, 0, 255, 255, 255, 127, 127, 127]);
+        assert_eq!(
+            flatten_rgba(&rgba),
+            vec![255, 0, 0, 255, 255, 255, 127, 127, 127]
+        );
     }
 
     #[test]
@@ -398,7 +403,10 @@ mod tests {
         let n = compress_cc_body(&mut body, &cfg_on(), &mut ImageMemo::new());
         assert_eq!(n, 1);
         // A text field holding the same URL string is untouched.
-        assert_eq!(body["messages"][0]["content"][0]["text"].as_str().unwrap(), url);
+        assert_eq!(
+            body["messages"][0]["content"][0]["text"].as_str().unwrap(),
+            url
+        );
         let img = body["messages"][0]["content"][1]["image"].as_str().unwrap();
         assert!(img.starts_with("data:image/jpeg;base64,"));
         assert_ne!(img, url);
@@ -413,8 +421,12 @@ mod tests {
             &mut memo
         )
         .is_none());
-        assert!(compress_data_url("data:image/png;base64,not-really-a-png", &cfg_on(), &mut memo)
-            .is_none());
+        assert!(compress_data_url(
+            "data:image/png;base64,not-really-a-png",
+            &cfg_on(),
+            &mut memo
+        )
+        .is_none());
         assert!(compress_data_url("https://example.com/a.png", &cfg_on(), &mut memo).is_none());
         assert!(compress_data_url("", &cfg_on(), &mut memo).is_none());
     }
