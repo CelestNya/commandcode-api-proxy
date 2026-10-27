@@ -175,13 +175,12 @@ fn decode_png_to_rgb(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 /// Straight-alpha composite of each RGBA pixel over an opaque white backdrop.
-/// Indexing is bounded by `chunks_exact(4)`; the arithmetic cannot overflow
-/// (every product fits u16 and the sum fits u17).
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+/// `as_chunks::<4>()` yields whole pixels only, so there is no indexing and
+/// the arithmetic cannot overflow (every product fits u16 and the sum fits u17).
+#[allow(clippy::arithmetic_side_effects)]
 fn flatten_rgba(src: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(src.len() / 4 * 3);
-    for px in src.chunks_exact(4) {
-        let [r, g, b, a] = [px[0], px[1], px[2], px[3]];
+    for &[r, g, b, a] in src.as_chunks::<4>().0 {
         if a == 255 {
             out.extend_from_slice(&[r, g, b]);
         } else {
@@ -194,11 +193,11 @@ fn flatten_rgba(src: &[u8]) -> Vec<u8> {
 }
 
 /// Gray+alpha over white: one blended channel replicated to RGB.
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects)]
 fn flatten_gray_alpha(src: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(src.len() / 2 * 3);
-    for px in src.chunks_exact(2) {
-        let blended = blend_over_white(px[0], px[1]);
+    for &[gray, a] in src.as_chunks::<2>().0 {
+        let blended = blend_over_white(gray, a);
         out.extend_from_slice(&[blended, blended, blended]);
     }
     out
