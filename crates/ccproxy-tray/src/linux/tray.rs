@@ -439,10 +439,8 @@ mod sni_contract_tests {
             }
             if tick % 20 == 0 {
                 let count = items.lock().unwrap().len();
-                println!(
-                    "等待注册… tick={tick} items={count} tray_thread_alive={}",
-                    tray_thread.is_finished() == false
-                );
+                let alive = !tray_thread.is_finished();
+                println!("等待注册… tick={tick} items={count} tray_thread_alive={alive}");
             }
             std::thread::sleep(Duration::from_millis(500));
         }
@@ -451,17 +449,7 @@ mod sni_contract_tests {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .take();
-            panic!("watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}；总线名字：{:?}",
-                zbus::blocking::Connection::session().and_then(|c| {
-                    let dbus = zbus::blocking::Proxy::new(
-                        &c,
-                        "org.freedesktop.DBus",
-                        "/org/freedesktop/DBus",
-                        "org.freedesktop.DBus",
-                    )?;
-                    let msg = dbus.call_method("ListNames", &())?;
-                    Ok::<Vec<String>, zbus::Error>(msg.body().deserialize()?)
-                }).unwrap_or_else(|e| vec![format!("ListNames 失败：{e}")]))
+            panic!("watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}")
         });
         println!("OK: 注册 {name}");
 
