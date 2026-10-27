@@ -303,36 +303,40 @@ mod sni_contract_tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    /// 伪造的 StatusNotifierWatcher：只记录注册上来的 item 名。
+    /// 伪造的 StatusNotifierWatcher：只记录注册上来的 item 名。形状与
+    /// ksni 官方协议测试的 MockWatcher 一致（async 方法 + fdo::Result）。
     struct FakeWatcher {
         items: Arc<Mutex<Vec<String>>>,
     }
 
     #[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
     impl FakeWatcher {
-        fn register_status_notifier_item(&self, service: String) {
+        async fn register_status_notifier_item(&self, service: &str) -> zbus::fdo::Result<()> {
             self.items
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .push(service);
+                .push(service.to_string());
+            Ok(())
         }
 
-        fn register_status_notifier_host(&self, _service: String) {}
+        async fn register_status_notifier_host(&self, _service: &str) -> zbus::fdo::Result<()> {
+            Ok(())
+        }
 
         #[zbus(property)]
-        fn registered_status_notifier_items(&self) -> Vec<String> {
-            self.items.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        fn registered_status_notifier_items(&self) -> zbus::fdo::Result<Vec<String>> {
+            Ok(self.items.lock().unwrap_or_else(|p| p.into_inner()).clone())
         }
 
         // KDE Plasma 与 GNOME 的 watcher 都硬编码 true（ksni 源码注释同）。
         #[zbus(property)]
-        fn is_status_notifier_host_registered(&self) -> bool {
-            true
+        fn is_status_notifier_host_registered(&self) -> zbus::fdo::Result<bool> {
+            Ok(true)
         }
 
         #[zbus(property)]
-        fn protocol_version(&self) -> i32 {
-            0
+        fn protocol_version(&self) -> zbus::fdo::Result<i32> {
+            Ok(0)
         }
     }
 
@@ -426,7 +430,17 @@ mod sni_contract_tests {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .take();
-            panic!("watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}")
+            panic!("watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}；总线名字：{:?}",
+                zbus::blocking::Connection::session().and_then(|c| {
+                    let dbus = zbus::blocking::Proxy::new(
+                        &c,
+                        "org.freedesktop.DBus",
+                        "/org/freedesktop/DBus",
+                        "org.freedesktop.DBus",
+                    )?;
+                    let msg = dbus.call_method("ListNames", &())?;
+                    Ok::<Vec<String>, zbus::Error>(msg.body().deserialize()?)
+                }).unwrap_or_else(|e| vec![format!("ListNames 失败：{e}")]))
         });
         println!("OK: 注册 {name}");
 
