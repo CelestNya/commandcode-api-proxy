@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "ccproxy"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "base64",
  "jpeg-encoder",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "ccproxy-tray"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "ccproxy",
  "ksni",

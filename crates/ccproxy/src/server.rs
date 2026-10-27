@@ -908,7 +908,7 @@ fn serve_sse(sse: SseRequest<'_>) {
     });
 
     let usage_slot = SseBody::new_slot();
-    let body = SseBody::with_no_output_retries(
+    let mut body = SseBody::with_no_output_retries(
         stream,
         dialect,
         model,
@@ -924,16 +924,43 @@ fn serve_sse(sse: SseRequest<'_>) {
     push_header(&mut headers, "Connection", "keep-alive");
     cors_headers(state, &mut headers);
 
-    // tiny_http already picks chunked for a body with no known length; the
-    // explicit threshold keeps that choice from depending on how many bytes
-    // happen to be buffered when the response is written.
-    let response =
-        Response::new(StatusCode(200), headers, body, None, None).with_chunked_threshold(0);
+    // tiny_http's `respond` copies the body through a 1024-byte BufWriter that
+    // nothing flushes until the response is complete, so the client sees the
+    // stream in ~1 KiB bursts instead of event-at-a-time (see stream_write
+    // module docs). HTTP/1.1 — every real SSE client — gets the hand-written
+    // chunked path with a flush per event; a 1.0 client keeps the legacy path,
+    // byte-identical to the previous behavior.
+    let version = req.http_version().clone();
     log::debug(&format!("[{}] -> 200 text/event-stream", ctx.id));
-    // `respond` drives the body to EOF, at which point the usage the encoder
-    // observed (if any) has been published. Recording after this point rather
-    // than inside the body keeps the accounting off the write path.
-    let _ = req.respond(response);
+    let write_result = if crate::stream_write::supports_chunked(&version) {
+        let mut writer = req.into_writer();
+        crate::stream_write::write_chunked_response(
+            &mut writer,
+            &version,
+            StatusCode(200),
+            &headers,
+            &mut body,
+        )
+    } else {
+        // tiny_http already picks chunked for a body with no known length;
+        // the explicit threshold keeps that choice from depending on how
+        // many bytes happen to be buffered when the response is written.
+        let response =
+            Response::new(StatusCode(200), headers, body, None, None).with_chunked_threshold(0);
+        req.respond(response)
+    };
+    // Client-closing errors are as ignorable here as they are inside
+    // `respond`; anything else is worth a line in the log.
+    if let Err(e) = write_result {
+        use std::io::ErrorKind;
+        match e.kind() {
+            ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionRefused => {}
+            _ => log::warn(&format!("[{}] error writing the stream: {}", ctx.id, e)),
+        }
+    }
     let observed = usage_slot.lock().ok().and_then(|g| g.clone());
     // A failure that ended the turn was already recorded by the body, as it
     // happened; settle_ok keeps that row and only records a success when the
