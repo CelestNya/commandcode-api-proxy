@@ -104,6 +104,17 @@ impl ksni::Tray for Snitray {
             .unwrap_or_default();
         menu_items(&menu, self.tx.clone())
     }
+
+    // 默认实现同样返回 true（保持服务存活）；覆写只为把原因写进日志——
+    // watcher 离线/上线在真实桌面上（如 Plasma 重启）也会发生，留痕有价值。
+    fn watcher_offline(&self, reason: ksni::OfflineReason) -> bool {
+        eprintln!("[ksni] watcher offline: {reason:?}");
+        true
+    }
+
+    fn watcher_online(&self) {
+        eprintln!("[ksni] watcher online（重新注册由 ksni 内部执行）");
+    }
 }
 
 /// 契约层菜单 → ksni 菜单。activate 闭包在 DBus 线程执行，把事件发到
@@ -164,9 +175,38 @@ fn dot_icon(size: u32, r: u8, g: u8, b: u8) -> ksni::Icon {
 /// Linux 托盘后端。
 pub struct LinuxTray {
     state: Arc<Mutex<TrayState>>,
-    /// spawn 后的服务句柄（`start` 期间持有，状态更新时触发刷新）。
-    handle: Mutex<Option<ksni::blocking::Handle<Snitray>>>,
+    /// spawn 后的服务句柄（`start` 期间持有，状态更新时触发刷新）。Arc：
+    /// [`MenuToken`] 与之共享，让事件回调也能触发刷新。
+    handle: Arc<Mutex<Option<ksni::blocking::Handle<Snitray>>>>,
     quit: Arc<AtomicBool>,
+}
+
+/// 事件回调手里的菜单刷新句柄。
+///
+/// `start` 阻塞在事件循环上，回调无法通过 `&mut LinuxTray` 调 `set_menu`；
+/// 状态与句柄本就在锁后共享，因此暴露一个 `&self` 的窄句柄——切换类动作
+/// （开机自启 / 图片压缩）落盘后即可重建菜单，✓ 状态不用等托盘重启。
+#[derive(Clone)]
+pub struct MenuToken {
+    state: Arc<Mutex<TrayState>>,
+    handle: Arc<Mutex<Option<ksni::blocking::Handle<Snitray>>>>,
+}
+
+impl MenuToken {
+    /// 用新菜单替换当前菜单并触发 SNI 刷新。
+    pub fn update_menu(&self, items: Vec<MenuItem>) {
+        if let Ok(mut s) = self.state.lock() {
+            s.menu = items;
+        }
+        let handle_guard = match self.handle.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(handle) = handle_guard.as_ref() {
+            // update 触发通知；闭包只读共享状态（状态已在上层更新）。
+            let _ = handle.update(|_tray: &mut Snitray| {});
+        }
+    }
 }
 
 impl LinuxTray {
@@ -178,8 +218,17 @@ impl LinuxTray {
                 menu,
                 tooltip,
             })),
-            handle: Mutex::new(None),
+            handle: Arc::new(Mutex::new(None)),
             quit: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// 菜单刷新句柄，供 `start` 的事件回调使用。
+    #[must_use]
+    pub fn menu_token(&self) -> MenuToken {
+        MenuToken {
+            state: Arc::clone(&self.state),
+            handle: Arc::clone(&self.handle),
         }
     }
 }
@@ -276,5 +325,298 @@ impl LinuxTray {
             // update 触发通知；闭包只读共享状态（状态已在上层方法更新）。
             let _ = handle.update(|_tray: &mut Snitray| {});
         }
+    }
+}
+
+#[cfg(test)]
+mod sni_contract_tests {
+    //! 与桌面外壳的端到端契约（Linux，需会话总线）。
+    //!
+    //! 伪造一个 StatusNotifierWatcher（即 Plasma 面板那一侧——真实的
+    //! watcher 由 plasma-workspace 在会话总线上提供），然后驱动真实的
+    //! `LinuxTray`，验证面板接入托盘的完整契约：
+    //!
+    //! 1. 托盘向 watcher 注册（well-known 名 `org.kde.StatusNotifierItem-PID-ID`）；
+    //! 2. `/StatusNotifierItem` 的属性可读（Id / Status / Menu）；
+    //! 3. DBusMenu 服务菜单布局（含「启动代理」「退出」）；
+    //! 4. 通过 `com.canonical.dbusmenu.Event` 点击「启动代理」→ 事件回调
+    //!    收到 `TrayEvent::Start`；点击「退出」→ `start` 的事件循环退出。
+    //!
+    //! 这正是 KDE 面板消费托盘的全部机器可验部分；面板上的渲染仍需真机
+    //! 目视确认。无会话总线时（如 quality job 的裸 runner）跳过——全量
+    //! 运行在 CI 的 `linux-sni-smoke` job（`dbus-run-session` 包裹）。
+
+    use super::LinuxTray;
+    use crate::tray_api::{build_menu, cmd, TrayBackend, TrayEvent, TrayStatus};
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// 伪造的 StatusNotifierWatcher：只记录注册上来的 item 名。形状与
+    /// ksni 官方协议测试的 MockWatcher 一致（async 方法 + fdo::Result）。
+    struct FakeWatcher {
+        items: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
+    impl FakeWatcher {
+        async fn register_status_notifier_item(&self, service: &str) -> zbus::fdo::Result<()> {
+            self.items
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(service.to_string());
+            Ok(())
+        }
+
+        async fn register_status_notifier_host(&self, _service: &str) -> zbus::fdo::Result<()> {
+            Ok(())
+        }
+
+        #[zbus(property)]
+        fn registered_status_notifier_items(&self) -> zbus::fdo::Result<Vec<String>> {
+            Ok(self.items.lock().unwrap_or_else(|p| p.into_inner()).clone())
+        }
+
+        // KDE Plasma 与 GNOME 的 watcher 都硬编码 true（ksni 源码注释同）。
+        #[zbus(property)]
+        fn is_status_notifier_host_registered(&self) -> zbus::fdo::Result<bool> {
+            Ok(true)
+        }
+
+        #[zbus(property)]
+        fn protocol_version(&self) -> zbus::fdo::Result<i32> {
+            Ok(0)
+        }
+    }
+
+    /// ksni 以扁平化位置索引分配菜单 id（根节点=0，DFS 序）。菜单无子菜
+    /// 单，因此第 n 个条目的 id 就是 n+1——由 build_menu 的输出直接算出，
+    /// 与 DBus 返回值交叉验证。
+    fn flat_id(menu: &[crate::tray_api::MenuItem], label: &str) -> i32 {
+        let pos = menu
+            .iter()
+            .position(|m| matches!(m, crate::tray_api::MenuItem::Entry(e) if e.label == label))
+            .unwrap_or_else(|| panic!("菜单中找不到「{label}」"));
+        (pos + 1) as i32
+    }
+
+    #[test]
+    fn the_tray_fulfils_the_sni_contract_a_panel_consumes() {
+        if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+            eprintln!(
+                "SKIP: 无会话总线（DBUS_SESSION_BUS_ADDRESS 未设置）；\
+                 全量运行见 CI linux-sni-smoke job"
+            );
+            return;
+        }
+
+        // watcher 侧（扮演 Plasma）。规范路径是 /StatusNotifierWatcher，
+        // 为防 ksni 用另一惯例路径调用，两个路径都服务同一接口。
+        let items = Arc::new(Mutex::new(Vec::<String>::new()));
+        let watcher_conn = zbus::blocking::connection::Builder::session()
+            .unwrap()
+            .name("org.kde.StatusNotifierWatcher")
+            .unwrap()
+            .serve_at(
+                "/StatusNotifierWatcher",
+                FakeWatcher {
+                    items: Arc::clone(&items),
+                },
+            )
+            .unwrap()
+            .serve_at(
+                "/org/kde/StatusNotifierWatcher",
+                FakeWatcher {
+                    items: Arc::clone(&items),
+                },
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        // 连接必须活着服务到测试结束；绑定后仅供存活。
+        let _keep_watcher = watcher_conn;
+
+        // item 侧（被测对象：真实 LinuxTray）。start 的结果要留证——
+        // 注册失败时它给出失败原因而不是静默。
+        let menu = build_menu(
+            false,
+            false,
+            false,
+            &("24h 缓存率：—".to_string(), " ".to_string()),
+            env!("CARGO_PKG_VERSION"),
+        );
+        let start_result: Arc<Mutex<Option<Result<(), crate::tray_api::TrayError>>>> =
+            Arc::new(Mutex::new(None));
+        let start_slot = Arc::clone(&start_result);
+        let (tx, rx) = mpsc::channel();
+        let menu_for_tray = menu.clone();
+        let tray_thread = std::thread::spawn(move || {
+            let mut tray = LinuxTray::new(
+                TrayStatus::Stopped,
+                menu_for_tray,
+                "Commandcode Proxy — SNI smoke".to_string(),
+            );
+            let result = tray.start(Box::new(move |ev| {
+                let _ = tx.send(ev);
+            }));
+            *start_slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
+        });
+
+        // 1) 注册：watcher 必须在超时内收到一个 SNI item 名。进度每 5s
+        // 打一次，失败时能看到注册是「从未发生」还是「迟到」。
+        let mut name: Option<String> = None;
+        for tick in 0..50 {
+            if let Some(n) = items
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|n| n.starts_with("org.kde.StatusNotifierItem-"))
+                .cloned()
+            {
+                name = Some(n);
+                break;
+            }
+            if tick % 20 == 0 {
+                let count = items.lock().unwrap().len();
+                let alive = !tray_thread.is_finished();
+                println!("等待注册… tick={tick} items={count} tray_thread_alive={alive}");
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        let name = name.unwrap_or_else(|| {
+            let started = start_result
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take();
+            panic!("watcher 未收到 StatusNotifierItem 注册；tray.start() 结果：{started:?}")
+        });
+        println!("OK: 注册 {name}");
+
+        // —— 独立诊断探针：把链路每一跳单独打通验证 ——
+        let conn = zbus::blocking::Connection::session().unwrap();
+        // 探针 A：客户端直调 watcher 的注册方法 → items 应立刻记录。
+        let watcher_probe = zbus::blocking::Proxy::new(
+            &conn,
+            "org.kde.StatusNotifierWatcher",
+            "/StatusNotifierWatcher",
+            "org.kde.StatusNotifierWatcher",
+        )
+        .unwrap();
+        let probe_result = watcher_probe.call_method(
+            "RegisterStatusNotifierItem",
+            &("org.kde.test.probe".to_string(),),
+        );
+        let probe_recorded = items
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|n| n == "org.kde.test.probe");
+        println!("PROBE watcher-dispatch: call={probe_result:?} recorded={probe_recorded}");
+
+        // 探针 B：客户端直读托盘 SNI 的 Id 属性 → 托盘对象服务应可访问。
+        let sni = zbus::blocking::Proxy::new(
+            &conn,
+            name.as_str(),
+            "/StatusNotifierItem",
+            "org.kde.StatusNotifierItem",
+        )
+        .unwrap();
+
+        // 2) 属性可读。
+        let id: String = sni.get_property("Id").unwrap();
+        assert_eq!(id, "commandcode-proxy");
+        let status: String = sni.get_property("Status").unwrap();
+        assert!(
+            status == "Active" || status == "Passive",
+            "unexpected Status: {status}"
+        );
+        let menu_path: zbus::zvariant::OwnedObjectPath = sni.get_property("Menu").unwrap();
+        println!(
+            "OK: Id/Status/Menu 可读（Status={status}, Menu={}）",
+            menu_path.as_str()
+        );
+
+        // 3) DBusMenu 布局含关键条目，且 ksni 的位置索引与契约 cmd 语义
+        // 交叉一致（布局 id == build_menu 位置 + 1）。
+        let menu_proxy = zbus::blocking::Proxy::new(
+            &conn,
+            name.as_str(),
+            menu_path.as_str(),
+            "com.canonical.dbusmenu",
+        )
+        .unwrap();
+        type LayoutTuple = (
+            i32,
+            std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+            Vec<zbus::zvariant::OwnedValue>,
+        );
+        fn label_of(
+            props: &std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+        ) -> Option<String> {
+            props
+                .get("label")
+                .and_then(|v| String::try_from(v.clone()).ok())
+        }
+        fn child_id(children: &[zbus::zvariant::OwnedValue], label: &str) -> Option<i32> {
+            children.iter().find_map(|c| {
+                let (id, props, _): LayoutTuple = c.clone().try_into().ok()?;
+                (label_of(&props).as_deref() == Some(label)).then_some(id)
+            })
+        }
+        let (_, root): (u32, LayoutTuple) = menu_proxy
+            .call("GetLayout", &(0i32, 2i32, Vec::<String>::new()))
+            .unwrap();
+        assert_eq!(root.0, 0, "布局根节点 id 应为 0");
+        let start_id =
+            child_id(&root.2, "启动代理").unwrap_or_else(|| panic!("menu layout 缺「启动代理」"));
+        let quit_id = child_id(&root.2, "退出（同时停止代理）")
+            .unwrap_or_else(|| panic!("menu layout 缺「退出」"));
+        assert_eq!(
+            start_id,
+            flat_id(&menu, "启动代理"),
+            "布局 id 与 build_menu 位置索引不一致"
+        );
+        assert_eq!(
+            quit_id,
+            flat_id(&menu, "退出（同时停止代理）"),
+            "布局 id 与 build_menu 位置索引不一致"
+        );
+        println!("OK: DBusMenu 布局可读，id 与契约交叉一致（start={start_id} quit={quit_id}）");
+
+        // 4) 点击「启动代理」→ 事件回调收到 Start。
+        menu_proxy
+            .call_method(
+                "Event",
+                &(
+                    start_id,
+                    "clicked".to_string(),
+                    zbus::zvariant::Value::new(""),
+                    0u32,
+                ),
+            )
+            .unwrap();
+        let ev = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(ev, TrayEvent::Start);
+        println!("OK: DBusMenu 点击「启动代理」→ TrayEvent::Start");
+
+        // 5) 点击「退出」→ start 的事件循环退出，线程收尾。
+        menu_proxy
+            .call_method(
+                "Event",
+                &(
+                    quit_id,
+                    "clicked".to_string(),
+                    zbus::zvariant::Value::new(""),
+                    0u32,
+                ),
+            )
+            .unwrap();
+        let ev = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(ev, TrayEvent::Quit);
+        tray_thread.join().unwrap();
+        println!("OK: 点击「退出」→ 事件循环退出，句柄已反注册");
+        // cmd::START / cmd::QUIT 与菜单语义的对应是契约的一部分，至少确认
+        // 两者不混淆（id 相等会是严重错误）。
+        assert_ne!(cmd::START, cmd::QUIT);
     }
 }

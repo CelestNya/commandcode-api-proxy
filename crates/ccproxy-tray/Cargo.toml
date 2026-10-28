@@ -59,3 +59,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# SNI 契约测试（linux/tray.rs 的 sni_contract_tests）：伪造 watcher + 以
+# DBus 客户端身份消费托盘。与 ksni 的 zbus 同版本，共享编译产物。
+zbus = "5"

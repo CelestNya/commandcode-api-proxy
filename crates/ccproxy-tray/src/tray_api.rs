@@ -49,6 +49,7 @@ pub mod cmd {
     pub const QUIT: u32 = 5;
     pub const OPEN_WEBUI: u32 = 6;
     pub const OPEN_TRAY_LOG: u32 = 7;
+    pub const IMAGE_COMPRESS: u32 = 8;
     /// 只读标签行（禁用，不可选中）。
     pub const LABEL: u32 = 0;
 }
@@ -77,6 +78,7 @@ pub enum TrayEvent {
     OpenTrayLog,
     OpenWebUi,
     ToggleAutostart,
+    ToggleImageCompress,
     Quit,
 }
 
@@ -91,6 +93,7 @@ impl TrayEvent {
             cmd::OPEN_TRAY_LOG => Some(Self::OpenTrayLog),
             cmd::OPEN_WEBUI => Some(Self::OpenWebUi),
             cmd::AUTOSTART => Some(Self::ToggleAutostart),
+            cmd::IMAGE_COMPRESS => Some(Self::ToggleImageCompress),
             cmd::QUIT => Some(Self::Quit),
             _ => None,
         }
@@ -109,6 +112,7 @@ impl TrayEvent {
             Self::OpenTrayLog => Some(cmd::OPEN_TRAY_LOG),
             Self::OpenWebUi => Some(cmd::OPEN_WEBUI),
             Self::ToggleAutostart => Some(cmd::AUTOSTART),
+            Self::ToggleImageCompress => Some(cmd::IMAGE_COMPRESS),
             Self::Quit => Some(cmd::QUIT),
         }
     }
@@ -123,6 +127,7 @@ impl TrayEvent {
 pub fn build_menu(
     running: bool,
     autostart: bool,
+    image_compress: bool,
     cache: &(String, String),
     version: &str,
 ) -> Vec<MenuItem> {
@@ -130,6 +135,11 @@ pub fn build_menu(
         "开机自启 ✓".to_string()
     } else {
         "开机自启".to_string()
+    };
+    let image_compress_line = if image_compress {
+        "图片压缩 ✓".to_string()
+    } else {
+        "图片压缩".to_string()
     };
     vec![
         MenuItem::Entry(MenuEntry {
@@ -173,6 +183,13 @@ pub fn build_menu(
         MenuItem::Entry(MenuEntry {
             id: cmd::AUTOSTART,
             label: autostart_line,
+            enabled: true,
+        }),
+        // 切换会改写配置（Windows：exe 旁 ccproxy.json；Linux：托盘偏好 +
+        // 启动环境注入）并重启代理，使变更即时生效。
+        MenuItem::Entry(MenuEntry {
+            id: cmd::IMAGE_COMPRESS,
+            label: image_compress_line,
             enabled: true,
         }),
         MenuItem::Separator,
@@ -341,7 +358,7 @@ mod tests {
     #[test]
     fn every_action_in_the_menu_has_an_entry() {
         for (running, autostart) in [(true, true), (true, false), (false, true), (false, false)] {
-            let items = build_menu(running, autostart, &cache(), "0.7.0");
+            let items = build_menu(running, autostart, false, &cache(), "0.7.0");
             for ev in [
                 TrayEvent::Start,
                 TrayEvent::Stop,
@@ -349,6 +366,7 @@ mod tests {
                 TrayEvent::OpenTrayLog,
                 TrayEvent::OpenWebUi,
                 TrayEvent::ToggleAutostart,
+                TrayEvent::ToggleImageCompress,
                 TrayEvent::Quit,
             ] {
                 let id = ev.to_cmd().unwrap();
@@ -367,7 +385,7 @@ mod tests {
     #[test]
     fn the_webui_entry_is_greyed_only_while_stopped() {
         let entry = |running: bool| {
-            let items = build_menu(running, false, &cache(), "0.7.0");
+            let items = build_menu(running, false, false, &cache(), "0.7.0");
             items
                 .iter()
                 .find_map(|i| match i {
@@ -384,7 +402,7 @@ mod tests {
 
     #[test]
     fn start_and_stop_are_gated_on_running_state() {
-        let items = build_menu(true, false, &cache(), "0.7.0");
+        let items = build_menu(true, false, false, &cache(), "0.7.0");
         let enabled = |id: u32| {
             items
                 .iter()
@@ -413,7 +431,7 @@ mod tests {
     fn status_menu_and_tooltip_are_recorded() {
         let mut tray = MockTray::new();
         tray.set_status(TrayStatus::Running).unwrap();
-        tray.set_menu(&build_menu(true, false, &cache(), "0.7.0"))
+        tray.set_menu(&build_menu(true, false, false, &cache(), "0.7.0"))
             .unwrap();
         tray.set_tooltip("Commandcode Proxy — running (:8787)")
             .unwrap();
@@ -462,6 +480,7 @@ mod tests {
         // 结构回归：第一行必须是缓存率标签，末尾必须是版本行（Windows 版
         // 同构断言，防止两侧漂移）。
         let items = build_menu(
+            false,
             false,
             false,
             &("24h 缓存率：99%（12 次）".into(), " ".into()),

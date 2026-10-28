@@ -819,6 +819,13 @@ fn attempt_send(
         .and_then(Value::as_str)
         .unwrap_or("");
     let payload = serde_json::to_string(body).unwrap_or_default();
+    // The forwarded size is the number the upstream 32 MB ceiling judges;
+    // pairing it with the incoming size in the log makes the raw→forwarded
+    // shrink (or its absence, for text-heavy bodies) directly observable.
+    log::info(&format!(
+        "forwarded body: {} bytes (thread {thread_id})",
+        payload.len()
+    ));
 
     // `timeout_connect` bounds the TCP+TLS handshake. `timeout_read` bounds one
     // socket read, and because ureq applies it for the connection's whole life —

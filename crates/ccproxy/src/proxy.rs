@@ -180,6 +180,7 @@ fn fallback_config() -> Config {
         no_output_timeout_ms: 30_000,
         no_output_retries: 3,
         max_body_bytes: 10 * 1024 * 1024,
+        image_compress: crate::image_compress::ImageCompressConfig::default(),
         proxy: ProxySetting::Default,
         no_proxy: Vec::new(),
     }

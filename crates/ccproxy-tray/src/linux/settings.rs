@@ -92,6 +92,34 @@ pub fn autostart_enabled() -> bool {
     autostart_file().is_file()
 }
 
+/// 图片压缩偏好的持久化位置（托盘自有状态目录）。
+///
+/// 设计差异（与 Windows）：Linux 的代理配置文件在打包布局下位于
+/// `/usr/bin/ccproxy.json`，普通用户不可写；而托盘拉起代理时本来就注入
+/// 环境（PORT、CC_LOG_DIR 等），所以偏好存在托盘状态目录、由 start_proxy
+/// 以 `CC_IMAGE_COMPRESS` 注入——env 优先级高于配置文件，语义一致。
+#[must_use]
+pub fn image_compress_pref_file() -> PathBuf {
+    state_dir().join("image-compress")
+}
+
+/// 图片压缩当前是否开启（偏好文件内容为 `on`）。
+#[must_use]
+pub fn image_compress_enabled() -> bool {
+    std::fs::read_to_string(image_compress_pref_file())
+        .map(|t| t.trim() == "on")
+        .unwrap_or(false)
+}
+
+/// 写入图片压缩偏好。
+pub fn set_image_compress(on: bool) {
+    let path = image_compress_pref_file();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, if on { "on\n" } else { "off\n" });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

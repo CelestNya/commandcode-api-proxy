@@ -22,7 +22,21 @@ pub const TRAY_LOG_DIR_ENV: &str = "CC_TRAY_LOG_DIR";
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u64 = 8787;
 const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
-const MAX_BODY_BYTES_MAX: u64 = 50 * 1024 * 1024;
+/// Upstream (CC API) hard limit measured in production: bodies of 30 MB are
+/// accepted, 32 MB is rejected with `413 Payload Too Large` ("Request body is
+/// 32.0 MB, over the 32 MB limit for one request (33554432 bytes)"). The
+/// ceiling must not exceed it, otherwise an allowed body would be rejected
+/// upstream with a confusing 413 after passing the proxy's own guard.
+const MAX_BODY_BYTES_MAX: u64 = 32 * 1024 * 1024;
+/// Incoming-guard headroom when compression is on. The guard runs on the raw
+/// client body, before translation and compression; the upstream 32 MB ceiling
+/// applies to the *forwarded* body. Base64 inflates an image 4/3, so a
+/// screenshot-heavy turn clears 32 MB raw — and with compression on it
+/// re-encodes to a fraction of that. 128 MB keeps such requests alive while
+/// bounding the one-shot memory a single request can pin. The forwarded body
+/// still obeys `MAX_BODY_BYTES_MAX` (upstream rejects anything larger with a
+/// plain 413, same as before).
+const COMPRESS_RAW_GUARD_MAX: u64 = 128 * 1024 * 1024;
 const TIMEOUT_MAX_MS: u64 = 30 * 60 * 1000;
 /// Default window in which a request must produce its first byte upstream
 /// before the attempt is discarded and re-sent.
@@ -53,6 +67,9 @@ pub struct Config {
     pub no_output_retries: u64,
     /// Maximum request body size in bytes (Content-Length pre-check + streaming guard).
     pub max_body_bytes: u64,
+    /// Inline-screenshot quality compression. Deterministic and cache-safe by
+    /// contract (`image_compress` module docs); off by default.
+    pub image_compress: crate::image_compress::ImageCompressConfig,
     /// Outbound proxy policy. `default` probes the system proxy and falls back
     /// to direct; `direct` never uses one; an explicit URL always does, with no
     /// fallback. See [`ProxySetting`].
@@ -87,6 +104,7 @@ impl Default for Config {
             no_output_timeout_ms: NO_OUTPUT_TIMEOUT_DEFAULT_MS,
             no_output_retries: NO_OUTPUT_RETRIES_DEFAULT,
             max_body_bytes: MAX_BODY_BYTES_DEFAULT,
+            image_compress: crate::image_compress::ImageCompressConfig::default(),
             proxy: ProxySetting::Default,
             no_proxy: Vec::new(),
         }
@@ -162,6 +180,9 @@ pub struct FileConfig {
     pub no_output_timeout_ms: Option<u64>,
     pub no_output_retries: Option<u64>,
     pub max_body_bytes: Option<u64>,
+    pub image_compress: Option<bool>,
+    pub image_compress_quality: Option<u64>,
+    pub image_compress_min_bytes: Option<u64>,
 }
 
 impl FileConfig {
@@ -188,6 +209,9 @@ impl FileConfig {
             no_output_timeout_ms: n("noOutputTimeoutMs"),
             no_output_retries: n("noOutputRetries"),
             max_body_bytes: n("maxBodyBytes"),
+            image_compress: v.get("imageCompress").and_then(serde_json::Value::as_bool),
+            image_compress_quality: n("imageCompressQuality"),
+            image_compress_min_bytes: n("imageCompressMinBytes"),
         }
     }
 }
@@ -197,11 +221,29 @@ impl FileConfig {
 /// Returns an empty config when the file is absent or unreadable — a missing
 /// file is the normal case, not an error, and a broken one must not stop the
 /// proxy from serving (the environment still applies).
+/// The config file the proxy reads: `ccproxy.json` next to the executable.
+/// Exposed because the tray's image-compress toggle edits this same file.
+#[must_use]
+pub fn config_file_path() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("ccproxy.json")))
+}
+
+/// The image-compress default the tray menu should reflect, resolved exactly
+/// as `load` resolves it: a well-formed env value wins, an absent or malformed
+/// one falls through to the config file, and only both-missing means off.
+#[must_use]
+pub fn image_compress_resolved(env_raw: Option<&str>, file_value: Option<bool>) -> bool {
+    env_raw
+        .and_then(parse_bool_word)
+        .or(file_value)
+        .unwrap_or(false)
+}
+
 #[must_use]
 pub fn load_file_config() -> FileConfig {
-    let path = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("ccproxy.json")));
+    let path = config_file_path();
     let Some(path) = path else {
         return FileConfig::default();
     };
@@ -279,12 +321,39 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
         |v| v.min(NO_OUTPUT_RETRIES_MAX),
     );
 
+    // Image compression: env > file > default (off). The bool accepts the
+    // usual words in the env ("true"/"1"/"on"...); the file uses JSON booleans.
+    let image_compress = crate::image_compress::ImageCompressConfig {
+        enabled: image_compress_resolved(env("CC_IMAGE_COMPRESS").as_deref(), file.image_compress),
+        quality: resolve_u64(
+            env("CC_IMAGE_COMPRESS_QUALITY").as_deref(),
+            file.image_compress_quality,
+            u64::from(crate::image_compress::DEFAULT_QUALITY),
+            |v| v.floor() as u64,
+            |v| v.clamp(1, 100),
+        ) as u8,
+        min_input_bytes: file
+            .image_compress_min_bytes
+            .unwrap_or(crate::image_compress::DEFAULT_MIN_BYTES),
+    };
+
     // Proxy: env (CC_PROXY) > file (`proxy`) > default. The env override stays
     // honoured because it is what operators already use to force direct.
     let proxy_raw = non_empty(env("CC_PROXY").as_deref()).or_else(|| file.proxy.clone());
     let proxy = proxy_raw.map_or(ProxySetting::Default, |raw| ProxySetting::parse(&raw));
     let no_proxy =
         parse_no_proxy(non_empty(env("NO_PROXY").as_deref()).or_else(|| file.no_proxy.clone()));
+
+    // With compression enabled the translated body can only shrink, so the
+    // incoming guard must not veto screenshot-heavy requests before the
+    // translator ever sees them: raise the guard well past the raw cost of a
+    // base64'd screenshot set. The upstream 32 MB limit still bounds what
+    // actually goes out.
+    let max_body_bytes = if image_compress.enabled {
+        max_body_bytes.max(COMPRESS_RAW_GUARD_MAX)
+    } else {
+        max_body_bytes
+    };
 
     Config {
         host,
@@ -298,8 +367,20 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
         no_output_timeout_ms,
         no_output_retries,
         max_body_bytes,
+        image_compress,
         proxy,
         no_proxy,
+    }
+}
+
+/// `1`/`true`/`yes`/`on` -> `Some(true)`; `0`/`false`/`no`/`off` ->
+/// `Some(false)`; anything else (including empty) -> `None`, so a typoed env
+/// value falls through to the file rather than silently disabling a feature.
+fn parse_bool_word(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 
@@ -585,6 +666,56 @@ mod tests {
     }
 
     #[test]
+    fn image_compress_resolves_env_then_file_then_default() {
+        use crate::image_compress::{DEFAULT_MIN_BYTES, DEFAULT_QUALITY};
+
+        // Default: off, stock quality.
+        let c = load(&[], &no_env);
+        assert!(!c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, DEFAULT_QUALITY);
+        assert_eq!(c.image_compress.min_input_bytes, DEFAULT_MIN_BYTES);
+
+        // File on, with a quality.
+        let file = FileConfig::parse(r#"{"imageCompress": true, "imageCompressQuality": 60}"#);
+        let c = load_with_file(&[], &no_env, &file);
+        assert!(c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, 60);
+
+        // Env wins over the file in either direction; a switch override leaves
+        // the file's quality alone.
+        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "off")]), &file);
+        assert!(!c.image_compress.enabled);
+        assert_eq!(c.image_compress.quality, 60);
+
+        // The env bool accepts words, and a typo falls through to the file
+        // rather than silently flipping to the default.
+        let on_file = FileConfig::parse(r#"{"imageCompress": true}"#);
+        let c = load_with_file(&[], &env_of(&[("CC_IMAGE_COMPRESS", "ture")]), &on_file);
+        assert!(c.image_compress.enabled);
+
+        // Quality clamps into 1..=100 whichever source won.
+        let c = load_with_file(
+            &[],
+            &env_of(&[("CC_IMAGE_COMPRESS_QUALITY", "0")]),
+            &on_file,
+        );
+        assert_eq!(c.image_compress.quality, 1);
+
+        // Enabling the compressor raises the incoming body guard past the
+        // upstream ceiling — the guard sees the raw base64-inflated body while
+        // the ceiling bounds the forwarded, already-shrunk one; disabling
+        // leaves the configured limit alone.
+        let c = load_with_file(
+            &[],
+            &env_of(&[("CC_IMAGE_COMPRESS", "on")]),
+            &FileConfig::default(),
+        );
+        assert_eq!(c.max_body_bytes, COMPRESS_RAW_GUARD_MAX);
+        let c = load_with_file(&[], &no_env, &FileConfig::default());
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_DEFAULT);
+    }
+
+    #[test]
     fn cli_overrides_env() {
         let argv = svec(["--port", "9999", "--host", "0.0.0.0"]);
         let c = load(&argv, &env_of(&[("PORT", "7777"), ("HOST", "10.0.0.1")]));
@@ -677,6 +808,23 @@ mod tests {
         let file = FileConfig::parse(r#"{"idleTimeoutMs": 45000}"#);
         let c = load_with_file(&[], &env_of(&[("CC_IDLE_TIMEOUT_MS", "abc")]), &file);
         assert_eq!(c.idle_timeout_ms, 45000);
+    }
+
+    #[test]
+    fn image_compress_resolution_matches_the_tray_toggle() {
+        // The tray menu shows the same resolved state the proxy runs with;
+        // this pure resolver is the shared source, so pin its precedence.
+        use super::image_compress_resolved as resolved;
+        assert!(!resolved(None, None), "both missing = off");
+        assert!(resolved(Some("1"), None));
+        assert!(resolved(Some("true"), None));
+        assert!(!resolved(Some("0"), None));
+        assert!(!resolved(Some("off"), None));
+        // A malformed env value falls through to the file, exactly like load.
+        assert!(resolved(Some("banana"), Some(true)));
+        assert!(!resolved(Some("banana"), Some(false)));
+        // A well-formed env wins over the file.
+        assert!(!resolved(Some("0"), Some(true)));
     }
 
     #[test]

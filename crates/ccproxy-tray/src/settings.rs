@@ -261,6 +261,176 @@ pub fn toggle_autostart(root: &Path, log: &crate::process::LogFile) {
     }
 }
 
+/// The image-compress state the menu should show, resolved the same way the
+/// proxy resolves it (`CC_IMAGE_COMPRESS` env wins over ccproxy.json, both
+/// missing means off).
+#[must_use]
+pub fn image_compress_enabled() -> bool {
+    let env = std::env::var("CC_IMAGE_COMPRESS").ok();
+    let file = ccproxy::config::load_file_config();
+    ccproxy::config::image_compress_resolved(env.as_deref(), file.image_compress)
+}
+
+/// Toggle the image-compress switch by rewriting the exe-adjacent
+/// ccproxy.json in place, preserving every other key. Returns the new state.
+///
+/// The proxy reads its config once at startup, so the caller restarts it for
+/// the change to apply; a stopped proxy simply picks the new value up on its
+/// next start.
+pub fn toggle_image_compress(log: &crate::process::LogFile) -> bool {
+    let new_state = !image_compress_enabled();
+    let path = ccproxy::config::config_file_path();
+    let Some(path) = path else {
+        log.warn("[tray] 图片压缩切换失败：无法定位 ccproxy.json（exe 旁）");
+        return image_compress_enabled();
+    };
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let written = set_image_compress_key(&text, new_state);
+    if std::fs::write(&path, written).is_err() {
+        log.warn(&format!(
+            "[tray] 图片压缩切换失败：无法写入 {}",
+            path.display()
+        ));
+        return image_compress_enabled();
+    }
+    log.info(&format!(
+        "[tray] 图片压缩 → {}（{}ccproxy.json，重启代理生效）",
+        if new_state { "开" } else { "关" },
+        path.display()
+    ));
+    new_state
+}
+
+/// Set `imageCompress` in a ccproxy.json text without disturbing any other
+/// key — including keys this build does not know about. A missing or corrupt
+/// file is treated as an empty object: the toggle must work on a fresh
+/// install, and a corrupt file must not be resurrected into something the
+/// proxy cannot parse either, so it is replaced wholesale.
+#[must_use]
+pub fn set_image_compress_key(text: &str, on: bool) -> String {
+    let mut root = match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
+        _ => serde_json::Value::Object(serde_json::Map::new()),
+    };
+    if let serde_json::Value::Object(map) = &mut root {
+        map.insert("imageCompress".to_string(), serde_json::Value::Bool(on));
+    }
+    let mut out = serde_json::to_string_pretty(&root).unwrap_or_default();
+    out.push('\n');
+    out
+}
+
+/// Repoint autostart at this install when it has drifted.///
+/// The Run entry is only written when the user toggles autostart, so the
+/// first handover that moves ownership to a new install directory leaves the
+/// entry naming the old one — and the next reboot rolls the service back to
+/// the old version. When this tray takes ownership it syncs: if autostart is
+/// on and the registered command is a tray exe in some other directory, it is
+/// rewritten to this exe. A command that is not a tray exe (a user's custom
+/// wrapper) is left alone, and autostart being off means nothing to sync.
+/// Adopt the previous install's `service/ccproxy.json` before starting the
+/// proxy. Takeover and upgrades unpack a fresh package whose config carries
+/// only zip defaults — notably no `imageCompress` — so without this a handover
+/// silently changes what gets re-encoded, which shifts the request prefix and
+/// drops the upstream prompt cache. The autostart entry names the incumbent
+/// install (kept in sync since 0.7.2), so it doubles as the migration source.
+/// Best effort in every direction: no registered command, same directory, or
+/// unreadable/unparseable source config all leave the local file untouched.
+pub fn inherit_config(root: &Path, log: &crate::process::LogFile) {
+    if !namespace().is_empty() {
+        return; // a test instance must not touch the production config
+    }
+    let Some(registered) = autostart_command() else {
+        return; // autostart is off; no previous install is named anywhere
+    };
+    let old_exe = PathBuf::from(registered.trim().trim_matches('"'));
+    let Some(old_root) = old_exe.parent() else {
+        return;
+    };
+    if old_root == root {
+        return; // same install restarting; nothing to inherit
+    }
+    let old_cfg = old_root.join("service").join("ccproxy.json");
+    let Ok(text) = std::fs::read_to_string(&old_cfg) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        log.warn(&format!(
+            "[tray] 上一安装的配置无法解析（{old_cfg:?}），保留本安装配置"
+        ));
+        return;
+    };
+    let pretty = match serde_json::to_string_pretty(&value) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let new_cfg = root.join("service").join("ccproxy.json");
+    if std::fs::write(&new_cfg, pretty.as_bytes()).is_ok() {
+        log.info(&format!("[tray] 配置已继承自上一安装（{old_cfg:?}）"));
+    } else {
+        log.warn("[tray] 配置继承写入失败（保留本安装配置）");
+    }
+}
+
+pub fn sync_autostart(root: &Path, log: &crate::process::LogFile) {
+    if !namespace().is_empty() {
+        return; // a test instance must not touch the production autostart
+    }
+    let Some(registered) = autostart_command() else {
+        return; // autostart is off; nothing can have drifted
+    };
+    let exe = std::env::current_exe().unwrap_or_else(|_| root.join("CCProxyTray.exe"));
+    let expected = format!("\"{}\"", exe.display());
+    if registered.trim() == expected {
+        return;
+    }
+    if !is_tray_command(&registered) {
+        log.warn(&format!(
+            "[tray] 自启动指向非托盘命令（{registered}），不擅自改动"
+        ));
+        return;
+    }
+    if crate::win::registry::write_string(RUN_KEY, RUN_VALUE, &expected) {
+        log.info(&format!(
+            "[tray] 自启动路径已同步到当前安装（原：{registered}）"
+        ));
+    } else {
+        log.warn("[tray] 自启动路径同步失败（保留原值）");
+    }
+}
+
+/// The registered autostart command, decoded from `REG_SZ` bytes.
+fn autostart_command() -> Option<String> {
+    let bytes = crate::win::registry::read_bytes(RUN_KEY, RUN_VALUE)?;
+    Some(reg_sz_to_string(&bytes))
+}
+
+/// Decode `REG_SZ` data: UTF-16LE code units, NUL-terminated, lenient on a
+/// truncated tail.
+#[must_use]
+fn reg_sz_to_string(bytes: &[u8]) -> String {
+    let units: Vec<u16> = bytes
+        .chunks(2)
+        .flat_map(|pair| match pair {
+            [lo, hi] => Some(u16::from_le_bytes([*lo, *hi])),
+            _ => None,
+        })
+        .take_while(|unit| *unit != 0)
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+/// Whether the command line names a tray exe — i.e. something this code wrote.
+/// A wrapper script or unrelated command is not ours to rewrite.
+#[must_use]
+fn is_tray_command(command: &str) -> bool {
+    let path = command.trim().trim_matches('"');
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("CCProxyTray.exe"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +442,34 @@ mod tests {
     /// this lock the namespace test intermittently saw an empty namespace when
     /// it raced the port test, and failed perhaps one run in three.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn reg_sz_decodes_utf16le_up_to_the_nul() {
+        let hello: Vec<u8> = "hello"
+            .encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        assert_eq!(reg_sz_to_string(&hello), "hello");
+        // An empty value (just the terminator) decodes to the empty string.
+        assert_eq!(reg_sz_to_string(&[0, 0]), "");
+        // A truncated tail is dropped, not panicked on.
+        assert_eq!(reg_sz_to_string(&[0x68, 0x00]), "h");
+        assert_eq!(reg_sz_to_string(&[0x68]), "");
+    }
+
+    #[test]
+    fn tray_command_recognition_is_narrow() {
+        assert!(is_tray_command(
+            r#""D:\somewhere\CCProxy-Release\CCProxy-v0.7.2-rust\CCProxyTray.exe""#
+        ));
+        assert!(is_tray_command(r#""D:\somewhere\ccproxytray.exe""#));
+        assert!(is_tray_command(r"D:\bare\CCProxyTray.exe"));
+        // Not ours to rewrite:
+        assert!(!is_tray_command(r#""D:\tools\my-wrapper.cmd" --flag"#));
+        assert!(!is_tray_command(r#""C:\Program Files\App\app.exe""#));
+        assert!(!is_tray_command(""));
+    }
 
     #[test]
     fn the_production_port_cannot_be_moved_by_the_environment() {
@@ -351,5 +549,57 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_toggle_preserves_every_other_config_key() {
+        // The service config carries proxy/noProxy/maxBodyBytes; a toggle
+        // that rewrote the file from a typed struct would silently drop keys
+        // it does not model, so the edit must be value-level.
+        let original = r#"{
+  "proxy": "default",
+  "noProxy": "localhost,127.0.0.1",
+  "maxBodyBytes": 33554432
+}
+"#;
+        let written = set_image_compress_key(original, true);
+        let parsed: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(
+            parsed.get("imageCompress"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            parsed.get("proxy"),
+            Some(&serde_json::Value::String("default".into()))
+        );
+        assert_eq!(
+            parsed.get("maxBodyBytes"),
+            Some(&serde_json::Value::from(33_554_432u64))
+        );
+        // Toggling off flips the key back without losing anything either.
+        let off: serde_json::Value =
+            serde_json::from_str(&set_image_compress_key(&written, false)).unwrap();
+        assert_eq!(
+            off.get("imageCompress"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(off.get("noProxy"), parsed.get("noProxy"));
+    }
+
+    #[test]
+    fn the_toggle_works_on_a_missing_or_corrupt_config() {
+        // Fresh install: no file yet — the result is a valid one-key file.
+        let fresh = set_image_compress_key("", true);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&fresh).unwrap(),
+            serde_json::json!({"imageCompress": true})
+        );
+        // Corrupt file: replaced wholesale rather than partially kept — a
+        // merge with garbage would leave the proxy unable to parse it either.
+        let repaired = set_image_compress_key("{ not json", false);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&repaired).unwrap(),
+            serde_json::json!({"imageCompress": false})
+        );
     }
 }

@@ -34,6 +34,10 @@ pub struct AppState {
     /// `ANTHROPIC_DEFAULT_MODEL` / `CC_NO_TOOLS_GUARD`, read once at startup.
     pub translate_env: crate::translate::Env,
     pub usage: Mutex<UsageTotals>,
+    /// SHA-256 memo for the image compressor (optimization only; the outputs
+    /// are deterministic without it). Shared across requests so a client's
+    /// per-turn image resends are a hash lookup, not a re-encode.
+    pub image_memo: Mutex<crate::image_compress::ImageMemo>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -45,6 +49,7 @@ pub fn new_state(config: Config) -> SharedState {
         tables: crate::translate::ModelTables::load(),
         translate_env: crate::translate::Env::from_process(),
         usage: Mutex::new(UsageTotals::default()),
+        image_memo: Mutex::new(crate::image_compress::ImageMemo::new()),
     })
 }
 
@@ -99,6 +104,31 @@ fn header_value<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
 
 fn is_anthropic(req: &Request) -> bool {
     header_value(req, "anthropic-version").is_some()
+}
+
+/// Run the image compressor over a translated CC body, when enabled. Shared by
+/// both dialect surfaces — the module itself guarantees passthrough-on-error,
+/// so a bad image can never fail the request here. A poisoned memo lock is
+/// recovered from: the memo is an optimization only.
+fn compress_body_images(state: &AppState, body: &mut Value, thread_id: &str) {
+    if !state.config.image_compress.enabled {
+        return;
+    }
+    let mut memo = state.image_memo.lock().unwrap_or_else(|e| e.into_inner());
+    let stats =
+        crate::image_compress::compress_cc_body(body, &state.config.image_compress, &mut memo);
+    // The ingress line shows the raw size and the forwarded line the final
+    // one; this is the step in between, named for what it is. Thread id ties
+    // it to the same request's other lines.
+    if stats.images > 0 {
+        log::info(&format!(
+            "image compress: {} image(s), {} -> {} bytes (-{}%) (thread {thread_id})",
+            stats.images,
+            stats.bytes_before,
+            stats.bytes_after,
+            stats.shrink_percent()
+        ));
+    }
 }
 
 /// `Authorization: Bearer <key>` or `x-api-key: <key>`; passthrough only.
@@ -220,14 +250,20 @@ pub struct BodyError {
 /// Read the body with the two-stage guard: a Content-Length pre-check that
 /// rejects without reading, then a streaming cap. Never resets the connection —
 /// the golden's 413 cases keep using the same keep-alive socket afterwards.
-pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<Value, BodyError> {
+pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<(Value, u64), BodyError> {
     if let Some(len) = header_value(req, "content-length") {
         if let Ok(declared) = len.trim().parse::<f64>() {
             if declared.is_finite() && declared > max_bytes as f64 {
                 drain(req);
                 return Err(BodyError {
                     status: 413,
-                    message: "Request body too large".into(),
+                    // The size is the whole diagnosis for a 413: without it a
+                    // reject like the 2026-10-27 production one (a >32 MiB
+                    // /v1/chat/completions body) leaves nothing to reason about.
+                    message: format!(
+                        "Request body too large: declared {} bytes (limit {})",
+                        declared as u64, max_bytes
+                    ),
                 });
             }
         }
@@ -243,17 +279,25 @@ pub fn parse_body(req: &mut Request, max_bytes: u64) -> Result<Value, BodyError>
         drain(req);
         return Err(BodyError {
             status: 413,
-            message: "Request body too large".into(),
+            // `take` stops at limit+1, so the count is a floor, not the size.
+            message: format!(
+                "Request body too large: at least {} bytes (limit {})",
+                raw.len(),
+                max_bytes
+            ),
         });
     }
+    let raw_len = raw.len() as u64;
     if raw.is_empty() {
-        return Ok(Value::Null);
+        return Ok((Value::Null, 0));
     }
     let text = String::from_utf8_lossy(&raw);
-    serde_json::from_str(&text).map_err(|_| BodyError {
-        status: 400,
-        message: "Invalid JSON body".into(),
-    })
+    serde_json::from_str(&text)
+        .map(|v| (v, raw_len))
+        .map_err(|_| BodyError {
+            status: 400,
+            message: "Invalid JSON body".into(),
+        })
 }
 
 /// Consume whatever is left of the body so the connection stays usable.
@@ -477,6 +521,7 @@ impl DialectSurface for Openai {
             &state.tables,
             state.translate_env.no_tools_guard_off,
         );
+        compress_body_images(state, &mut body, thread_id);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }
@@ -525,6 +570,7 @@ impl DialectSurface for Anthropic {
     fn build_body(raw: &Value, catalog: &Catalog, state: &AppState, thread_id: &str) -> Value {
         let mut body =
             translate::anthropic_to_cc_with_env(raw, catalog, &state.tables, &state.translate_env);
+        compress_body_images(state, &mut body, thread_id);
         if let Some(obj) = body.as_object_mut() {
             obj.insert("threadId".into(), Value::String(thread_id.into()));
         }
@@ -567,7 +613,7 @@ impl DialectSurface for Anthropic {
 /// resolved by the surface, so a change to the pipeline lands here once
 /// instead of in two parallel handlers.
 fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, ctx: &RequestId) {
-    let raw = match parse_body(&mut req, state.config.max_body_bytes) {
+    let (raw, raw_len) = match parse_body(&mut req, state.config.max_body_bytes) {
         Ok(v) => v,
         Err(e) => {
             return D::respond_error(
@@ -580,6 +626,9 @@ fn handle_generation<D: DialectSurface>(state: &SharedState, mut req: Request, c
             );
         }
     };
+    // Body size is the first thing a 413/size investigation asks for; log it
+    // on every request so the answer is already in the log when it happens.
+    log::info(&format!("[{}] body: {} bytes", ctx.id, raw_len));
     if let Err(validation::ValidationError(msg)) = D::validate(&raw) {
         return D::respond_error(req, 400, D::validation_error_type(), &msg, state, ctx);
     }
@@ -682,7 +731,7 @@ fn handle_messages(state: &SharedState, req: Request, ctx: &RequestId) {
 }
 
 fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
-    let raw = match parse_body(&mut req, state.config.max_body_bytes) {
+    let (raw, raw_len) = match parse_body(&mut req, state.config.max_body_bytes) {
         Ok(v) => v,
         Err(e) => {
             let kind = if e.status == 413 {
@@ -693,6 +742,7 @@ fn handle_count_tokens(state: &SharedState, mut req: Request, ctx: &RequestId) {
             return respond_anthropic_error(req, e.status, kind, &e.message, state, ctx);
         }
     };
+    log::info(&format!("[{}] body: {} bytes", ctx.id, raw_len));
     if let Err(validation::ValidationError(msg)) = validation::validate_count_tokens_request(&raw) {
         return respond_anthropic_error(req, 400, "invalid_request_error", &msg, state, ctx);
     }
@@ -912,7 +962,7 @@ fn serve_sse(sse: SseRequest<'_>) {
     });
 
     let usage_slot = SseBody::new_slot();
-    let body = SseBody::with_no_output_retries(
+    let mut body = SseBody::with_no_output_retries(
         stream,
         dialect,
         model,
@@ -928,16 +978,43 @@ fn serve_sse(sse: SseRequest<'_>) {
     push_header(&mut headers, "Connection", "keep-alive");
     cors_headers(state, &mut headers);
 
-    // tiny_http already picks chunked for a body with no known length; the
-    // explicit threshold keeps that choice from depending on how many bytes
-    // happen to be buffered when the response is written.
-    let response =
-        Response::new(StatusCode(200), headers, body, None, None).with_chunked_threshold(0);
+    // tiny_http's `respond` copies the body through a 1024-byte BufWriter that
+    // nothing flushes until the response is complete, so the client sees the
+    // stream in ~1 KiB bursts instead of event-at-a-time (see stream_write
+    // module docs). HTTP/1.1 — every real SSE client — gets the hand-written
+    // chunked path with a flush per event; a 1.0 client keeps the legacy path,
+    // byte-identical to the previous behavior.
+    let version = req.http_version().clone();
     log::debug(&format!("[{}] -> 200 text/event-stream", ctx.id));
-    // `respond` drives the body to EOF, at which point the usage the encoder
-    // observed (if any) has been published. Recording after this point rather
-    // than inside the body keeps the accounting off the write path.
-    let _ = req.respond(response);
+    let write_result = if crate::stream_write::supports_chunked(&version) {
+        let mut writer = req.into_writer();
+        crate::stream_write::write_chunked_response(
+            &mut writer,
+            &version,
+            StatusCode(200),
+            &headers,
+            &mut body,
+        )
+    } else {
+        // tiny_http already picks chunked for a body with no known length;
+        // the explicit threshold keeps that choice from depending on how
+        // many bytes happen to be buffered when the response is written.
+        let response =
+            Response::new(StatusCode(200), headers, body, None, None).with_chunked_threshold(0);
+        req.respond(response)
+    };
+    // Client-closing errors are as ignorable here as they are inside
+    // `respond`; anything else is worth a line in the log.
+    if let Err(e) = write_result {
+        use std::io::ErrorKind;
+        match e.kind() {
+            ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionRefused => {}
+            _ => log::warn(&format!("[{}] error writing the stream: {}", ctx.id, e)),
+        }
+    }
     let observed = usage_slot.lock().ok().and_then(|g| g.clone());
     // A failure that ended the turn was already recorded by the body, as it
     // happened; settle_ok keeps that row and only records a success when the
