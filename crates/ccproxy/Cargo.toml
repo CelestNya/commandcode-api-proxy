@@ -31,6 +31,7 @@ assets = [
   ["webui/css/detail.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/layout.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/log.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/settings.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/overview.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/responsive.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/tokens.css", "usr/share/commandcode-proxy/webui/css/", "644"],
@@ -40,6 +41,7 @@ assets = [
   ["webui/js/core.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/logs.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/router.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/settings.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/stats.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["pkg/systemd/commandcode-proxy.service", "lib/systemd/system/", "644"],
   ["pkg/env.example", "etc/commandcode-proxy/", "640"],
@@ -73,6 +75,10 @@ sha2 = "0.10"
 # drops `rayon` (thread-pool per image buys nothing for one screenshot and
 # pulls five more crates into the build).
 jpeg-decoder = { version = "0.3", default-features = false }
+# Inflate for the update package reader (archive.rs). Already in the tree as a
+# dependency of ureq's gzip support; the general-purpose `zip` crate was
+# rejected because it drags in aes/zstd/bzip2 for features this does not use.
+flate2 = "1.1"
 
 [target.'cfg(windows)'.dependencies]
 # Reading the Windows system proxy for `proxy = "default"`. A safe wrapper over

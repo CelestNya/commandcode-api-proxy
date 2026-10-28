@@ -10,7 +10,8 @@
 function currentView() {
   var h = location.hash || "#/stats";
   return h.indexOf("logs") >= 0 ? "logs"
-       : h.indexOf("attempts") >= 0 ? "attempts" : "stats";
+       : h.indexOf("attempts") >= 0 ? "attempts"
+       : h.indexOf("settings") >= 0 ? "settings" : "stats";
 }
 
 /* 概览/明细的轮询走同一定时器：一个 tick 按当前视图取对应的数。 */
@@ -27,6 +28,7 @@ function startDataPolling() {
 
 document.addEventListener("DOMContentLoaded", function () {
   route();
+  initSettings();
   el("days-7").addEventListener("click", function () { setDays(7); });
   el("days-14").addEventListener("click", function () { setDays(14); });
   el("days-30").addEventListener("click", function () { setDays(30); });

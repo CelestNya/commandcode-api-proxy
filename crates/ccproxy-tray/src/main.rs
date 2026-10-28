@@ -149,6 +149,10 @@ fn windows_main() {
     // names the previous install, and sync rewrites it.
     settings::inherit_config(&root, &log);
     settings::sync_autostart(&root, &log);
+    // Before the first read of the proxy's config: an install upgraded from a
+    // build that wrote the config beside the *tray* still has that file, and
+    // the toggle menu now reads the proxy's copy.
+    settings::migrate_legacy_config(&root, &log);
 
     // Start the child before the UI, so the icon reflects reality immediately.
     if let Ok(mut p) = proxy.lock() {
@@ -182,6 +186,17 @@ fn windows_main() {
         },
         settings::autostart_enabled,
         settings::image_compress_enabled,
+        // A staged release is offered as a menu command; mere availability is
+        // not, because detection alone has no bytes to install from. Read per
+        // menu opening, so a download finishing in the background shows up
+        // without a tray restart.
+        || {
+            let staged = settings::proxy_config_path()
+                .map(|config| ccproxy::update::load_at(&config))
+                .unwrap_or_default()
+                .staged?;
+            Some(staged.version)
+        },
     );
     // The automatic-restart policy is a small state machine (`supervision`),
     // so the crash/restart timing rules are testable in isolation from the
@@ -210,6 +225,36 @@ fn windows_main() {
             );
         },
         move || {
+            // Control requests come from the WebUI — restart the proxy, or
+            // switch to a staged version. They are consumed here, on the UI
+            // thread, because this is the thread that owns the child process:
+            // acting on the HTTP handler's thread would have two threads
+            // racing the same `Child`.
+            if let Some(config) = settings::proxy_config_path() {
+                let request = match ccproxy::control::take(&config) {
+                    Ok(request) => request,
+                    Err(err) => {
+                        tick_log.append(&format!("[tray] 控制文件有问题：{err}"));
+                        ccproxy::control::Request::default()
+                    }
+                };
+                if let Some(restart) = request.restart {
+                    // A requested restart supersedes a pending crash-restart:
+                    // the child is about to be replaced on purpose.
+                    tick_supervision.borrow_mut().cancel();
+                    tick_log.append(&format!(
+                        "[tray] 收到重启请求（{}，配置 {}）",
+                        restart.reason, restart.revision
+                    ));
+                    if let Ok(mut p) = tick_proxy.lock() {
+                        p.stop();
+                        let _ = p.start(tick_job.as_deref());
+                    }
+                }
+                if let Some(handover) = request.handover {
+                    switch_to(&handover, &tick_log);
+                }
+            }
             let crashed = tick_proxy
                 .lock()
                 .map(|mut p| p.take_unexpected_exit())
@@ -275,6 +320,32 @@ fn dispatch(
                 log.append("[tray] 配置已更新，代理已重启");
             }
         }
+        tray::Action::InstallUpdate => {
+            let Some(config) = settings::proxy_config_path() else {
+                log.append("[tray] 更新切换失败：无法定位 ccproxy.json");
+                return;
+            };
+            let state = ccproxy::update::load_at(&config);
+            match state.staged {
+                Some(staged) => {
+                    let root = std::path::PathBuf::from(&staged.root);
+                    let tray_exe = std::path::PathBuf::from(&staged.tray);
+                    match ccproxy::control::request_handover(
+                        &config,
+                        &root,
+                        &tray_exe,
+                        &staged.version,
+                    ) {
+                        Ok(()) => log.append(&format!(
+                            "[tray] 已请求切换到 v{}（{}），下一次检查时执行",
+                            staged.version, staged.root
+                        )),
+                        Err(err) => log.append(&format!("[tray] 更新切换请求写入失败：{err}")),
+                    }
+                }
+                None => log.append("[tray] 没有已就绪的更新（请先在 WebUI 中下载）"),
+            }
+        }
         tray::Action::Quit => {
             // The last line the tray ever writes: the UI loop breaks right
             // after this action, so without it a manual quit and a silent
@@ -283,6 +354,37 @@ fn dispatch(
             log.append("[tray] 手动退出（停止代理并释放端口）");
         }
         tray::Action::None => {}
+    }
+}
+
+/// Launch the staged tray and let the handover protocol perform the switch.
+///
+/// This instance deliberately does **not** stop the proxy here. The successor
+/// signals `Standby`; `handover_loop` stops the child and releases the
+/// ownership lock; the successor binds the port, proves `/health`, then
+/// commits. Reusing that protocol is what makes an update roll back exactly
+/// like any other handover — the new version never gets to claim the port
+/// before it has shown it can serve it.
+///
+/// The child is spawned outside the Job Object on purpose: it must outlive
+/// this process, which is about to exit.
+#[cfg(windows)]
+fn switch_to(handover: &ccproxy::control::Handover, log: &process::LogFile) {
+    let tray = std::path::PathBuf::from(&handover.tray);
+    if !tray.is_file() {
+        log.append(&format!(
+            "[tray] 更新切换失败：找不到 {}（暂存目录可能已被删除）",
+            tray.display()
+        ));
+        return;
+    }
+    match std::process::Command::new(&tray).spawn() {
+        Ok(child) => log.append(&format!(
+            "[tray] 已启动 v{} 的托盘 pid={}，等待其接管",
+            handover.version,
+            child.id()
+        )),
+        Err(err) => log.append(&format!("[tray] 更新切换失败：无法启动新托盘（{err}）")),
     }
 }
 

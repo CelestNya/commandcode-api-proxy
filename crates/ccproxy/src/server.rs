@@ -38,6 +38,13 @@ pub struct AppState {
     /// are deterministic without it). Shared across requests so a client's
     /// per-turn image resends are a hash lookup, not a re-encode.
     pub image_memo: Mutex<crate::image_compress::ImageMemo>,
+    /// Revision of the settings file this process booted from. The WebUI
+    /// compares the file's revision against this to answer "saved but not yet
+    /// in effect" — the config is read once at startup, so a save is only
+    /// visible to request handling after a restart.
+    pub settings_revision: String,
+    /// Progress of an asynchronous update check or install.
+    pub update_job: Mutex<crate::update::Job>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -50,6 +57,10 @@ pub fn new_state(config: Config) -> SharedState {
         translate_env: crate::translate::Env::from_process(),
         usage: Mutex::new(UsageTotals::default()),
         image_memo: Mutex::new(crate::image_compress::ImageMemo::new()),
+        settings_revision: crate::settings::config_path()
+            .map(|p| crate::settings::revision_at(&p))
+            .unwrap_or_else(|| crate::settings::ABSENT_REVISION.to_string()),
+        update_job: Mutex::new(crate::update::Job::default()),
     })
 }
 
@@ -342,6 +353,11 @@ pub fn handle(state: &SharedState, req: Request) {
         ("GET", "/webui/api/stats") => crate::webui::handle_stats(state, req, &ctx),
         ("GET", "/webui/api/attempts") => crate::webui::handle_attempts(state, req, &ctx),
         ("GET", "/webui/api/logs") => crate::webui::handle_logs(state, req, &ctx),
+        ("GET", "/webui/api/settings") => crate::webui::handle_settings_get(state, req, &ctx),
+        ("POST", "/webui/api/settings") => crate::webui::handle_settings_post(state, req, &ctx),
+        ("POST", "/webui/api/restart") => crate::webui::handle_restart(state, req, &ctx),
+        ("GET", "/webui/api/update") => crate::webui::handle_update_get(state, req, &ctx),
+        ("POST", "/webui/api/update") => crate::webui::handle_update_post(state, req, &ctx),
         ("POST", "/v1/chat/completions") => handle_chat(state, req, &ctx),
         ("POST", "/v1/messages") => handle_messages(state, req, &ctx),
         ("POST", "/v1/messages/count_tokens") => handle_count_tokens(state, req, &ctx),
@@ -370,6 +386,9 @@ fn handle_preflight(state: &SharedState, req: Request, path: &str) {
             | "/webui/api/stats"
             | "/webui/api/attempts"
             | "/webui/api/logs"
+            | "/webui/api/settings"
+            | "/webui/api/restart"
+            | "/webui/api/update"
             | "/v1/chat/completions"
             | "/v1/messages"
             | "/v1/messages/count_tokens"

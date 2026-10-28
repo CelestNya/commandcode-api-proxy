@@ -33,6 +33,7 @@ pub mod cmd {
     pub const OPEN_WEBUI: usize = 6;
     pub const OPEN_TRAY_LOG: usize = 7;
     pub const IMAGE_COMPRESS: usize = 8;
+    pub const UPDATE: usize = 9;
     /// A read-only line, drawn greyed and never chosen.
     pub const LABEL: usize = 0;
     /// A separator.
@@ -49,6 +50,7 @@ pub enum Action {
     OpenWebUi,
     ToggleAutostart,
     ToggleImageCompress,
+    InstallUpdate,
     Quit,
     None,
 }
@@ -62,6 +64,7 @@ fn action_from_id(id: usize) -> Action {
         cmd::OPEN_WEBUI => Action::OpenWebUi,
         cmd::AUTOSTART => Action::ToggleAutostart,
         cmd::IMAGE_COMPRESS => Action::ToggleImageCompress,
+        cmd::UPDATE => Action::InstallUpdate,
         cmd::QUIT => Action::Quit,
         _ => Action::None,
     }
@@ -81,6 +84,10 @@ pub struct UiState {
     /// Read on demand (the exe-adjacent ccproxy.json can change between menu
     /// openings), the same way `autostart` is.
     pub image_compress: Box<dyn Fn() -> bool + Send + Sync>,
+    /// The version a staged update would switch to, or `None` when nothing is
+    /// staged. Read per menu opening: the proxy can finish staging while the
+    /// menu is closed.
+    pub update: Box<dyn Fn() -> Option<String> + Send + Sync>,
     last_action: std::sync::atomic::AtomicU32,
 }
 
@@ -99,6 +106,7 @@ impl UiState {
         running: impl Fn() -> bool + Send + Sync + 'static,
         autostart: impl Fn() -> bool + Send + Sync + 'static,
         image_compress: impl Fn() -> bool + Send + Sync + 'static,
+        update: impl Fn() -> Option<String> + Send + Sync + 'static,
     ) -> Self {
         Self {
             port,
@@ -108,6 +116,7 @@ impl UiState {
             running: Box::new(running),
             autostart: Box::new(autostart),
             image_compress: Box::new(image_compress),
+            update: Box::new(update),
             last_action: std::sync::atomic::AtomicU32::new(0),
         }
     }
@@ -186,6 +195,7 @@ impl UiState {
             Action::OpenWebUi => cmd::OPEN_WEBUI,
             Action::ToggleAutostart => cmd::AUTOSTART,
             Action::ToggleImageCompress => cmd::IMAGE_COMPRESS,
+            Action::InstallUpdate => cmd::UPDATE,
             Action::Quit => cmd::QUIT,
             Action::None => 0,
         };
@@ -209,12 +219,14 @@ impl UiState {
     /// Build and run the context menu; record the choice.
     fn show_menu(&self, hwnd: HWND) {
         let running = (self.running)();
+        let staged = (self.update)();
         let entries = menu_entries(
             running,
             (self.autostart)(),
             (self.image_compress)(),
             &self.cache_lines(),
             &self.version,
+            staged.as_deref(),
         );
 
         // SAFETY: the menu handle is checked before use and destroyed on every
@@ -343,6 +355,7 @@ pub fn menu_entries(
     image_compress: bool,
     cache: &(String, String),
     version: &str,
+    staged_update: Option<&str>,
 ) -> Vec<(usize, String, bool)> {
     let autostart_line = if autostart {
         "开机自启 ✓".to_string()
@@ -371,6 +384,14 @@ pub fn menu_entries(
         // Toggling rewrites the exe-adjacent ccproxy.json and restarts the
         // proxy, so the change applies without a manual stop/start.
         (cmd::IMAGE_COMPRESS, image_compress_line, true),
+        // Only a *staged* release is actionable: the install is a local file
+        // copy plus a handover, so offering the command before the bytes are
+        // on disk would be a button that fails. Availability is shown by the
+        // WebUI page instead.
+        match staged_update {
+            Some(v) => (cmd::UPDATE, format!("重启并更新到 v{v}"), true),
+            None => (cmd::LABEL, "已是最新版本".to_string(), false),
+        },
         (cmd::SEPARATOR, String::new(), false),
         (cmd::QUIT, "退出（同时停止代理）".into(), true),
         (cmd::SEPARATOR, String::new(), false),
@@ -590,7 +611,7 @@ mod tests {
 
     fn webui_entry(running: bool) -> (String, bool) {
         let cache = ("24h 缓存率：—".to_string(), " ".to_string());
-        let entry = menu_entries(running, false, false, &cache, "0.5.2")
+        let entry = menu_entries(running, false, false, &cache, "0.5.2", None)
             .into_iter()
             .find(|(id, ..)| *id == cmd::OPEN_WEBUI)
             .expect("the WebUI entry is always present");
@@ -609,7 +630,7 @@ mod tests {
         // missing again; every actionable id must appear exactly once.
         let cache = ("24h 缓存率：—".to_string(), " ".to_string());
         for (running, autostart) in [(true, true), (true, false), (false, true), (false, false)] {
-            let ids: Vec<usize> = menu_entries(running, autostart, false, &cache, "0.5.2")
+            let ids: Vec<usize> = menu_entries(running, autostart, false, &cache, "0.5.2", None)
                 .into_iter()
                 .map(|(id, ..)| id)
                 .collect();
@@ -638,7 +659,7 @@ mod tests {
         // whole point of splitting them is that a user can open either. If a
         // later edit collapses them, this names the regression.
         let cache = ("24h 缓存率：—".to_string(), " ".to_string());
-        let entries = menu_entries(true, false, false, &cache, "0.6.2");
+        let entries = menu_entries(true, false, false, &cache, "0.6.2", None);
         let label = |id: usize| {
             entries
                 .iter()
@@ -656,7 +677,7 @@ mod tests {
         // menu has, so it must track the setting both ways.
         let cache = ("24h 缓存率：—".to_string(), " ".to_string());
         let label = |on: bool| {
-            menu_entries(true, false, on, &cache, "0.7.2")
+            menu_entries(true, false, on, &cache, "0.7.2", None)
                 .into_iter()
                 .find(|(id, ..)| *id == cmd::IMAGE_COMPRESS)
                 .map(|(_, text, _)| text)
@@ -664,5 +685,32 @@ mod tests {
         };
         assert_eq!(label(true), "图片压缩 ✓");
         assert_eq!(label(false), "图片压缩");
+    }
+
+    #[test]
+    fn the_update_entry_is_actionable_only_once_a_version_is_staged() {
+        // The menu must not offer "update" before the bytes are on disk: the
+        // install is a local copy plus a handover, so an early entry would be
+        // a button that fails. Detection alone shows a greyed line.
+        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
+        let idle = menu_entries(true, false, false, &cache, "0.7.7", None);
+        assert!(
+            idle.iter().all(|(id, ..)| *id != cmd::UPDATE),
+            "no UPDATE command before staging"
+        );
+        assert!(
+            idle.iter()
+                .any(|(_, text, enabled)| text == "已是最新版本" && !*enabled),
+            "the idle state is still visible as a greyed line"
+        );
+
+        let ready = menu_entries(true, false, false, &cache, "0.7.7", Some("0.8.0"));
+        let entry = ready
+            .iter()
+            .find(|(id, ..)| *id == cmd::UPDATE)
+            .expect("a staged version adds the command");
+        assert_eq!(entry.1, "重启并更新到 v0.8.0");
+        assert!(entry.2, "the entry is enabled once staged");
+        assert_eq!(action_from_id(cmd::UPDATE), Action::InstallUpdate);
     }
 }

@@ -899,6 +899,343 @@ fn attempts_json(conn: &Connection, limit: i64) -> Value {
     json!(out)
 }
 
+// ── settings and updates ───────────────────────────────────────
+//
+// These are the panel's only *write* endpoints. Both follow the same shape:
+// a POST carries the state the page believed it was editing, the proxy
+// compares it with the file, and a disagreement is a 409 with the current
+// document attached rather than a silent last-writer-wins. The page is opened
+// from a tray icon on the same desktop, so a second tab (or the tray menu)
+// editing concurrently is a realistic collision, not a theoretical one.
+
+/// Cap on a settings/update request body. The largest real payload is the
+/// settings form: fourteen short values.
+const API_BODY_CAP: u64 = 64 * 1024;
+
+fn respond_status(req: Request, status: u16, body: &Value) {
+    let payload = serde_json::to_string(body).unwrap_or_else(|_| "{}".into());
+    respond(req, status, payload, "application/json");
+}
+
+/// Read and parse a small JSON body.
+fn read_json_body(req: &mut Request) -> Result<Value, String> {
+    let mut raw = Vec::new();
+    req.as_reader()
+        .take(API_BODY_CAP)
+        .read_to_end(&mut raw)
+        .map_err(|e| format!("读取请求失败：{e}"))?;
+    if raw.is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_slice(&raw).map_err(|e| format!("请求不是有效 JSON：{e}"))
+}
+
+/// The settings document plus what the page needs to judge staleness:
+/// `revision` is the file now, `runningRevision` is what this process booted
+/// with, and the two differing is exactly "stored but not yet in effect".
+fn settings_payload(state: &SharedState, doc: &crate::settings::Doc) -> Value {
+    let mut body = doc.to_json();
+    if let Value::Object(map) = &mut body {
+        map.insert("fields".into(), doc.fields_json());
+        map.insert(
+            "runningRevision".into(),
+            Value::from(state.settings_revision.clone()),
+        );
+        map.insert(
+            "runningVersion".into(),
+            Value::from(crate::server::PROXY_VERSION),
+        );
+        let pending = crate::settings::config_path()
+            .map(|p| crate::control::peek(&p))
+            .unwrap_or_default();
+        map.insert(
+            "pending".into(),
+            json!({
+                "restart": pending.restart.as_ref().map(|r| json!({
+                    "reason": r.reason,
+                    "revision": r.revision,
+                    "at": r.at,
+                })),
+                "handover": pending.handover.as_ref().map(|h| h.version.clone()),
+            }),
+        );
+    }
+    body
+}
+
+/// The document, loaded fresh from disk. Absent path is a hard error: without
+/// it there is nowhere to save.
+fn load_doc() -> Result<crate::settings::Doc, String> {
+    let path = crate::settings::config_path().ok_or_else(|| "无法定位 ccproxy.json".to_string())?;
+    Ok(crate::settings::Doc::load(&path))
+}
+
+/// `GET /webui/api/settings` — the editable document, its field table, and
+/// whether the file differs from what is running.
+pub fn handle_settings_get(state: &SharedState, req: Request, _ctx: &RequestId) {
+    match load_doc() {
+        Ok(doc) => respond_json(req, &settings_payload(state, &doc)),
+        Err(err) => respond_json(req, &json!({ "error": err })),
+    }
+}
+
+/// `POST /webui/api/settings` — apply a patch.
+///
+/// Body: `{"baseRevision": "<revision the page loaded>", "values": {...},
+/// "restart": true|false}`. `baseRevision` may be omitted by a caller that
+/// means to overwrite regardless; the page always sends it.
+pub fn handle_settings_post(state: &SharedState, mut req: Request, _ctx: &RequestId) {
+    let body = match read_json_body(&mut req) {
+        Ok(v) => v,
+        Err(err) => return respond_status(req, 400, &json!({ "error": err })),
+    };
+    let mut doc = match load_doc() {
+        Ok(d) => d,
+        Err(err) => return respond_status(req, 500, &json!({ "error": err })),
+    };
+    if let Some(base) = body.get("baseRevision").and_then(Value::as_str) {
+        if base != doc.revision() {
+            return respond_status(
+                req,
+                409,
+                &json!({
+                    "error": "配置文件已被其他窗口或托盘修改，请重新加载后再保存",
+                    "conflict": true,
+                    "document": settings_payload(state, &doc),
+                }),
+            );
+        }
+    }
+    let Some(values) = body.get("values").and_then(Value::as_object) else {
+        return respond_status(req, 400, &json!({ "error": "缺少 values" }));
+    };
+    let changed = match doc.apply(values) {
+        Ok(changed) => changed,
+        Err(err) => return respond_status(req, 400, &json!({ "error": err })),
+    };
+    if changed.is_empty() {
+        // Nothing moved: do not touch the file, and do not restart for a form
+        // the user opened and closed.
+        return respond_json(
+            req,
+            &json!({
+                "ok": true,
+                "changed": [],
+                "revision": doc.revision(),
+                "restartRequested": false,
+                "document": settings_payload(state, &doc),
+            }),
+        );
+    }
+    if let Err(err) = doc.save() {
+        return respond_status(req, 500, &json!({ "error": format!("保存失败：{err}") }));
+    }
+    let restart = body.get("restart").and_then(Value::as_bool).unwrap_or(true);
+    // Asking for the restart is the default because every field in the table
+    // is read once at startup: a save that is not followed by a restart has
+    // changed the file and nothing else, which is exactly the state the user
+    // cannot see from the page.
+    let (restart_requested, note) = if !restart {
+        (false, "已保存；重启后生效".to_string())
+    } else {
+        match crate::settings::config_path() {
+            Some(path) => {
+                match crate::control::request_restart(&path, "settings", doc.revision()) {
+                    Ok(()) => (true, "已保存，托盘将在下一次检查时重启代理".to_string()),
+                    Err(err) => (false, format!("已保存，但请求重启失败：{err}")),
+                }
+            }
+            None => (false, "已保存，但无法定位控制文件".to_string()),
+        }
+    };
+    crate::log::info(&format!(
+        "设置已更新：{}（revision {}）{note}",
+        changed.join(", "),
+        doc.revision()
+    ));
+    respond_json(
+        req,
+        &json!({
+            "ok": true,
+            "changed": changed,
+            "revision": doc.revision(),
+            "restartRequested": restart_requested,
+            "note": note,
+            "document": settings_payload(state, &doc),
+        }),
+    );
+}
+
+/// `POST /webui/api/restart` — ask the tray to restart the proxy.
+///
+/// Separate from saving settings because it is also useful on its own: after a
+/// hand-edit of the file, or to clear a degraded egress state.
+pub fn handle_restart(state: &SharedState, req: Request, _ctx: &RequestId) {
+    let _ = state;
+    let Some(path) = crate::settings::config_path() else {
+        return respond_status(req, 500, &json!({ "error": "无法定位 ccproxy.json" }));
+    };
+    let revision = crate::settings::revision_at(&path);
+    match crate::control::request_restart(&path, "webui", &revision) {
+        Ok(()) => {
+            crate::log::info("WebUI 请求重启代理");
+            respond_json(req, &json!({ "requested": true, "revision": revision }));
+        }
+        Err(err) => respond_status(
+            req,
+            500,
+            &json!({ "error": format!("写入重启请求失败：{err}") }),
+        ),
+    }
+}
+
+/// `GET /webui/api/update` — what the last check found, plus any running job.
+pub fn handle_update_get(state: &SharedState, req: Request, _ctx: &RequestId) {
+    let status = crate::update::load();
+    let job = state
+        .update_job
+        .lock()
+        .map(|j| j.clone())
+        .unwrap_or_default();
+    respond_json(
+        req,
+        &json!({
+            "update": status.to_json(crate::server::PROXY_VERSION),
+            "job": job.to_json(),
+        }),
+    )
+}
+
+/// `POST /webui/api/update` — `{"action": "check"}` or `{"action": "install"}`.
+///
+/// Both are asynchronous: the reply says the work started, and the page polls
+/// `GET /webui/api/update` until the phase leaves `running`. A download takes
+/// long enough that a blocking POST would time out or freeze the panel, and
+/// the panel has no other way to show progress.
+pub fn handle_update_post(state: &SharedState, mut req: Request, _ctx: &RequestId) {
+    let body = match read_json_body(&mut req) {
+        Ok(v) => v,
+        Err(err) => return respond_status(req, 400, &json!({ "error": err })),
+    };
+    let action = body
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let busy = state
+        .update_job
+        .lock()
+        .map(|j| j.phase == "running")
+        .unwrap_or(false);
+    if busy {
+        return respond_status(req, 409, &json!({ "error": "已有更新任务在进行中" }));
+    }
+    match action.as_str() {
+        "check" => {
+            let shared = SharedState::clone(state);
+            spawn_job(&shared, "check", move || {
+                let state = crate::update::fetch_latest(crate::server::PROXY_VERSION)?;
+                if state.available(crate::server::PROXY_VERSION) {
+                    Ok(format!("发现新版本 {}", state.latest))
+                } else {
+                    Ok("已是最新版本".to_string())
+                }
+            });
+            respond_json(req, &json!({ "started": true, "action": "check" }));
+        }
+        "install" => {
+            let status = crate::update::load();
+            if !status.available(crate::server::PROXY_VERSION) {
+                return respond_status(req, 400, &json!({ "error": "当前没有可安装的新版本" }));
+            }
+            if status.url.is_empty() {
+                return respond_status(
+                    req,
+                    400,
+                    &json!({ "error": "新版本没有适配本平台的安装包" }),
+                );
+            }
+            let shared = SharedState::clone(state);
+            let worker = SharedState::clone(state);
+            spawn_job(&shared, "install", move || install(&worker));
+            respond_json(req, &json!({ "started": true, "action": "install" }));
+        }
+        _ => respond_status(req, 400, &json!({ "error": "未知操作" })),
+    }
+}
+
+/// Stage the update and hand the switch to the tray. Runs on its own thread.
+fn install(state: &SharedState) -> Result<String, String> {
+    let status = crate::update::load();
+    let staged = crate::update::stage(&status, &|line| {
+        if let Ok(mut job) = state.update_job.lock() {
+            job.message = line.to_string();
+        }
+    })?;
+    let config =
+        crate::settings::config_path().ok_or_else(|| "无法定位 ccproxy.json".to_string())?;
+    crate::control::request_handover(
+        &config,
+        std::path::Path::new(&staged.root),
+        std::path::Path::new(&staged.tray),
+        &staged.version,
+    )
+    .map_err(|e| format!("写入接管请求失败：{e}"))?;
+    crate::log::info(&format!(
+        "更新 v{} 已暂存到 {}，已请求托盘接管",
+        staged.version, staged.root
+    ));
+    Ok(format!(
+        "v{} 已就绪，等待托盘切换（{}）",
+        staged.version, staged.root
+    ))
+}
+
+/// Run `work` on a thread, tracking it in the shared job slot.
+fn spawn_job<F>(state: &SharedState, kind: &str, work: F)
+where
+    F: FnOnce() -> Result<String, String> + Send + 'static,
+{
+    if let Ok(mut job) = state.update_job.lock() {
+        job.phase = "running";
+        job.message = match kind {
+            "install" => "正在准备更新…".to_string(),
+            _ => "正在检查更新…".to_string(),
+        };
+        job.started_at = crate::now_epoch_secs();
+    }
+    let shared = SharedState::clone(state);
+    let spawned = std::thread::Builder::new()
+        .name(format!("ccproxy-update-{kind}"))
+        .spawn(move || {
+            let outcome = work();
+            if let Ok(mut job) = shared.update_job.lock() {
+                match outcome {
+                    Ok(message) => {
+                        job.phase = "done";
+                        job.message = message;
+                    }
+                    Err(message) => {
+                        job.phase = "failed";
+                        // Persist the failure so it survives the restart the
+                        // page is about to trigger, and so the next check's
+                        // "no error" is a real state change.
+                        let mut persisted = crate::update::load();
+                        persisted.error = message.clone();
+                        let _ = crate::update::save(&persisted);
+                        job.message = message;
+                    }
+                }
+            }
+        });
+    if spawned.is_err() {
+        if let Ok(mut job) = state.update_job.lock() {
+            job.phase = "failed";
+            job.message = "无法启动更新线程".to_string();
+        }
+    }
+}
+
 // ── tests ──────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {

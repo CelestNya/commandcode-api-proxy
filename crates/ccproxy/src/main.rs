@@ -48,6 +48,39 @@ fn main() {
     // interleave in one stream.
     ccproxy::log::init_file(&ccproxy::config::log_path());
 
+    if config.port < 1024 {
+        ccproxy::log::warn(&format!(
+            "Port {} is in the privileged range (<1024); binding may require elevated privileges.",
+            config.port
+        ));
+    }
+
+    // ── bind first, then do the slow startup work ────────────────────
+    //
+    // The order here is a deployment contract, not a style choice. Everything
+    // below — reading the system proxy out of the registry, the npm lookup for
+    // the CLI version (up to 4 s of budget), building the request state — can
+    // take seconds, and during a version handover those seconds are exactly
+    // the window in which the previous process has already let go of the port.
+    // Every client that dials in that window sees `ECONNREFUSED`: bili retries
+    // for ~4.5 s and then returns 502 "acp-proxy failure", which is how a
+    // 30-second manual window was diagnosed in the field.
+    //
+    // Binding first removes the window entirely. tiny_http starts accepting as
+    // soon as the listener exists, so a request that arrives during the startup
+    // work is queued and answered when serving begins, instead of being
+    // refused. The wait is bounded by `STARTUP_LOOKUP_BUDGET`.
+    let addr = format!("{}:{}", config.host, config.port);
+    let server = match bind_with_retry(&addr) {
+        Ok(s) => s,
+        Err(detail) => {
+            ccproxy::log::error(&detail);
+            report_startup_failure(&detail, config.port);
+            std::process::exit(2);
+        }
+    };
+    ccproxy::log::info(&format!("listening socket bound on {addr}"));
+
     // Resolve the outbound proxy before anything dials out. This is where the
     // Rust build previously diverged from the Node one: it went direct while
     // the tray's HTTPS_PROXY was set, which surfaced as a flood of connection
@@ -58,12 +91,12 @@ fn main() {
     ccproxy::log::info(&egress.note);
 
     // CC's server blocks a stale `x-command-code-version`, so the published
-    // version is consulted before the listener opens — within a hard budget.
-    // The lookup once took 35.8s (two 10s attempts on top of DNS resolution
-    // that ureq does not bound) and blew the tray's 30s handover gate, so the
-    // budget is the load-bearing wall: past it the fallback wins and the next
-    // startup retries. An explicit CC_CLI_VERSION pins it and skips the
-    // lookup, so offline runs never wait on DNS.
+    // version is consulted before serving — within a hard budget. The lookup
+    // once took 35.8s (two 10s attempts on top of DNS resolution that ureq
+    // does not bound) and blew the tray's 30s handover gate, so the budget is
+    // the load-bearing wall: past it the fallback wins and the next startup
+    // retries. An explicit CC_CLI_VERSION pins it and skips the lookup, so
+    // offline runs never wait on DNS.
     let pinned = env("CC_CLI_VERSION");
     let before = config.cc_version.clone();
     config.cc_version = ccproxy::cli_version::resolve_within_budget(
@@ -79,13 +112,6 @@ fn main() {
         ));
     }
 
-    if config.port < 1024 {
-        ccproxy::log::warn(&format!(
-            "Port {} is in the privileged range (<1024); binding may require elevated privileges.",
-            config.port
-        ));
-    }
-
     let state = ccproxy::server::new_state(config.clone());
     // The proxy is key-passthrough: the upstream key arrives per request, so
     // there is nothing to warm the catalog with at startup. The persisted
@@ -98,17 +124,6 @@ fn main() {
             config.host
         ));
     }
-
-    let addr = format!("{}:{}", config.host, config.port);
-    let server = match tiny_http::Server::http(&addr) {
-        Ok(s) => s,
-        Err(e) => {
-            let detail = format!("Failed to bind {addr}: {e}");
-            ccproxy::log::error(&detail);
-            report_startup_failure(&detail, config.port);
-            std::process::exit(2);
-        }
-    };
 
     ccproxy::log::info(&format!(
         "cc-proxy listening on http://{addr} (upstream {})",
@@ -133,6 +148,12 @@ fn main() {
     #[cfg(not(unix))]
     let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
+    // Silent update detection. It records "a newer release exists" in a state
+    // file that the tray menu and the WebUI read; nothing is downloaded, shown,
+    // or acted on without the user asking. Started here rather than in the
+    // server so a stalled check can never delay the listener.
+    ccproxy::update::spawn_detector();
+
     ccproxy::server::serve_with_stop(server, state, &stop_flag);
 
     #[cfg(unix)]
@@ -140,6 +161,52 @@ fn main() {
         ccproxy::log::info("shutdown signal received, stopping");
     }
     ccproxy::cli::remove_pid();
+}
+
+/// Bind the listening socket, retrying briefly while the address is still in
+/// use.
+///
+/// A handover is `stop the old child` then `start the new one`. The old child's
+/// listener is closed when the process exits, but the tray observes the exit
+/// through `WaitForSingleObject`, and the kernel's socket teardown is not
+/// guaranteed to be visible in the same instant. Without a retry, that
+/// microsecond race becomes "the new version failed to start", which is
+/// indistinguishable from a real conflict in the log.
+///
+/// Two seconds is long enough to outlast a teardown and short enough that a
+/// genuine conflict (a foreign process holding the port) still fails fast —
+/// and the failure is still reported, with the same file and message as
+/// before.
+fn bind_with_retry(addr: &str) -> Result<tiny_http::Server, String> {
+    const WINDOW: std::time::Duration = std::time::Duration::from_millis(2_000);
+    const STEP: std::time::Duration = std::time::Duration::from_millis(100);
+    let started = std::time::Instant::now();
+    loop {
+        match tiny_http::Server::http(addr) {
+            Ok(server) => {
+                if started.elapsed() >= STEP {
+                    ccproxy::log::info(&format!(
+                        "bind succeeded after retry ({} ms) — the previous listener had not fully released the port",
+                        started.elapsed().as_millis()
+                    ));
+                }
+                return Ok(server);
+            }
+            Err(err) => {
+                if !is_address_in_use(err.as_ref()) || started.elapsed() >= WINDOW {
+                    return Err(format!("Failed to bind {addr}: {err}"));
+                }
+                std::thread::sleep(STEP);
+            }
+        }
+    }
+}
+
+/// Whether a bind failure is the retryable "someone still holds this port".
+fn is_address_in_use(err: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+    err.downcast_ref::<std::io::Error>()
+        .map(|e| e.kind() == std::io::ErrorKind::AddrInUse)
+        .unwrap_or(false)
 }
 
 /// Catch SIGTERM/SIGINT into a flag that `serve_with_stop` polls.

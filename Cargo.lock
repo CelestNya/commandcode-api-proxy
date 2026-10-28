@@ -249,6 +249,7 @@ name = "ccproxy"
 version = "0.7.7"
 dependencies = [
  "base64",
+ "flate2",
  "jpeg-decoder",
  "jpeg-encoder",
  "png",

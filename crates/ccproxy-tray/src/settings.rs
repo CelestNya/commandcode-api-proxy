@@ -261,63 +261,116 @@ pub fn toggle_autostart(root: &Path, log: &crate::process::LogFile) {
     }
 }
 
+/// The settings file the *supervised proxy* reads, resolved from the proxy
+/// binary rather than from the tray's own location.
+///
+/// The shipped layout puts the tray at `<root>/` and the proxy at
+/// `<root>/service/`. Resolving from `current_exe` therefore named
+/// `<root>/ccproxy.json` — a file the proxy never reads. The menu checkbox and
+/// the toggle have been operating on that dead document: the checkbox said on
+/// while the running proxy stayed off. `ccproxy::settings::path_for_proxy` is
+/// the single answer both processes now agree on.
+#[must_use]
+pub fn proxy_config_path() -> Option<PathBuf> {
+    let root = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let proxy = proxy_binary(&root)?;
+    Some(ccproxy::settings::path_for_proxy(&proxy))
+}
+
 /// The image-compress state the menu should show, resolved the same way the
 /// proxy resolves it (`CC_IMAGE_COMPRESS` env wins over ccproxy.json, both
 /// missing means off).
 #[must_use]
 pub fn image_compress_enabled() -> bool {
     let env = std::env::var("CC_IMAGE_COMPRESS").ok();
-    let file = ccproxy::config::load_file_config();
+    let file = proxy_config_path().map_or_else(ccproxy::config::FileConfig::default, |p| {
+        ccproxy::config::load_file_config_at(&p)
+    });
     ccproxy::config::image_compress_resolved(env.as_deref(), file.image_compress)
 }
 
-/// Toggle the image-compress switch by rewriting the exe-adjacent
-/// ccproxy.json in place, preserving every other key. Returns the new state.
+/// Toggle the image-compress switch by rewriting the proxy's ccproxy.json in
+/// place, preserving every other key (including ones this build does not
+/// model). Returns the new state.
 ///
 /// The proxy reads its config once at startup, so the caller restarts it for
 /// the change to apply; a stopped proxy simply picks the new value up on its
-/// next start.
+/// next start. The write goes through [`ccproxy::settings::Doc`], so it is
+/// atomic — the restart can land the instant after.
 pub fn toggle_image_compress(log: &crate::process::LogFile) -> bool {
     let new_state = !image_compress_enabled();
-    let path = ccproxy::config::config_file_path();
-    let Some(path) = path else {
-        log.append("[tray] 图片压缩切换失败：无法定位 ccproxy.json（exe 旁）");
+    let Some(path) = proxy_config_path() else {
+        log.append("[tray] 图片压缩切换失败：无法定位代理旁的 ccproxy.json");
         return image_compress_enabled();
     };
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let written = set_image_compress_key(&text, new_state);
-    if std::fs::write(&path, written).is_err() {
+    let mut doc = ccproxy::settings::Doc::load(&path);
+    let patch = serde_json::json!({ "imageCompress": new_state });
+    let applied = patch
+        .as_object()
+        .ok_or_else(|| "patch is not an object".to_string())
+        .and_then(|map| doc.apply(map))
+        .and_then(|_| doc.save().map_err(|e| e.to_string()));
+    if let Err(err) = applied {
         log.append(&format!(
-            "[tray] 图片压缩切换失败：无法写入 {}",
+            "[tray] 图片压缩切换失败：写入 {} 出错（{err}）",
             path.display()
         ));
         return image_compress_enabled();
     }
     log.append(&format!(
-        "[tray] 图片压缩 → {}（{}ccproxy.json，重启代理生效）",
+        "[tray] 图片压缩 → {}（{}，重启代理生效）",
         if new_state { "开" } else { "关" },
         path.display()
     ));
     new_state
 }
 
-/// Set `imageCompress` in a ccproxy.json text without disturbing any other
-/// key — including keys this build does not know about. A missing or corrupt
-/// file is treated as an empty object: the toggle must work on a fresh
-/// install, and a corrupt file must not be resurrected into something the
-/// proxy cannot parse either, so it is replaced wholesale.
-#[must_use]
-pub fn set_image_compress_key(text: &str, on: bool) -> String {
-    let mut root = match serde_json::from_str::<serde_json::Value>(text) {
-        Ok(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
-        _ => serde_json::Value::Object(serde_json::Map::new()),
+/// Move a pre-fix `<root>/ccproxy.json` to where the proxy actually reads it.
+///
+/// Before the paths were unified the tray wrote `<root>/ccproxy.json`. On an
+/// install upgraded from that layout the proxy's own file still exists (it is
+/// what the proxy booted from), so the legacy file is simply left behind —
+/// deleting it would be the tidy move, but it is the only copy of a setting a
+/// user toggled, so it is merged instead: keys the live file lacks are copied
+/// in, keys it already has are left alone. Best effort; a failure leaves both
+/// files as they were.
+pub fn migrate_legacy_config(root: &Path, log: &crate::process::LogFile) {
+    let legacy = root.join("ccproxy.json");
+    let Some(target) = proxy_config_path() else {
+        return;
     };
-    if let serde_json::Value::Object(map) = &mut root {
-        map.insert("imageCompress".to_string(), serde_json::Value::Bool(on));
+    if legacy == target {
+        return; // a flat build: one file, nothing to merge
     }
-    let mut out = serde_json::to_string_pretty(&root).unwrap_or_default();
-    out.push('\n');
-    out
+    let Ok(text) = std::fs::read_to_string(&legacy) else {
+        return;
+    };
+    let Ok(serde_json::Value::Object(old)) = serde_json::from_str(&text) else {
+        return;
+    };
+    if old.is_empty() {
+        return;
+    }
+    let mut doc = ccproxy::settings::Doc::load(&target);
+    let mut copied = 0usize;
+    for (key, value) in old {
+        if doc.get(&key).is_none() && doc.apply_key(&key, value) {
+            copied = copied.saturating_add(1);
+        }
+    }
+    if copied == 0 {
+        return;
+    }
+    match doc.save() {
+        Ok(()) => log.append(&format!(
+            "[tray] 已从旧位置合并 {copied} 项配置到 {}",
+            target.display()
+        )),
+        Err(err) => log.append(&format!(
+            "[tray] 旧配置合并失败（{}）：{err}",
+            target.display()
+        )),
+    }
 }
 
 /// Repoint autostart at this install when it has drifted.///
@@ -443,6 +496,26 @@ mod tests {
     /// it raced the port test, and failed perhaps one run in three.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// A scratch directory per test: `set_image_compress_at` is the real write
+    /// path, so the tests exercise `Doc` rather than a string transform.
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ccproxy-tray-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The toggle's body, minus the menu plumbing: write `imageCompress` into
+    /// `path` atomically, preserving every other key.
+    fn set_image_compress_at(path: &Path, on: bool) -> bool {
+        let mut doc = ccproxy::settings::Doc::load(path);
+        let patch = serde_json::json!({ "imageCompress": on });
+        let Some(map) = patch.as_object() else {
+            return false;
+        };
+        doc.apply(map).is_ok() && doc.save().is_ok()
+    }
+
     #[test]
     fn reg_sz_decodes_utf16le_up_to_the_nul() {
         let hello: Vec<u8> = "hello"
@@ -556,14 +629,21 @@ mod tests {
         // The service config carries proxy/noProxy/maxBodyBytes; a toggle
         // that rewrote the file from a typed struct would silently drop keys
         // it does not model, so the edit must be value-level.
-        let original = r#"{
+        let dir = temp_dir("toggle");
+        let path = dir.join("ccproxy.json");
+        std::fs::write(
+            &path,
+            r#"{
   "proxy": "default",
   "noProxy": "localhost,127.0.0.1",
   "maxBodyBytes": 33554432
 }
-"#;
-        let written = set_image_compress_key(original, true);
-        let parsed: serde_json::Value = serde_json::from_str(&written).unwrap();
+"#,
+        )
+        .unwrap();
+        set_image_compress_at(&path, true);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
             parsed.get("imageCompress"),
             Some(&serde_json::Value::Bool(true))
@@ -577,29 +657,88 @@ mod tests {
             Some(&serde_json::Value::from(33_554_432u64))
         );
         // Toggling off flips the key back without losing anything either.
+        set_image_compress_at(&path, false);
         let off: serde_json::Value =
-            serde_json::from_str(&set_image_compress_key(&written, false)).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
             off.get("imageCompress"),
             Some(&serde_json::Value::Bool(false))
         );
         assert_eq!(off.get("noProxy"), parsed.get("noProxy"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn the_toggle_works_on_a_missing_or_corrupt_config() {
         // Fresh install: no file yet — the result is a valid one-key file.
-        let fresh = set_image_compress_key("", true);
+        let dir = temp_dir("toggle-fresh");
+        let path = dir.join("ccproxy.json");
+        assert!(set_image_compress_at(&path, true));
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&fresh).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap())
+                .unwrap(),
             serde_json::json!({"imageCompress": true})
         );
         // Corrupt file: replaced wholesale rather than partially kept — a
         // merge with garbage would leave the proxy unable to parse it either.
-        let repaired = set_image_compress_key("{ not json", false);
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(set_image_compress_at(&path, false));
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&repaired).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap())
+                .unwrap(),
             serde_json::json!({"imageCompress": false})
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_legacy_root_config_is_merged_not_dropped() {
+        // The pre-fix layout wrote `<root>/ccproxy.json`, which the proxy never
+        // read. On upgrade the live file wins and only missing keys are copied
+        // across — specifically for a key this build does not model.
+        let dir = temp_dir("legacy");
+        let root = dir.join("root");
+        let service = root.join("service");
+        std::fs::create_dir_all(&service).unwrap();
+        std::fs::write(service.join("ccproxy.exe"), b"").unwrap();
+        std::fs::write(root.join("ccproxy.json"), r#"{"imageCompress":true}"#).unwrap();
+        std::fs::write(
+            service.join("ccproxy.json"),
+            r#"{"proxy":"direct","imageCompress":false}"#,
+        )
+        .unwrap();
+
+        let target = service.join("ccproxy.json");
+        assert_eq!(
+            ccproxy::settings::path_for_proxy(&service.join("ccproxy.exe")),
+            target
+        );
+        // The merge is keyed on the live file's contents, not on the legacy
+        // file winning: imageCompress stays false because the live file has it.
+        let legacy: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("ccproxy.json")).unwrap())
+                .unwrap();
+        let mut doc = ccproxy::settings::Doc::load(&target);
+        let mut copied = 0usize;
+        if let serde_json::Value::Object(map) = legacy {
+            for (key, value) in map {
+                if doc.get(&key).is_none() && doc.apply_key(&key, value) {
+                    copied += 1;
+                }
+            }
+        }
+        doc.save().unwrap();
+        let merged: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        assert_eq!(copied, 0, "the live file already had every legacy key");
+        assert_eq!(
+            merged.get("imageCompress"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            merged.get("proxy"),
+            Some(&serde_json::Value::String("direct".into()))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
