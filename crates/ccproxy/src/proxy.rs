@@ -18,13 +18,38 @@
 //!   surface as errors, not be silently bypassed into looking like a flaky
 //!   upstream.
 //!
+//! **The probe only covers startup.** A proxy that is alive at boot and dies
+//! later (a Clash exit node failing, a tunnel daemon restarting) used to keep
+//! every request pointed at it until someone noticed and restarted the proxy.
+//! Under the `default` policy that gap is now closed at runtime: an attempt
+//! that fails with [`TransportFault::is_proxy_attributable`] increments a
+//! streak, any attempt that reaches the upstream clears it, and
+//! [`PROXY_FAULT_LIMIT`] consecutive faults abandon the proxy for the rest of
+//! the process (a warning names the streak and says how to force it back). The
+//! policy is a preference, so honouring it early is the behaviour its own
+//! documentation promises; the explicit-URL policy keeps failing loudly
+//! instead, because there the operator asked for that hop specifically.
+//!
 //! `NO_PROXY` is served by holding two agents — proxied and direct — and
 //! choosing per URL host, which is the only way to honour the list on `ureq`
 //! 2.x (it has no per-request bypass hook). Loopback is always exempt.
 
 use crate::config::{Config, ProxySetting};
+use crate::upstream::TransportFault;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
+
+/// Consecutive proxy-attributable transport failures that condemn the proxy.
+///
+/// One request already retries twice internally ([`crate::upstream`] sends up
+/// to three attempts), so this is "one whole generation never got a handshake
+/// through the proxy". A single reset is ordinary noise — Clash nodes reset
+/// connections all the time without being dead — while three in a row with no
+/// attempt reaching the upstream is the signature of a tunnel that accepts the
+/// `CONNECT` and then closes it (the failure that produced `tls connection init
+/// failed: unexpected end of file` in production).
+const PROXY_FAULT_LIMIT: u32 = 3;
 
 /// How long a proxy probe may take before it is judged unusable.
 ///
@@ -43,6 +68,16 @@ pub struct Egress {
     /// host, which is also the fallback the `default` policy takes.
     proxy: Option<ureq::Proxy>,
     using_proxy: bool,
+    /// Whether the proxy may be abandoned at runtime — that is, whether the
+    /// policy was a preference (`default`) rather than an instruction (an
+    /// explicit URL). `false` pins `using_proxy` for the process's lifetime.
+    auto_fallback: bool,
+    /// The proxy was abandoned mid-flight; read on every request so the next
+    /// attempt after the verdict already dials direct.
+    degraded: AtomicBool,
+    /// Consecutive proxy-attributable failures. Any attempt that reached the
+    /// upstream resets it, so only an unbroken run can condemn the proxy.
+    consecutive_faults: AtomicU32,
     no_proxy: Vec<String>,
     /// One-line description of the decision, printed at startup.
     pub note: String,
@@ -64,8 +99,12 @@ pub enum Route {
 
 impl Egress {
     /// Whether `url`'s host is exempt from the proxy.
+    ///
+    /// A degraded plan exempts everything: once the proxy is abandoned the
+    /// route is direct for every host, and saying otherwise would put
+    /// [`Route::ViaProxy`] on faults the proxy no longer carries.
     fn bypasses(&self, url: &str) -> bool {
-        if !self.using_proxy {
+        if !self.using_proxy || self.is_degraded() {
             return true;
         }
         let Some(host) = host_of(url) else {
@@ -79,6 +118,60 @@ impl Egress {
             let e = e.trim_start_matches('.').to_ascii_lowercase();
             host == e || host.ends_with(&format!(".{e}"))
         })
+    }
+
+    /// Whether the proxy has been abandoned for this process.
+    #[must_use]
+    pub fn is_degraded(&self) -> bool {
+        self.degraded.load(Ordering::Relaxed)
+    }
+
+    /// Whether a proxy was selected and is still in use.
+    #[must_use]
+    pub fn is_proxied(&self) -> bool {
+        self.using_proxy && !self.is_degraded()
+    }
+
+    /// Account for one upstream attempt, and abandon a dead proxy once the
+    /// evidence is decisive.
+    ///
+    /// `fault` is `None` when the attempt produced a response: reaching the
+    /// upstream — even with an HTTP error status — proves the proxy carried the
+    /// traffic, so it clears the streak. A fault that is *not* proxy-attributable
+    /// (a header timeout, say) proves the same thing and is treated identically;
+    /// only [`TransportFault::is_proxy_attributable`] classes keep a streak
+    /// alive, because only they are consistent with a tunnel that never reached
+    /// the far side.
+    ///
+    /// No-op unless the policy is a preference and the proxy is still in use,
+    /// so an explicit URL keeps failing loudly as its own documentation
+    /// promises.
+    pub fn report_attempt(&self, fault: Option<&TransportFault>) {
+        if !self.auto_fallback || !self.using_proxy || self.is_degraded() {
+            return;
+        }
+        let attributable = fault.is_some_and(TransportFault::is_proxy_attributable);
+        if !attributable {
+            // Proof of life, or at least of a working tunnel: forget the run.
+            self.consecutive_faults.store(0, Ordering::Relaxed);
+            return;
+        }
+        let streak = self
+            .consecutive_faults
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        if streak < PROXY_FAULT_LIMIT {
+            return;
+        }
+        // `swap` rather than `store`: only the thread that flips the flag logs,
+        // so a burst of failures cannot print the verdict several times.
+        if !self.degraded.swap(true, Ordering::Relaxed) {
+            crate::log::warn(&format!(
+                "出站代理连续 {streak} 次传输失败（连接在 TLS 握手前就被中断）——\
+                 已放弃代理，改走直连，直到下次重启。proxy=\"default\" 允许回退；\
+                 要强制走该代理请把 ccproxy.json 的 proxy 设成它的地址"
+            ));
+        }
     }
 
     /// The proxy to apply to `url`: `Some` only when one is configured and the
@@ -167,6 +260,25 @@ pub fn route_for(url: &str) -> Route {
     installed().route_for(url)
 }
 
+/// Account for one upstream attempt against the installed egress plan.
+///
+/// The attempt layer calls this once per attempt with the classified fault
+/// (`None` when a response arrived). Kept here rather than in `upstream` so the
+/// verdict — degrade or keep — is made by the module that owns the policy.
+pub fn report_attempt(fault: Option<&TransportFault>) {
+    installed().report_attempt(fault);
+}
+
+/// The installed plan's live state, for `/health`: `(proxied, degraded)`.
+///
+/// The startup note describes the decision made at boot; this reports what is
+/// true now, which is the difference that matters after a runtime fallback.
+#[must_use]
+pub fn live_state() -> (bool, bool) {
+    let e = installed();
+    (e.is_proxied(), e.is_degraded())
+}
+
 fn fallback_config() -> Config {
     Config {
         host: "127.0.0.1".into(),
@@ -186,22 +298,46 @@ fn fallback_config() -> Config {
     }
 }
 
+/// Assemble a plan. `using_proxy` is derived from the proxy itself: every
+/// branch either has a proxy or is direct, and letting the two drift apart is
+/// how a plan ends up claiming to proxy nothing.
+fn plan(
+    proxy: Option<ureq::Proxy>,
+    auto_fallback: bool,
+    no_proxy: Vec<String>,
+    note: String,
+) -> Egress {
+    Egress {
+        using_proxy: proxy.is_some(),
+        proxy,
+        auto_fallback,
+        degraded: AtomicBool::new(false),
+        consecutive_faults: AtomicU32::new(0),
+        no_proxy,
+        note,
+    }
+}
+
 fn resolve(config: &Config) -> Egress {
     let no_proxy = config.no_proxy.clone();
     match &config.proxy {
-        ProxySetting::Direct => Egress {
-            proxy: None,
-            using_proxy: false,
+        // An instruction, not a preference: nothing to fall back to.
+        ProxySetting::Direct => plan(
+            None,
+            false,
             no_proxy,
-            note: "出站代理: 直连（配置为 direct）".into(),
-        },
+            "出站代理: 直连（配置为 direct）".into(),
+        ),
         ProxySetting::Explicit(url) => match ureq::Proxy::new(url.as_str()) {
-            Ok(p) => Egress {
-                proxy: Some(p),
-                using_proxy: true,
+            // An explicit URL is pinned: `auto_fallback` stays false so a dying
+            // proxy keeps producing errors instead of being silently bypassed
+            // into looking like a flaky upstream.
+            Ok(p) => plan(
+                Some(p),
+                false,
                 no_proxy,
-                note: format!("出站代理: {url}（配置为显式，始终使用）"),
-            },
+                format!("出站代理: {url}（配置为显式，始终使用）"),
+            ),
             Err(e) => {
                 // The policy says "always proxy", so an unparseable URL is a
                 // configuration error the user must see, not a reason to go
@@ -209,48 +345,50 @@ fn resolve(config: &Config) -> Egress {
                 crate::log::error(&format!(
                     "出站代理地址无法解析（{url}）: {e}；请修正 ccproxy.json 的 proxy 字段"
                 ));
-                Egress {
-                    proxy: None,
-                    using_proxy: false,
+                plan(
+                    None,
+                    false,
                     no_proxy,
-                    note: format!("出站代理: 配置无效（{url}）— 地址无法解析，请修正配置"),
-                }
+                    format!("出站代理: 配置无效（{url}）— 地址无法解析，请修正配置"),
+                )
             }
         },
         ProxySetting::Default => match system_proxy() {
-            None => Egress {
-                proxy: None,
-                using_proxy: false,
+            None => plan(
+                None,
+                false,
                 no_proxy,
-                note: "出站代理: 直连（系统未配置代理）".into(),
-            },
+                "出站代理: 直连（系统未配置代理）".into(),
+            ),
             Some(url) => match ureq::Proxy::new(url.as_str()) {
-                Ok(p) if probe(&url) => Egress {
-                    proxy: Some(p),
-                    using_proxy: true,
+                // The probe only proves the proxy worked *at startup*; the
+                // runtime streak is what catches it dying later.
+                Ok(p) if probe(&url) => plan(
+                    Some(p),
+                    true,
                     no_proxy,
-                    note: format!("出站代理: {url}（系统代理，探测通过）"),
-                },
+                    format!("出站代理: {url}（系统代理，探测通过；失败可自动回退直连）"),
+                ),
                 Ok(_) => {
                     crate::log::warn(&format!(
                         "系统代理 {url} 探测失败；回退直连（proxy=\"default\" 允许回退，\
                          要强制使用请把 proxy 设为该地址）"
                     ));
-                    Egress {
-                        proxy: None,
-                        using_proxy: false,
+                    plan(
+                        None,
+                        false,
                         no_proxy,
-                        note: format!("出站代理: 直连（系统代理 {url} 探测失败，已回退）"),
-                    }
+                        format!("出站代理: 直连（系统代理 {url} 探测失败，已回退）"),
+                    )
                 }
                 Err(e) => {
                     crate::log::warn(&format!("系统代理地址无法解析（{url}）: {e}；回退直连"));
-                    Egress {
-                        proxy: None,
-                        using_proxy: false,
+                    plan(
+                        None,
+                        false,
                         no_proxy,
-                        note: "出站代理: 直连（系统代理地址无法解析）".into(),
-                    }
+                        "出站代理: 直连（系统代理地址无法解析）".into(),
+                    )
                 }
             },
         },
@@ -352,21 +490,26 @@ mod tests {
     use super::*;
 
     fn egress_with(no_proxy: &[&str]) -> Egress {
-        Egress {
-            proxy: Some(ureq::Proxy::new("http://127.0.0.1:7897").unwrap()),
-            using_proxy: true,
-            no_proxy: no_proxy.iter().map(|s| (*s).to_string()).collect(),
-            note: String::new(),
-        }
+        plan(
+            Some(ureq::Proxy::new("http://127.0.0.1:7897").unwrap()),
+            true,
+            no_proxy.iter().map(|s| (*s).to_string()).collect(),
+            String::new(),
+        )
+    }
+
+    /// An explicit-URL plan: the proxy is pinned, so it must never be abandoned.
+    fn pinned_egress() -> Egress {
+        plan(
+            Some(ureq::Proxy::new("http://127.0.0.1:7897").unwrap()),
+            false,
+            Vec::new(),
+            String::new(),
+        )
     }
 
     fn direct_egress() -> Egress {
-        Egress {
-            proxy: None,
-            using_proxy: false,
-            no_proxy: Vec::new(),
-            note: String::new(),
-        }
+        plan(None, false, Vec::new(), String::new())
     }
 
     #[test]
@@ -452,5 +595,76 @@ mod tests {
         // Nothing usable: a blank value, and a list of only other schemes.
         assert_eq!(pick_https("   "), None);
         assert_eq!(pick_https("ftp=10.0.0.1:21"), None);
+    }
+
+    #[test]
+    fn a_streak_of_proxy_faults_degrades_the_default_policy_to_direct() {
+        // The production failure: a Clash node that accepts the CONNECT and then
+        // closes the tunnel, so every attempt dies as `Reset` with
+        // `tls connection init failed: unexpected end of file`. Before the
+        // streak existed the proxy stayed selected forever.
+        let e = egress_with(&[]);
+        for _ in 1..PROXY_FAULT_LIMIT {
+            e.report_attempt(Some(&TransportFault::Reset));
+            assert!(!e.is_degraded(), "must not condemn on a partial streak");
+            assert_eq!(e.route_for("https://api.commandcode.ai/x"), Route::ViaProxy);
+        }
+        e.report_attempt(Some(&TransportFault::ProxyFailed));
+        assert!(e.is_degraded());
+        assert!(!e.is_proxied());
+        // Degraded means direct *everywhere*, including hosts that a fresh plan
+        // would have proxied.
+        assert_eq!(e.route_for("https://api.commandcode.ai/x"), Route::Direct);
+    }
+
+    #[test]
+    fn one_reachable_attempt_clears_the_streak() {
+        // A reset is ordinary noise on a live tunnel; only an unbroken run means
+        // the proxy is gone. Reaching the upstream — even with an HTTP error,
+        // which arrives here as `None` — is the proof that clears it.
+        let e = egress_with(&[]);
+        e.report_attempt(Some(&TransportFault::Reset));
+        e.report_attempt(Some(&TransportFault::Reset));
+        e.report_attempt(None);
+        e.report_attempt(Some(&TransportFault::Reset));
+        e.report_attempt(Some(&TransportFault::Reset));
+        assert!(!e.is_degraded());
+        assert_eq!(e.route_for("https://api.commandcode.ai/x"), Route::ViaProxy);
+    }
+
+    #[test]
+    fn a_non_proxy_fault_is_evidence_the_tunnel_works() {
+        // A header timeout means the TLS handshake completed and the request
+        // reached upstream, so it cannot count toward condemning the proxy —
+        // otherwise a slow upstream would silently switch the egress path.
+        let e = egress_with(&[]);
+        for _ in 0..PROXY_FAULT_LIMIT.saturating_mul(3) {
+            e.report_attempt(Some(&TransportFault::HeaderTimeout));
+            e.report_attempt(Some(&TransportFault::Dns));
+            e.report_attempt(Some(&TransportFault::ConnectTimeout));
+        }
+        assert!(!e.is_degraded());
+    }
+
+    #[test]
+    fn an_explicit_proxy_is_never_silently_abandoned() {
+        // `proxy: "http://..."` is an instruction: a dead proxy must surface as
+        // errors, not be bypassed into looking like a flaky upstream.
+        let e = pinned_egress();
+        for _ in 0..PROXY_FAULT_LIMIT.saturating_mul(5) {
+            e.report_attempt(Some(&TransportFault::Reset));
+        }
+        assert!(!e.is_degraded());
+        assert_eq!(e.route_for("https://api.commandcode.ai/x"), Route::ViaProxy);
+    }
+
+    #[test]
+    fn a_direct_plan_has_nothing_to_degrade() {
+        let e = direct_egress();
+        for _ in 0..PROXY_FAULT_LIMIT.saturating_mul(5) {
+            e.report_attempt(Some(&TransportFault::Reset));
+        }
+        assert!(!e.is_degraded());
+        assert!(!e.is_proxied());
     }
 }

@@ -396,10 +396,15 @@ fn handle_health(state: &SharedState, req: Request, ctx: &RequestId) {
         .lock()
         .map(|t| t.snapshot())
         .unwrap_or_else(|_| crate::usage::UsageTotals::default().snapshot());
+    // The egress state is reported live, not as resolved at startup: after a
+    // runtime fallback the startup note says "via proxy" while traffic is
+    // already direct, and that gap is exactly what an operator needs to see.
+    let (proxied, degraded) = crate::proxy::live_state();
     let body = json!({
         "status": "ok",
         "version": PROXY_VERSION,
         "cache": cache.to_json(),
+        "egress": { "proxied": proxied, "degraded": degraded },
     });
     respond_json(req, 200, body, state, ctx);
 }
