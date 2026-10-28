@@ -10,7 +10,8 @@
 //! The contract this module must never break — prompt-cache prefix stability:
 //!
 //! * **Deterministic.** The same PNG bytes always map to the same JPEG bytes:
-//!   fixed encoder settings, no metadata, no timestamps. When the client
+//!   fixed encoder settings, and the carried metadata is a pure function of
+//!   the source bytes (never a clock, never a counter). When the client
 //!   resends an image it already sent, this module reproduces byte-identical
 //!   output, so the serialized prefix the upstream has cached still matches
 //!   and the ~99% cache-hit rate survives.
@@ -36,11 +37,20 @@
 //! re-encoded to JPEG at `quality`, so the output side of the memo is uniform.
 //! Everything else (WebP, GIF, SVG, `http(s)` URLs) passes through untouched.
 //!
-//! **EXIF is the one thing JPEG input can lose that matters.** Re-encoding
-//! drops every metadata segment and never rotates pixels, so an image tagged
-//! "rotate 90°" would come back sideways. The orientation tag is read first;
-//! anything other than 1 passes through. A sideways screenshot is worse than
-//! a large one.
+//! **Metadata survives exactly as far as rendering needs it.** Re-encoding
+//! drops every segment the encoder does not write, so the two that decide how
+//! the pixels are *displayed* are carried across by hand:
+//!
+//! * the EXIF `Orientation` tag, rewritten as a 32-byte minimal EXIF block.
+//!   Pixels are never rotated, so dropping the tag would hand back a sideways
+//!   photo; keeping it lets a rotated photo be compressed like any other.
+//! * the ICC profile (APP2 `ICC_PROFILE` chunks), copied verbatim. Without it
+//!   a Display-P3 screenshot is read as sRGB and its colour shifts.
+//!
+//! Everything else in EXIF — camera body, lens, exposure, timestamps, the
+//! embedded thumbnail, GPS coordinates — is deliberately dropped: none of it
+//! is needed to draw the image, and shipping a location alongside a screenshot
+//! is not something the client asked for.
 //!
 //! Re-encoding an already-lossy JPEG loses generation quality, but never
 //! accumulates: the client resends its *own* bytes every turn, so each pass
@@ -167,24 +177,31 @@ pub fn compress_data_url(
         return Some(cached.to_owned());
     }
 
-    // JPEG only: a rotated photo must not come back sideways.
-    if mime != "image/png" && jpeg_exif_orientation(&src).is_some_and(|o| o != 1) {
-        return None;
-    }
+    // Orientation and the ICC profile are the only metadata that outlives the
+    // re-encode; read them before decoding so a malformed header costs nothing.
+    let meta = jpeg_metadata(&src);
 
     let (pixels, width, height) = decode_to_rgb(mime, &src)?;
     // The JPEG encoder addresses dimensions as u16; a legitimately larger
     // image is simply passed through rather than mis-encoded.
     let (w, h) = (u16::try_from(width).ok()?, u16::try_from(height).ok()?);
 
-    let mut jpeg = Vec::new();
-    let mut encoder = jpeg_encoder::Encoder::new(&mut jpeg, cfg.quality);
+    let mut encoded = Vec::new();
+    let mut encoder = jpeg_encoder::Encoder::new(&mut encoded, cfg.quality);
     // Optimized Huffman tables: smaller files and still fully deterministic
     // (the table is derived from the image data alone).
     encoder.set_optimized_huffman_tables(true);
     encoder
         .encode(&pixels, w, h, jpeg_encoder::ColorType::Rgb)
         .ok()?;
+    // Compare the bytes that actually go on the wire, carried metadata
+    // included — a 60 KB EXIF thumbnail must not sneak past the "only shrink"
+    // guard.
+    let jpeg = if meta.is_empty() {
+        encoded
+    } else {
+        splice_metadata(&encoded, &meta)?
+    };
     if u64::try_from(jpeg.len()).ok()? >= src_len {
         // Only ever shrink: a flat, already-tiny PNG can re-encode larger
         // (measured 0.9x on clean UI screenshots), and a JPEG that is already
@@ -223,56 +240,151 @@ fn decode_jpeg_to_rgb(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     }
 }
 
-/// EXIF `Orientation` (tag 0x0112) from a JPEG's APP1 segment, or `None` when
-/// the file carries no EXIF or the TIFF block is not shaped as expected.
+/// The metadata a re-encode carries across, and nothing else.
 ///
-/// Deliberately narrow: only IFD0 is scanned (every writer puts orientation
-/// there) and only the segment walker is implemented. `None` means "nothing to
-/// rotate", not "unknown": a file we cannot parse is treated as upright and
-/// allowed through, which is the pre-existing behaviour for every input.
-fn jpeg_exif_orientation(bytes: &[u8]) -> Option<u8> {
-    match bytes.get(0..2)? {
-        [0xFF, 0xD8] => {}
-        _ => return None,
+/// `orientation` keeps a rotated photo upright for the viewer; `icc` keeps a
+/// wide-gamut profile so the pixels are still interpreted as the author
+/// intended. Camera body, lens, exposure, timestamps and GPS coordinates are
+/// absent by design — see the module docs.
+#[derive(Debug, Default, PartialEq)]
+struct JpegMeta {
+    /// `Orientation` (tag 0x0112) from APP1, when the file has one.
+    orientation: Option<u8>,
+    /// Raw APP2 `ICC_PROFILE` payloads, in file order (a profile larger than
+    /// 64 KB is chunked across several segments and must stay chunked).
+    icc: Vec<Vec<u8>>,
+}
+
+impl JpegMeta {
+    fn is_empty(&self) -> bool {
+        self.orientation.is_none() && self.icc.is_empty()
+    }
+}
+
+/// Pick the carried metadata out of a JPEG's header segments.
+///
+/// Deliberately narrow: only IFD0 is scanned for orientation (every writer
+/// puts it there), and only the segment walker is implemented. Framing that
+/// does not look like a JPEG header yields whatever was collected so far —
+/// metadata is a bonus, never a precondition for compressing.
+fn jpeg_metadata(bytes: &[u8]) -> JpegMeta {
+    let mut meta = JpegMeta::default();
+    if bytes.get(0..2) != Some(&[0xFFu8, 0xD8][..]) {
+        return meta;
     }
     let mut i = 2usize;
-    loop {
-        // Marker (2) + length (2) must still be inside the buffer.
-        if i.checked_add(4)? > bytes.len() {
-            return None;
-        }
-        if *bytes.get(i)? != 0xFF {
-            return None;
-        }
-        let marker = *bytes.get(i.checked_add(1)?)?;
-        // Standalone markers carry no length field.
-        if marker == 0xD8 || marker == 0x01 || (0xD0..=0xD7).contains(&marker) {
-            i = i.checked_add(2)?;
-            continue;
-        }
-        // Start of scan: entropy-coded data follows, no metadata past here.
-        if marker == 0xDA {
-            return None;
-        }
-        let hi = u16::from(*bytes.get(i.checked_add(2)?)?);
-        let lo = u16::from(*bytes.get(i.checked_add(3)?)?);
-        // The segment length covers its own two bytes.
-        let len = usize::from(hi.checked_mul(256)?.checked_add(lo)?);
-        if len < 2 {
-            return None;
-        }
-        let end = i.checked_add(2)?.checked_add(len)?;
-        if end > bytes.len() {
-            return None;
-        }
-        if marker == 0xE1 {
-            let seg = bytes.get(i.checked_add(4)?..end)?;
-            if let Some(tiff) = seg.strip_prefix(b"Exif\0\0") {
-                return tiff_orientation(tiff);
+    while let Some((marker, start, end)) = segment_at(bytes, i) {
+        let Some(payload) = bytes.get(start..end) else {
+            break;
+        };
+        match marker {
+            // First EXIF block wins: a file with two is already malformed, and
+            // the one nearest SOI is the one viewers read.
+            0xE1 if meta.orientation.is_none() => {
+                if let Some(tiff) = payload.strip_prefix(b"Exif\0\0") {
+                    meta.orientation = tiff_orientation(tiff);
+                }
             }
+            0xE2 if payload.starts_with(b"ICC_PROFILE\0") => meta.icc.push(payload.to_vec()),
+            _ => {}
         }
         i = end;
     }
+    meta
+}
+
+/// `(marker, payload_start, segment_end)` for the segment beginning at `i`.
+///
+/// `None` means "stop walking": end of metadata (SOS/EOI), a marker that
+/// carries no payload, or framing that runs past the buffer. All of those make
+/// the rest of the header unreadable, which is a passthrough condition rather
+/// than an error.
+fn segment_at(bytes: &[u8], i: usize) -> Option<(u8, usize, usize)> {
+    if *bytes.get(i)? != 0xFF {
+        return None;
+    }
+    let marker = *bytes.get(i.checked_add(1)?)?;
+    // Standalone markers (TEM, RST0-7, SOI) have no length field, and EOI/SOS
+    // end the metadata region outright.
+    if marker == 0x01 || marker == 0xD8 || marker == 0xD9 || (0xD0..=0xD7).contains(&marker) {
+        return None;
+    }
+    if marker == 0xDA {
+        return None;
+    }
+    let hi = u16::from(*bytes.get(i.checked_add(2)?)?);
+    let lo = u16::from(*bytes.get(i.checked_add(3)?)?);
+    // The segment length covers its own two bytes.
+    let len = usize::from(hi.checked_mul(256)?.checked_add(lo)?);
+    if len < 2 {
+        return None;
+    }
+    let start = i.checked_add(4)?;
+    let end = i.checked_add(2)?.checked_add(len)?;
+    if end > bytes.len() {
+        return None;
+    }
+    Some((marker, start, end))
+}
+
+/// `Orientation` out of a JPEG's APP1 segment, for the tests and for anything
+/// that only cares about rotation.
+#[cfg(test)]
+fn jpeg_exif_orientation(bytes: &[u8]) -> Option<u8> {
+    jpeg_metadata(bytes).orientation
+}
+
+/// Rebuild the output with the carried segments between `SOI` and the
+/// encoder's tables. `None` when the encoder output is not a JPEG, which the
+/// caller treats as passthrough.
+fn splice_metadata(encoded: &[u8], meta: &JpegMeta) -> Option<Vec<u8>> {
+    let rest = encoded.strip_prefix(&[0xFF, 0xD8][..])?;
+    let extra = metadata_segments(meta);
+    let mut out = Vec::with_capacity(encoded.len().saturating_add(extra.len()));
+    out.extend_from_slice(&[0xFF, 0xD8]);
+    out.extend_from_slice(&extra);
+    out.extend_from_slice(rest);
+    Some(out)
+}
+
+/// The carried metadata as emit-ready APP segments.
+///
+/// Orientation is rebuilt rather than copied: the source block also holds the
+/// camera's identity, its timestamps and its GPS position, and none of that is
+/// worth carrying. Orientation 1 (upright) is not written at all — it says
+/// nothing a viewer needs.
+fn metadata_segments(meta: &JpegMeta) -> Vec<u8> {
+    let mut out = Vec::new();
+    if let Some(orientation) = meta.orientation.filter(|o| *o != 1) {
+        // Minimal little-endian TIFF: header, one IFD0 entry (0x0112 SHORT 1),
+        // no next IFD and no thumbnail — 32 bytes, versus tens of KB for the
+        // original block.
+        let mut payload = Vec::with_capacity(32);
+        payload.extend_from_slice(b"Exif\0\0");
+        payload.extend_from_slice(&[0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00]);
+        payload.extend_from_slice(&[0x01, 0x00]);
+        payload.extend_from_slice(&[0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00]);
+        payload.extend_from_slice(&[orientation, 0x00]);
+        payload.extend_from_slice(&[0x00, 0x00]);
+        payload.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        push_segment(&mut out, 0xE1, &payload);
+    }
+    for chunk in &meta.icc {
+        push_segment(&mut out, 0xE2, chunk);
+    }
+    out
+}
+
+/// Append `FF <marker> <length> <payload>`. A payload that cannot fit the
+/// 16-bit length field is skipped: source segments are already ≤ 64 KB by
+/// construction, so this only guards against a future caller.
+fn push_segment(out: &mut Vec<u8>, marker: u8, payload: &[u8]) {
+    let Ok(len) = u16::try_from(payload.len().saturating_add(2)) else {
+        return;
+    };
+    out.extend_from_slice(&[0xFF, marker]);
+    out.extend_from_slice(&len.to_be_bytes());
+    out.extend_from_slice(payload);
 }
 
 /// IFD0 orientation out of a TIFF block (the bytes after `Exif\0\0`). Handles
@@ -561,6 +673,70 @@ mod tests {
         out
     }
 
+    /// Splice an APP2/ICC segment (`ICC_PROFILE\0`, chunk 1 of 1) into a JPEG.
+    fn jpeg_with_icc(jpeg: &[u8], profile: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(b"ICC_PROFILE\0");
+        payload.extend_from_slice(&[0x01, 0x01]);
+        payload.extend_from_slice(profile);
+
+        let mut out = Vec::new();
+        out.extend_from_slice(jpeg.get(0..2).unwrap());
+        out.extend_from_slice(&[0xFF, 0xE2]);
+        let len = u16::try_from(payload.len() + 2).unwrap();
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&payload);
+        out.extend_from_slice(jpeg.get(2..).unwrap());
+        out
+    }
+
+    /// APP1 carrying Orientation *and* a camera `Make` string — the metadata
+    /// that must not survive a re-encode.
+    fn jpeg_with_camera_exif(jpeg: &[u8], orientation: u16, make: &[u8; 4]) -> Vec<u8> {
+        let mut app1 = Vec::new();
+        app1.extend_from_slice(b"Exif\0\0");
+        app1.extend_from_slice(&[0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00]);
+        // Two IFD0 entries, ascending tag order as TIFF requires.
+        app1.extend_from_slice(&[0x02, 0x00]);
+        // tag 0x010F Make, type 2 (ASCII), count 4, value inline.
+        app1.extend_from_slice(&[0x0F, 0x01, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00]);
+        app1.extend_from_slice(make);
+        // tag 0x0112 Orientation, type 3 (SHORT), count 1, value inline.
+        app1.extend_from_slice(&[0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00]);
+        app1.extend_from_slice(&orientation.to_le_bytes());
+        app1.extend_from_slice(&[0x00, 0x00]);
+        // No next IFD.
+        app1.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        let mut out = Vec::new();
+        out.extend_from_slice(jpeg.get(0..2).unwrap());
+        out.extend_from_slice(&[0xFF, 0xE1]);
+        let len = u16::try_from(app1.len() + 2).unwrap();
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&app1);
+        out.extend_from_slice(jpeg.get(2..).unwrap());
+        out
+    }
+
+    /// Every header segment as `(marker, payload)` — lets a test assert on the
+    /// bytes that were written, not just on what the parser can read back.
+    fn header_segments(bytes: &[u8]) -> Vec<(u8, Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut i = 2usize;
+        while let Some((marker, start, end)) = segment_at(bytes, i) {
+            out.push((marker, bytes.get(start..end).unwrap().to_vec()));
+            i = end;
+        }
+        out
+    }
+
+    fn bytes_of(url: &str) -> Vec<u8> {
+        let (_, payload) = url.split_once(";base64,").unwrap();
+        base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .unwrap()
+    }
+
     fn data_url(png: &[u8]) -> String {
         data_url_mime("image/png", png)
     }
@@ -719,17 +895,74 @@ mod tests {
     }
 
     #[test]
-    fn rotated_photo_passes_through() {
-        // Orientation 6 = rotate 90° CW. Re-encoding drops the tag and never
-        // rotates pixels, so the guard must refuse it outright.
+    fn rotated_photo_compresses_and_keeps_its_orientation() {
+        // Orientation 6 = rotate 90° CW. Pixels are never rotated, so the tag
+        // must survive the re-encode; with it carried, the photo is no longer
+        // a special case and gets the same shrink as any other.
         let rotated = jpeg_with_orientation(&screenshot_jpeg(640, 400, 95), 6);
         let url = data_url_mime("image/jpeg", &rotated);
-        assert!(compress_data_url(&url, &cfg_on(), &mut ImageMemo::new()).is_none());
+        let out = compress_data_url(&url, &cfg_on(), &mut ImageMemo::new()).unwrap();
+        assert!(out.len() < url.len(), "rotated photos must still shrink");
+        let bytes = bytes_of(&out);
+        assert_eq!(jpeg_metadata(&bytes).orientation, Some(6));
 
-        // Orientation 1 is upright: safe, and it must still shrink.
+        // Orientation 1 says nothing a viewer needs, so it is not written.
         let upright = jpeg_with_orientation(&screenshot_jpeg(640, 400, 95), 1);
         let url = data_url_mime("image/jpeg", &upright);
-        assert!(compress_data_url(&url, &cfg_on(), &mut ImageMemo::new()).is_some());
+        let out = compress_data_url(&url, &cfg_on(), &mut ImageMemo::new()).unwrap();
+        let bytes = bytes_of(&out);
+        assert_eq!(jpeg_metadata(&bytes).orientation, None);
+        assert!(!bytes.windows(2).any(|w| *w == [0xFF, 0xE1]));
+    }
+
+    #[test]
+    fn icc_profile_is_carried_over() {
+        // 600 bytes stands in for a Display-P3 profile: bigger than the 32-byte
+        // EXIF we rebuild, small enough to stay inside one segment.
+        let profile: Vec<u8> = (0..600u16)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        let tagged = jpeg_with_icc(&screenshot_jpeg(640, 400, 95), &profile);
+        let url = data_url_mime("image/jpeg", &tagged);
+        let out = compress_data_url(&url, &cfg_on(), &mut ImageMemo::new()).unwrap();
+        assert!(out.len() < url.len());
+
+        let bytes = bytes_of(&out);
+        let mut expected = b"ICC_PROFILE\0\x01\x01".to_vec();
+        expected.extend_from_slice(&profile);
+        let carried: Vec<Vec<u8>> = header_segments(&bytes)
+            .into_iter()
+            .filter(|(marker, _)| *marker == 0xE2)
+            .map(|(_, payload)| payload)
+            .collect();
+        assert_eq!(
+            carried,
+            vec![expected],
+            "ICC chunk must round-trip verbatim"
+        );
+    }
+
+    #[test]
+    fn camera_metadata_does_not_survive() {
+        let tagged = jpeg_with_camera_exif(&screenshot_jpeg(640, 400, 95), 6, b"SONY");
+        let url = data_url_mime("image/jpeg", &tagged);
+        let out = compress_data_url(&url, &cfg_on(), &mut ImageMemo::new()).unwrap();
+
+        let bytes = bytes_of(&out);
+        let app1: Vec<Vec<u8>> = header_segments(&bytes)
+            .into_iter()
+            .filter(|(marker, _)| *marker == 0xE1)
+            .map(|(_, payload)| payload)
+            .collect();
+        assert_eq!(app1.len(), 1, "exactly one EXIF block goes out");
+        // 6 (Exif\0\0) + 8 (TIFF header) + 2 (count) + 12 (entry) + 4 (next
+        // IFD) = 32: orientation and nothing else.
+        assert_eq!(app1.first().map(Vec::len), Some(32));
+        assert_eq!(jpeg_metadata(&bytes).orientation, Some(6));
+        assert!(
+            !bytes.windows(4).any(|w| w == b"SONY".as_slice()),
+            "camera make must not reach the upstream"
+        );
     }
 
     #[test]
