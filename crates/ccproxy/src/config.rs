@@ -21,21 +21,23 @@ pub const TRAY_LOG_DIR_ENV: &str = "CC_TRAY_LOG_DIR";
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u64 = 8787;
-const MAX_BODY_BYTES_DEFAULT: u64 = 10 * 1024 * 1024;
-/// Upstream (CC API) hard limit measured in production: bodies of 30 MB are
-/// accepted, 32 MB is rejected with `413 Payload Too Large` ("Request body is
-/// 32.0 MB, over the 32 MB limit for one request (33554432 bytes)"). The
-/// ceiling must not exceed it, otherwise an allowed body would be rejected
-/// upstream with a confusing 413 after passing the proxy's own guard.
-const MAX_BODY_BYTES_MAX: u64 = 32 * 1024 * 1024;
+/// The request-body ceiling: the upstream's own hard limit, measured in
+/// production (bodies of 30 MB are accepted, 32 MB is rejected with `413
+/// Payload Too Large` — "Request body is 32.0 MB, over the 32 MB limit for one
+/// request (33554432 bytes)").
+///
+/// Deliberately not a setting. A lower local gate only moves the very same 413
+/// earlier, at the cost of a 413 the user has to diagnose themselves; a higher
+/// one cannot exist. There is nothing to choose, so nothing is offered.
+const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 /// Incoming-guard headroom when compression is on. The guard runs on the raw
 /// client body, before translation and compression; the upstream 32 MB ceiling
 /// applies to the *forwarded* body. Base64 inflates an image 4/3, so a
 /// screenshot-heavy turn clears 32 MB raw — and with compression on it
 /// re-encodes to a fraction of that. 128 MB keeps such requests alive while
 /// bounding the one-shot memory a single request can pin. The forwarded body
-/// still obeys `MAX_BODY_BYTES_MAX` (upstream rejects anything larger with a
-/// plain 413, same as before).
+/// still obeys `MAX_BODY_BYTES` (upstream rejects anything larger with a plain
+/// 413, same as before).
 const COMPRESS_RAW_GUARD_MAX: u64 = 128 * 1024 * 1024;
 const TIMEOUT_MAX_MS: u64 = 30 * 60 * 1000;
 /// Default window in which a request must produce its first byte upstream
@@ -65,7 +67,9 @@ pub struct Config {
     pub no_output_timeout_ms: u64,
     /// How many times a silent attempt is re-sent before the client is told.
     pub no_output_retries: u64,
-    /// Maximum request body size in bytes (Content-Length pre-check + streaming guard).
+    /// Maximum request body size in bytes (Content-Length pre-check + streaming
+    /// guard). Always [`MAX_BODY_BYTES`]; kept as a field so tests can construct
+    /// a config with a smaller gate.
     pub max_body_bytes: u64,
     /// Inline-screenshot quality compression. Deterministic and cache-safe by
     /// contract (`image_compress` module docs); off by default.
@@ -103,7 +107,7 @@ impl Default for Config {
             idle_timeout_ms: 120_000,
             no_output_timeout_ms: NO_OUTPUT_TIMEOUT_DEFAULT_MS,
             no_output_retries: NO_OUTPUT_RETRIES_DEFAULT,
-            max_body_bytes: MAX_BODY_BYTES_DEFAULT,
+            max_body_bytes: MAX_BODY_BYTES,
             image_compress: crate::image_compress::ImageCompressConfig::default(),
             proxy: ProxySetting::Default,
             no_proxy: Vec::new(),
@@ -179,7 +183,6 @@ pub struct FileConfig {
     pub idle_timeout_ms: Option<u64>,
     pub no_output_timeout_ms: Option<u64>,
     pub no_output_retries: Option<u64>,
-    pub max_body_bytes: Option<u64>,
     pub image_compress: Option<bool>,
     pub image_compress_quality: Option<u64>,
     pub image_compress_min_bytes: Option<u64>,
@@ -208,7 +211,6 @@ impl FileConfig {
             idle_timeout_ms: n("idleTimeoutMs"),
             no_output_timeout_ms: n("noOutputTimeoutMs"),
             no_output_retries: n("noOutputRetries"),
-            max_body_bytes: n("maxBodyBytes"),
             image_compress: v.get("imageCompress").and_then(serde_json::Value::as_bool),
             image_compress_quality: n("imageCompressQuality"),
             image_compress_min_bytes: n("imageCompressMinBytes"),
@@ -291,14 +293,10 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
     // Empty string is meaningful: it disables CORS entirely.
     let cors_origin = env("CORS_ORIGIN").unwrap_or_else(|| "*".into());
     // Each numeric setting resolves env-first, then the file, then the default;
-    // the clamp is applied whichever source won.
-    let max_body_bytes = resolve_u64(
-        env("CC_MAX_BODY_BYTES").as_deref(),
-        file.max_body_bytes,
-        MAX_BODY_BYTES_DEFAULT,
-        |v| v.floor() as u64,
-        |v| v.min(MAX_BODY_BYTES_MAX),
-    );
+    // the clamp is applied whichever source won. The body ceiling is the one
+    // exception: it is the upstream's own limit, so nothing can override it —
+    // an old `maxBodyBytes` left in a config file is simply ignored.
+    let max_body_bytes = MAX_BODY_BYTES;
     let upstream_timeout_ms = resolve_u64(
         env("CC_UPSTREAM_TIMEOUT_MS").as_deref(),
         file.upstream_timeout_ms,
@@ -357,7 +355,7 @@ pub fn load_with_file(argv: &[String], env: &EnvLookup, file: &FileConfig) -> Co
     // base64'd screenshot set. The upstream 32 MB limit still bounds what
     // actually goes out.
     let max_body_bytes = if image_compress.enabled {
-        max_body_bytes.max(COMPRESS_RAW_GUARD_MAX)
+        COMPRESS_RAW_GUARD_MAX
     } else {
         max_body_bytes
     };
@@ -669,7 +667,7 @@ mod tests {
         assert_eq!(c.cors_origin, "*");
         assert_eq!(c.upstream_timeout_ms, 600_000);
         assert_eq!(c.idle_timeout_ms, 120_000);
-        assert_eq!(c.max_body_bytes, 10 * 1024 * 1024);
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES);
     }
 
     #[test]
@@ -719,7 +717,7 @@ mod tests {
         );
         assert_eq!(c.max_body_bytes, COMPRESS_RAW_GUARD_MAX);
         let c = load_with_file(&[], &no_env, &FileConfig::default());
-        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_DEFAULT);
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES);
     }
 
     #[test]
@@ -841,30 +839,34 @@ mod tests {
             &env_of(&[
                 ("PORT", "not-a-port"),
                 ("HOST", "bad host"),
-                ("CC_MAX_BODY_BYTES", "-5"),
                 ("CC_IDLE_TIMEOUT_MS", "999999999"),
                 ("CC_UPSTREAM_TIMEOUT_MS", "-1"),
             ]),
         );
         assert_eq!(c.port, 8787);
         assert_eq!(c.host, "127.0.0.1");
-        assert_eq!(c.max_body_bytes, 10 * 1024 * 1024);
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES);
         // Typo-sized timeouts clamp to the 30 min ceiling / fall back.
         assert_eq!(c.idle_timeout_ms, TIMEOUT_MAX_MS);
         assert_eq!(c.upstream_timeout_ms, 600_000);
     }
 
     #[test]
-    fn zero_idle_disables_and_body_cap_applies() {
-        let c = load(
-            &[],
-            &env_of(&[
-                ("CC_IDLE_TIMEOUT_MS", "0"),
-                ("CC_MAX_BODY_BYTES", "999999999999"),
-            ]),
-        );
+    fn zero_idle_disables_stream_timeout() {
+        let c = load(&[], &env_of(&[("CC_IDLE_TIMEOUT_MS", "0")]));
         assert_eq!(c.idle_timeout_ms, 0);
-        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES_MAX);
+    }
+
+    /// The body ceiling is the upstream's limit, so no env var and no config
+    /// file can move it — including the `CC_MAX_BODY_BYTES` that 0.7.7 honoured.
+    #[test]
+    fn body_ceiling_ignores_the_retired_overrides() {
+        let c = load(&[], &env_of(&[("CC_MAX_BODY_BYTES", "999999999999")]));
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES);
+
+        let on_file = FileConfig::parse(r#"{"maxBodyBytes":1048576}"#);
+        let c = load_with_file(&[], &no_env, &on_file);
+        assert_eq!(c.max_body_bytes, MAX_BODY_BYTES);
     }
 
     #[test]

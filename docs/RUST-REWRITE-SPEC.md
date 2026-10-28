@@ -631,7 +631,7 @@ budget 8000 → `medium` —— 它的子集覆盖了低区间，所以不塌缩
 | `HOST` | `127.0.0.1` | 拒绝含空白/控制字符，回退 localhost |
 | `PORT` | `8787` | 整数 1-65535，否则回退 |
 | `CORS_ORIGIN` | `*` | 空串禁用 CORS |
-| `CC_MAX_BODY_BYTES` | 10 MiB | 上限 50 MiB |
+| `CC_MAX_BODY_BYTES` | — | 已废弃（0.7.8 起固定 32 MiB = 上游硬顶，见 README 排错） |
 | `CC_API_BASE` | `https://api.commandcode.ai` | — |
 | `CC_CLI_VERSION` | `0.40.3` | 启动时查 npm registry 刷新（24h 缓存） |
 
