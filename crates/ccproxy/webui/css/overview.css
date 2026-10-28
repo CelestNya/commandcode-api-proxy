@@ -39,10 +39,24 @@
 }
 
 
-.model-layout { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: center; }
+.model-layout { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: start; }
+/* The model list is unbounded: a busy gateway racks up dozens of entries, and an
+   uncapped table then dictates the height of the whole .ov-row — the panel grows
+   past the viewport on every poll and drags 状态分布 (and the page scroll length)
+   with it. Cap the list and scroll it in place; max-height (not height) keeps a
+   short list compact instead of leaving an empty scroll area. */
+.model-table-wrap {
+  max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
+  /* Room for the sticky header's bottom border, which would otherwise be the
+     one pixel a scrollbar-less render clips at the box edge. */
+  padding-bottom: 1px;
+}
 .model-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
 .model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--outline-variant); font-size: 11.5px; letter-spacing: .2px; }
 .model-table th:first-child { text-align: left; }
+/* Pin the header inside .model-table-wrap; the opaque fill is mandatory, or the
+   rows show through it while scrolling. */
+.model-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
 .model-table td { padding: 6px 6px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--outline-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 40%; }
 .model-table th:nth-child(2), .model-table td:nth-child(2) { width: 18%; }
