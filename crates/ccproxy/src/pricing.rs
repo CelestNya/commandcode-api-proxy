@@ -6,10 +6,12 @@
 //! in the repo would go stale, so this module fetches the page, parses the
 //! per-model rows and caches the result next to the billing database.
 //!
-//! Refresh policy: on load, if the cached table is missing or older than 24
-//! hours, a synchronous fetch replaces it. A failed fetch (offline, page
-//! restructured) keeps the previous cache — the proxy must keep working and
-//! the ledger keeps its numbers; only the cost columns go missing.
+//! Refresh policy (stale-while-revalidate): the first request seeds the
+//! in-memory table from the disk cache; if that copy is missing or older
+//! than 24 hours, a background thread fetches the page and swaps the table
+//! in when it lands. No request path ever waits on the network — a failed
+//! fetch (offline, page restructured) keeps the previous numbers, and the
+//! ledger keeps working; only the cost columns go missing until a retry.
 //!
 //! Cost model: a request bills cached prompt tokens at the cache-read rate,
 //! the remaining prompt at the input rate and completion at the output rate.
@@ -21,7 +23,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Where the live prices live. Public, no auth, changes over time — exactly
 /// why we crawl instead of vendoring the numbers.
@@ -155,20 +160,6 @@ impl Pricing {
             fetched_at: None,
             source: PRICING_SOURCE,
         }
-    }
-
-    /// Load the table for `dir`, refreshing the cache when it is missing or
-    /// stale. Never panics and never blocks the caller for long: the fetch is
-    /// capped at `FETCH_TIMEOUT` and a failure returns the previous cache.
-    pub fn load(dir: &Path) -> Pricing {
-        let mut cached = read_cache(dir).unwrap_or_else(Pricing::empty);
-        if cached.stale() {
-            if let Some(fresh) = fetch_latest() {
-                cached = fresh;
-            }
-            write_cache(dir, &cached);
-        }
-        cached
     }
 
     /// Rate lookup for an exact model id as recorded in the ledger.
@@ -307,6 +298,86 @@ impl Pricing {
             }
         }
     }
+}
+
+// ── non-blocking table (stale-while-revalidate) ─────────────────
+
+/// Process-wide table. Read-mostly, swapped wholesale on refresh.
+static TABLE: OnceLock<RwLock<Arc<Pricing>>> = OnceLock::new();
+/// Set once the disk cache has been consulted (successfully or not), so the
+/// seed step never re-runs and a missing file is not re-read per request.
+/// An AtomicBool rather than a OnceLock so tests can reset process state.
+static SEEDED: AtomicBool = AtomicBool::new(false);
+/// Rate-limits background refreshes: at most one attempt per RETRY_EVERY,
+/// so an unreachable upstream cannot spawn a fetch per request.
+static LAST_ATTEMPT: Mutex<Option<Instant>> = Mutex::new(None);
+/// Minimum gap between background fetch attempts.
+const RETRY_EVERY: Duration = Duration::from_secs(60);
+
+fn table_slot() -> &'static RwLock<Arc<Pricing>> {
+    TABLE.get_or_init(|| RwLock::new(Arc::new(Pricing::empty())))
+}
+
+/// Return the current table, refreshing it in the background when stale.
+///
+/// Fast path: a fresh in-memory table. Slow path (once per process): seed
+/// from the disk cache. If still stale afterwards, spawn one background
+/// fetch — the caller keeps the previous numbers and the next request
+/// after the swap sees fresh rates.
+pub fn pricing_table(dir: &Path) -> Arc<Pricing> {
+    pricing_table_with(dir, fetch_latest)
+}
+
+/// [`pricing_table`] with the fetch function injected, so the background
+/// path can be exercised without touching the network.
+fn pricing_table_with(dir: &Path, fetch: fn() -> Option<Pricing>) -> Arc<Pricing> {
+    let slot = table_slot();
+    {
+        let cur = slot.read().unwrap_or_else(|e| e.into_inner());
+        if !cur.stale() {
+            return Arc::clone(&cur);
+        }
+    }
+    let mut cur = slot.write().unwrap_or_else(|e| e.into_inner());
+    // Re-check under the write lock: a concurrent refresh may have landed.
+    if !cur.stale() {
+        return Arc::clone(&cur);
+    }
+    if !SEEDED.swap(true, Ordering::SeqCst) {
+        if let Some(disk) = read_cache(dir) {
+            *cur = Arc::new(disk);
+            if !cur.stale() {
+                return Arc::clone(&cur);
+            }
+        }
+    }
+    if claim_attempt() {
+        let dir = dir.to_path_buf();
+        thread::spawn(move || {
+            if let Some(fresh) = fetch() {
+                write_cache(&dir, &fresh);
+                if let Some(slot) = TABLE.get() {
+                    let mut w = slot.write().unwrap_or_else(|e| e.into_inner());
+                    *w = Arc::new(fresh);
+                }
+            }
+        });
+    }
+    Arc::clone(&cur)
+}
+
+/// True when RETRY_EVERY has elapsed since the last attempt; claims the slot.
+fn claim_attempt() -> bool {
+    let mut last = LAST_ATTEMPT.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let due = match *last {
+        Some(t) => now.duration_since(t) >= RETRY_EVERY,
+        None => true,
+    };
+    if due {
+        *last = Some(now);
+    }
+    due
 }
 
 /// Fetch and parse the current table from the official page.
@@ -1162,5 +1233,144 @@ mod tests {
             source: PRICING_SOURCE,
         };
         assert!(none.stale());
+    }
+
+    /// Serializes the tests that touch the process-wide table state.
+    static PRICING_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Put TABLE/SEEDED/LAST_ATTEMPT back to their just-started values so
+    /// each test observes its own scenario regardless of execution order.
+    fn reset_pricing_state_for_tests() {
+        if let Some(slot) = TABLE.get() {
+            *slot.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(Pricing::empty());
+        }
+        SEEDED.store(false, Ordering::SeqCst);
+        *LAST_ATTEMPT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// A fresh table distinguishable from the SAMPLE cache (one model, an id).
+    fn fixture_fresh() -> Pricing {
+        Pricing {
+            models: BTreeMap::from([(
+                "Fixture Model".to_string(),
+                ModelPrice {
+                    input: 1.5,
+                    output: 3.0,
+                    cache_read: 0.15,
+                    cache_write: None,
+                    id: Some("fixture-model".to_string()),
+                    peak: None,
+                    off_peak: None,
+                },
+            )]),
+            fetched_at: Some(crate::now_epoch_secs()),
+            source: PRICING_SOURCE,
+        }
+    }
+
+    #[test]
+    fn pricing_table_seeds_fresh_cache_from_disk() {
+        let _guard = PRICING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_pricing_state_for_tests();
+        // A fresh on-disk cache (ids present, fetched just now) must satisfy
+        // pricing_table entirely from disk: the fast path returns before any
+        // background fetch is considered, so no network is touched.
+        let dir = std::env::temp_dir().join("ccproxy-pricing-table-test");
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::create_dir_all(&dir);
+        // Give the sample ids so the schema-upgrade check does not fire.
+        let models: BTreeMap<String, ModelPrice> = parse_pricing_html(SAMPLE)
+            .into_iter()
+            .map(|(k, mut v)| {
+                v.id = Some(k.clone());
+                (k, v)
+            })
+            .collect();
+        let fetched = crate::now_epoch_secs();
+        write_cache(
+            &dir,
+            &Pricing {
+                models: models.clone(),
+                fetched_at: Some(fetched),
+                source: PRICING_SOURCE,
+            },
+        );
+
+        let table = pricing_table(&dir);
+        assert_eq!(table.fetched_at, Some(fetched));
+        assert_eq!(table.models.len(), models.len());
+        assert_eq!(
+            table.models.get("MiniMax M3").unwrap().input,
+            models.get("MiniMax M3").unwrap().input
+        );
+        // Rate lookup still works through the Arc.
+        assert!(table.price("MiniMax M3").is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pricing_table_refreshes_a_stale_cache_in_the_background() {
+        let _guard = PRICING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_pricing_state_for_tests();
+        let dir = std::env::temp_dir().join("ccproxy-pricing-refresh-test");
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::create_dir_all(&dir);
+        // Aged disk cache — the caller must get these numbers immediately,
+        // never waiting for the refresh that is about to be spawned.
+        let aged = crate::now_epoch_secs().saturating_sub(REFRESH_AFTER_SECS + 60);
+        write_cache(
+            &dir,
+            &Pricing {
+                models: parse_pricing_html(SAMPLE),
+                fetched_at: Some(aged),
+                source: PRICING_SOURCE,
+            },
+        );
+
+        // A deliberately slow fetch: if the call blocked on it, this assert
+        // could not hold. It models the real 12s TLS budget in miniature.
+        let started = Instant::now();
+        let first = pricing_table_with(&dir, || {
+            thread::sleep(Duration::from_secs(3));
+            Some(fixture_fresh())
+        });
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(1500),
+            "first call blocked for {elapsed:?} — the fetch must run in the background"
+        );
+        assert_eq!(first.fetched_at, Some(aged));
+
+        // The background fetch lands on disk and swaps the in-memory table;
+        // the next request sees fresh rates. Wait for the swap — the disk
+        // write happens just before it, so it is done by then too.
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while pricing_table(&dir).stale() {
+            assert!(
+                Instant::now() < deadline,
+                "background refresh never swapped into memory"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        let fresh = read_cache(&dir).expect("refreshed cache on disk");
+        assert!(!fresh.stale());
+        assert_eq!(fresh.models.len(), 1);
+        let second = pricing_table(&dir);
+        assert!(!second.stale());
+        assert_eq!(second.fetched_at, fresh.fetched_at);
+        assert_eq!(second.price("Fixture Model").unwrap().input, 1.5);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn claim_attempt_rate_limits_bursts() {
+        let _guard = PRICING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_pricing_state_for_tests();
+        // The first claim in the process is granted; immediate retries are
+        // refused until RETRY_EVERY elapses, so an unreachable upstream
+        // cannot spawn one background fetch per request.
+        assert!(claim_attempt());
+        assert!(!claim_attempt());
+        assert!(!claim_attempt());
     }
 }

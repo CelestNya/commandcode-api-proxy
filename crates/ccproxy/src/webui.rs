@@ -15,7 +15,7 @@
 //! intermediate proxies keep the connection open.
 
 use crate::billing;
-use crate::pricing::{Pricing, PRICING_SOURCE};
+use crate::pricing::{PRICING_SOURCE, pricing_table};
 use crate::server::{RequestId, SharedState};
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -582,8 +582,9 @@ struct BucketRow {
 /// Token columns are NULL when unknown (a failed attempt has no tokens) and
 /// must never be shown as 0 — every SUM is coalesced so the aggregate is real.
 fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
-    // Crawled price table; loads from disk and refreshes when stale (24h).
-    let pricing = Pricing::load(&billing::billing_dir());
+    // Crawled price table; seeds from disk and refreshes in the background
+    // when stale (24h) — the request path never waits on the network.
+    let pricing = pricing_table(&billing::billing_dir());
     let totals = conn
         .query_row(
             "select count(*),
@@ -1027,7 +1028,7 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
 /// request, with the final attempt's status/latency shown and a `costUsd`
 /// priced per attempt at its own peak/off-peak rate.
 fn attempts_json(conn: &Connection, from_ts: &str, to_ts: &str, limit: i64) -> Value {
-    let pricing = Pricing::load(&billing::billing_dir());
+    let pricing = pricing_table(&billing::billing_dir());
     let mut stmt = match conn.prepare(
         "select ts, reqId, wire, model, stream, attempt, status, errorTag,
                 promptTokens, cachedTokens, cacheCreationTokens,
