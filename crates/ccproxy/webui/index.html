@@ -12,18 +12,34 @@
      These are served loose from webui/ (no build-time inlining — see
      webui_site.rs); to add a file, add a line here. -->
 <link rel="stylesheet" href="css/tokens.css">
+<!-- 主题层：只覆盖颜色令牌，结构令牌与深色共享。必须紧跟 tokens.css，
+     否则组件规则里的背景/描边会盖掉主题值。 -->
+<link rel="stylesheet" href="css/theme-light.css">
+<link rel="stylesheet" href="css/theme-jelly.css">
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/content.css">
 <link rel="stylesheet" href="css/overview.css">
 <link rel="stylesheet" href="css/detail.css">
 <link rel="stylesheet" href="css/log.css">
 <link rel="stylesheet" href="css/responsive.css">
+
+<!-- 主题在绘制前定下来，否则浅色用户会先看到一帧深色。
+     默认（无 data-theme）是深色；`?theme=` 只给本地对比两套外观用。 -->
+<script>
+(function () {
+  var want = null;
+  var q = new URLSearchParams(location.search).get("theme");
+  if (q) want = q;
+  else { try { want = localStorage.getItem("ccproxy.theme"); } catch (e) {} }
+  if (want === "light" || want === "jelly") document.documentElement.dataset.theme = want;
+})();
+</script>
 </head>
 <body>
 <div class="shell">
   <aside class="sidebar">
     <div class="side-logo">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#181B24" stroke="#2E3342"/><path d="M8 10l8 6-8 6z" fill="#8B7CF6"/><path d="M17 22h7" stroke="#EDEFF5" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true"><rect class="lm-bg" width="32" height="32" rx="9"/><path class="lm-play" d="M8 10l8 6-8 6z"/><path class="lm-cursor" d="M17 22h7"/></svg>
     </div>
     <nav class="side-nav">
       <a href="#/stats" class="nav-item active" id="nav-stats">
@@ -139,9 +155,12 @@
         <div class="table-wrap">
           <table>
             <colgroup>
-              <col style="width:3%"><col style="width:12%"><col style="width:14%">
-              <col style="width:6%"><col style="width:5%"><col style="width:8%">
-              <col style="width:14%"><col style="width:8%"><col style="width:12%"><col style="width:13%"><col style="width:5%">
+              <!-- 列宽按内容类型分配：序号/端点/类型/状态/时间是固定长度的短文本，
+                   给足；模型名是变量长度，允许省略号。# 列从 3% 提到 4%——
+                   原宽度扣掉内边距只剩 14px，两位数行号会被截成「1…」。 -->
+              <col style="width:4%"><col style="width:11%"><col style="width:13%">
+              <col style="width:7.5%"><col style="width:5%"><col style="width:6.5%">
+              <col style="width:14%"><col style="width:8%"><col style="width:12%"><col style="width:14%"><col style="width:5%">
             </colgroup>
             <thead>
               <tr>

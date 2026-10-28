@@ -76,7 +76,7 @@
 .window-picker a.active {
   color: var(--on-primary-container);
   background: var(--primary-container);
-  border-color: rgba(139, 124, 246, 0.4);
+  border-color: var(--primary-border);
   font-weight: 600;
 }
 .window-picker input[type="datetime-local"] {
@@ -98,7 +98,7 @@
   cursor: pointer;
   transition: background var(--t-base), color var(--t-base), border-color var(--t-base);
 }
-.btn-mini:hover { background: var(--primary-container); color: var(--on-primary-container); border-color: rgba(139, 124, 246, 0.4); }
+.btn-mini:hover { background: var(--primary-container); color: var(--on-primary-container); border-color: var(--primary-border); }
 /* effective range label next to the picker: always visible so the selector
    reads as done, not as two inert fields */
 .win-range {

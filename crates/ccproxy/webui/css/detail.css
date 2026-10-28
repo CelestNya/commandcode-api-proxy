@@ -95,7 +95,7 @@
 .filterbar button.active {
   color: var(--on-primary-container);
   background: var(--primary-container);
-  border-color: rgba(139, 124, 246, 0.4);
+  border-color: var(--primary-border);
   font-weight: 600;
 }
 .filterbar input[type="datetime-local"] {
@@ -128,6 +128,8 @@
 }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; min-width: 780px; }
 th, td { padding: 9px 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 序号列只放一两位数字，右内边距收紧，把宽度让给内容本身 */
+th:first-child, td:first-child { padding-right: 4px; }
 /* Sticky within `.content` (the only scroller). `top: 0` now meets the topbar
    flush because `.content` carries no padding, so rows never surface above
    the header. The background must be opaque and the z-index above the rows. */
@@ -196,7 +198,7 @@ td { transition: background var(--t-fast); }
 }
 .pager .pg-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--text); }
 .pager .pg-btn:disabled { opacity: 0.45; cursor: default; }
-.pager .pg-btn.active { background: var(--primary-container); color: var(--on-primary-container); border-color: rgba(139, 124, 246, 0.4); }
+.pager .pg-btn.active { background: var(--primary-container); color: var(--on-primary-container); border-color: var(--primary-border); }
 .pager .pg-ellipsis { padding: 0 4px; color: var(--muted); }
 .pager .pg-count { margin-right: auto; }
 .pager .pg-size { display: inline-flex; align-items: center; gap: 6px; }

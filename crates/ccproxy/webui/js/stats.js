@@ -248,7 +248,7 @@ function renderTrend(raw, animate) {
     if (!se.fill || se.pts.length < 2) return;
     var d = pchipPath(se.pts);
     if (!d) return;
-    out += '<path d="' + d +
+    out += '<path class="trend-area" d="' + d +
            ' L' + se.pts[se.pts.length - 1][0].toFixed(1) + ' ' + baseY.toFixed(1) +
            ' L' + se.pts[0][0].toFixed(1) + ' ' + baseY.toFixed(1) + ' Z" ' +
            'fill="' + se.color + '" fill-opacity="' + se.fill + '" stroke="none"/>';

@@ -1,0 +1,171 @@
+/* 果冻主题（jelly / 冰态果冻）
+ *
+ * 参考 Auroraqua‑UI 的读法：**浅底 + 粉主色 + 磨砂玻璃**。不是深色皮肤。
+ * 上一版做成深底蓝紫是抄错了——那套的识别特征是低饱和粉紫渐层上盖霜，
+ * 底色本来就是亮的。
+ *
+ * 约束与浅色主题一致：只覆盖颜色层 + 材质层，结构令牌（间距/字号/圆角/
+ * 动效/字体）一个都不动。三套主题的信息密度、模块尺寸完全相同。
+ *
+ * ── 为什么浅底做玻璃反而容易 ──────────────────────────────
+ * 深色底上玻璃必然发灰：模糊一片近黑还是近黑，只有那层白把亮度抬起来，
+ * 结果就是灰塑料。浅底相反——背后本来就是有颜色的粉紫渐层，模糊之后
+ * 仍是粉紫，只要 saturate 稍微提一点就干净。所以这套不需要压暗、不需要
+ * 加强光、不需要噪点堆叠，只有：淡粉底 → 单层 blur → 一道白边高光。
+ *
+ * ── 三条硬规则 ──────────────────────────────────────────
+ *   ① 密集数字不放在玻璃上：表格框、抽屉、日志面板用近实底白。
+ *   ② 玻璃只给"容器表面"：卡片、面板、侧栏、顶栏、筛选栏。
+ *   ③ 无发光、无脉冲、无循环动画。粉色只在色相上，不在光上。
+ *
+ * 明度关系（浅色物理直觉）：页面底最暗（淡粉灰），卡片最亮（近白玻璃），
+ * 内嵌块（输入框/表头）回落一档变"凹陷"。
+ */
+
+:root[data-theme="jelly"] {
+  /* 原生控件跟随浅色：日期控件日历图标、select 弹层、滚动条 */
+  color-scheme: light;
+
+  /* 页面底：极淡的粉。它只作兜底，真正的颜色来自 body 上的渐层。 */
+  --bg: #FBEFF5;
+
+  /* 卡片表面：62% 白。浅底上这个值刚好——低于 50% 会透出文字重影，
+     高于 75% 就看不出是玻璃，退化成纯白卡。 */
+  --surface: rgba(255, 255, 255, 0.45);
+
+  /* 内嵌块：输入框、表头、chip、分页按钮。浅色里"凹陷 = 更暗"，
+     所以用一层淡粉白而不是更亮的白。 */
+  --surface-2: rgba(255, 255, 255, 0.80);
+  --surface-3: #F4E4EE;
+
+  /* 描边：玻璃的边界靠白线 + 一层薄粉边，纯灰线在粉底上会发脏 */
+  --outline: rgba(176, 122, 152, 0.26);
+  --outline-strong: rgba(158, 98, 132, 0.36);
+  /* 图表网格线：浅底上要独立一档，否则网格在白玻璃上消失 */
+  --outline-variant: rgba(176, 122, 152, 0.20);
+
+  /* 文字：暖黑而不是纯黑，和粉底相处不刺眼 */
+  --text: #33202B;
+  --muted: #7B6371;
+
+  /* 主色：粉。这是这套主题的识别色，比"玫瑰红"更柔、比"樱花粉"更沉，
+     在白底上 5.3:1，能做正文级使用（导航激活、图表主线、链接）。 */
+  --primary: #C7265F;
+  --cost: #9A5A00;
+  --primary-container: rgba(199, 38, 95, 0.10);
+  --on-primary-container: #8C1241;
+  --primary-border: rgba(199, 38, 95, 0.42);
+
+  /* 状态色：粉主色占走了红系，错误必须往深玫红再压一档才不和主色混。
+     成功用青绿（与粉互补，一眼分得开）。 */
+  --ok: #07776B;
+  --warn: #9A5A00;
+  --error: #B3123F;
+  --interrupted: #6A3FC0;
+  --aborted: #4A5B9E;
+
+  /* 图表系列色：粉主线 + 青 + 琥珀 + 紫 + 薄荷。全部按白底 4.4:1 起压明度。 */
+  --chart-hit: #C7265F;
+  --chart-6: #7C3A96;
+  --chart-7: #0F6E8C;
+  --chart-8: #9A5A00;
+  --chart-9: #0B7A6B;
+  --chart-10: #A8465E;
+
+  /* 日志面板：近实底白。等宽代码必须有一块稳定的纸，不能透。 */
+  --log-bg: #FFFFFF;
+}
+
+/* ── 背景：粉紫渐层 ─────────────────────────────────────────
+   Auroraqua 的底是"极光但很淡"：粉（顶部中央，正落在指标卡背后）、淡紫
+   （左上）、淡蓝（右下），三团在近白底上化开。色只有 20~30% 的浓度——
+   再浓就变成彩色海报，密集数据放上去会累。没有模糊光晕、没有动效。 */
+:root[data-theme="jelly"] body {
+  background:
+    /* 粉集中在最上沿（指标卡那条带），往下化开成粉紫，右下收成淡蓝 */
+    radial-gradient(120% 96% at 50% -30%, #FFC2DB 0%, rgba(255, 194, 219, 0) 72%),
+    radial-gradient(76% 66% at 102% 34%, #EDE0FF 0%, rgba(237, 224, 255, 0) 62%),
+    radial-gradient(86% 76% at -6% 104%, #DCEAFB 0%, rgba(220, 234, 251, 0) 64%),
+    linear-gradient(160deg, #FDF0F6 0%, #F9F2FE 50%, #F4F8FD 100%);
+}
+
+/* ── 玻璃材质 ──────────────────────────────────────────────
+   只给容器表面。饱和提高 140%：浅底模糊会把粉调平均掉一点，提一点刚好
+   回到"霜下是粉"的感觉。不叠额外渐变、不叠噪点——这就是上一版翻车的原因。 */
+:root[data-theme="jelly"] .mcard,
+:root[data-theme="jelly"] .mini-card,
+:root[data-theme="jelly"] .panel,
+:root[data-theme="jelly"] .filterbar,
+:root[data-theme="jelly"] .sidebar,
+:root[data-theme="jelly"] .topbar {
+  background: var(--surface);
+  border-color: var(--outline);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(140%);
+  /* 浅底玻璃靠"白边 + 淡粉投影"立起来，不用深阴影（白底上深阴影会发脏） */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 10px 26px -16px rgba(150, 70, 110, 0.30);
+}
+
+/* 侧栏 / 顶栏贴着窗口边：只留内侧一道白线，不留外边阴影 */
+:root[data-theme="jelly"] .sidebar,
+:root[data-theme="jelly"] .topbar {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.85);
+}
+
+/* ── 密集数据：近实底白 ─────────────────────────────────────
+   请求表、请求详情抽屉、日志面板不透。12.5px 等宽数字叠在模糊彩底上
+   必然发虚，这一层不参与"果冻"的表演。 */
+:root[data-theme="jelly"] .table-wrap,
+:root[data-theme="jelly"] .drawer,
+:root[data-theme="jelly"] .logpane {
+  background: rgba(255, 255, 255, 0.94);
+  -webkit-backdrop-filter: blur(20px) saturate(130%);
+  backdrop-filter: blur(20px) saturate(130%);
+}
+:root[data-theme="jelly"] .logpane {
+  background: var(--log-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* 表头必须不透明：sticky 表头要盖住滚过的行 */
+:root[data-theme="jelly"] th {
+  background: #FDF5F9;
+  color: var(--muted);
+}
+
+/* 行 hover：淡粉而不是灰，跟着主题走 */
+:root[data-theme="jelly"] tr:hover td {
+  background: rgba(199, 38, 95, 0.05);
+}
+
+/* ── 浅底细节（与浅色主题同一批坑） ─────────────────────────
+   ① 状态胶囊：淡底会把 11.5px 小字压到 4.5:1 以下，浓度降到 8%
+   ② 选中文本：白底上 30% 会把选中字对比压掉
+   ③ 原生 select 箭头是 data URI，拿不到 CSS 变量 */
+:root[data-theme="jelly"] .badge {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+:root[data-theme="jelly"] ::selection {
+  background: rgba(199, 38, 95, 0.18);
+}
+:root[data-theme="jelly"] .filterbar select,
+:root[data-theme="jelly"] .pager select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237B6371' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* 面积填色压低：主色是深粉，12% 的填色在浅底上会糊成一片肉色，把线压住。
+   stats.js 里面积是 fill-opacity 属性（表现属性），CSS 规则的优先级更高。 */
+:root[data-theme="jelly"] .trend-area { fill-opacity: 0.05; }
+
+/* ── 降级：不支持 backdrop-filter 时不留半透明白壳 ───────────
+   否则卡片变成"看得见背景的一层薄膜"，文字直接叠在渐层上。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-theme="jelly"] {
+    --surface: rgba(255, 255, 255, 0.93);
+    --surface-2: #FAEEF5;
+  }
+}

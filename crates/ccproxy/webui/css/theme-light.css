@@ -1,0 +1,95 @@
+/* 浅色主题（porcelain / 浅瓷）
+ *
+ * 与深色版**一比一**：结构令牌（间距、字号、圆角、动效、字体）一个都不覆盖，
+ * 只重写颜色层。所以两个主题的信息密度、模块尺寸、层级数量完全一致。
+ *
+ * 明度关系不是简单反相，而是按"浅色底"的物理直觉重排：
+ *
+ *   深色                     浅色
+ *   页面 #0B0C10  最暗   →   页面 #F2F4F8  最暗（浅灰）
+ *   卡片 #12141C  更亮   →   卡片 #FFFFFF  最亮（纯白）
+ *   内嵌 #181B24  再亮   →   内嵌 #F5F7FA  回落变暗（凹陷）
+ *
+ * 浅色里"内嵌块变暗"才是凹陷，若照抄深色的"内嵌块更亮"会让输入框浮在
+ * 卡片之上，层级的读法就反了。凸起/凹陷的语义保住，色值方向跟着翻转。
+ *
+ * 文字与强调色一律按对比度压明度（白底 4.5:1 起），不是把深色值直接搬来
+ * ——深色里的 #F0A868、#4FD1C5 在白底上只有 2:1，照搬会看不见。
+ */
+
+:root[data-theme="light"] {
+  /* 原生控件跟随主题：datetime-local 的日历图标、select 弹层、滚动条
+     的明暗由 color-scheme 决定，不给它 light 的话日历图标会是白的。 */
+  color-scheme: light;
+
+  /* 底色三级：页面 / 卡片 / 卡片内嵌块
+     页面底要压到"明显是浅灰"，与纯白卡片差 3~4 级明度——浅色里差值小于
+     这数就糊成一整片白（深色下靠黑底反衬白字，反而是差值小也不散）。 */
+  --bg: #EDF1F6;
+  --surface: #FFFFFF;
+  /* 内嵌块（表头、输入框、chip、分页按钮）要比卡片明显低一档：白底上
+     #F5F7FA 那点差看不出"这块可以输入"，表头带也会消失。 */
+  --surface-2: #EEF2F7;
+  --surface-3: #E4EAF2;
+  --outline: #DAE1EB;
+  --outline-strong: #BFC9D8;
+  /* 图表网格线单独一档：白面板上 --outline 只有 1.2:1，网格会消失。
+     深色里两者同值是因为深底本身就把淡线衬出来了。 */
+  --outline-variant: #CBD6E4;
+
+  --text: #171B22;
+  --muted: #5B6474;
+
+  /* 主色紫；费用琥珀。同色相压明度，保住"紫 = 品牌 / 琥珀 = 钱"的分配。 */
+  --primary: #5A4BD6;
+  --cost: #9C5A0C;
+  --primary-container: rgba(90, 75, 214, 0.08);
+  --on-primary-container: #3E31A8;
+  /* 选中态的描边：深色是 primary 的 40% 透明，白底要再实一点才看得出边界 */
+  --primary-border: rgba(90, 75, 214, 0.38);
+
+  /* 状态色。
+     青绿和琥珀的亮度天然偏高，白底上刚过 4.5，但状态徽章用的是
+     color-mix 淡底（同色 12% 叠白），底色被抬亮后这两色会掉到 3.5:1
+     ——11.5px 小字撑不住。所以这两色比"够用"再压一档。 */
+  --ok: #07776B;
+  --warn: #9C5A0C;
+  --error: #C4284E;
+  --interrupted: #5A4BD6;
+  --aborted: #47589E;
+
+  /* 图表系列色：同色相、压明度。白底上原亮色（#9D8FF8 等）只有 2:1，
+     线一细就看不见；这一组都在 4.4:1 以上。 */
+  --chart-hit: #6B57D9;
+  --chart-6: #8A5BB0;
+  --chart-7: #3565D0;
+  --chart-8: #9C7409;
+  --chart-9: #0D7A5E;
+  --chart-10: #B04F52;
+
+  /* 日志面板：比卡片暗一档的"纸"，等宽字体在上面仍读作代码块 */
+  --log-bg: #F1F5FA;
+}
+
+/* 状态胶囊：深色用同色 12% 做底刚好，浅色下这层淡底会把底色抬亮、压掉
+   11.5px 状态字（实测从 10:1 掉到 3.5:1）。降到 8% 让底更贴近白，
+   胶囊感还在，小字对比回到 4.5:1 以上。 */
+:root[data-theme="light"] .badge {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* 选中文本：深色用 primary 的 30%，浅色降到 18% —— 白底上 30% 会把
+   选中文字的对比压掉。 */
+:root[data-theme="light"] ::selection {
+  background: rgba(90, 75, 214, 0.18);
+}
+
+/* 原生 select 的下拉箭头是内联 SVG（data URI 拿不到 CSS 变量），
+   深色版画的是 #8A90A3，浅色底上要换成更深的灰。 */
+:root[data-theme="light"] .filterbar select,
+:root[data-theme="light"] .pager select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235B6474' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* 面积填色：浅底上 12% 偏重，压一档。 */
+:root[data-theme="light"] .trend-area { fill-opacity: 0.085; }

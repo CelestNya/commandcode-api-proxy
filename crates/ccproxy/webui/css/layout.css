@@ -39,6 +39,11 @@
 .sidebar::-webkit-scrollbar { display: none; }
 .side-logo { display: flex; align-items: center; gap: 10px; padding: 0; flex: none; }
 .side-logo svg { width: 26px; height: 26px; flex: none; }
+/* 品牌标记走令牌而不是写死 fill：浅色主题下深色方块会压在白侧栏上，
+   一套 SVG 跟着主题变比维护两份图标可靠。 */
+.logo-mark .lm-bg { fill: var(--surface-3); stroke: var(--outline-strong); }
+.logo-mark .lm-play { fill: var(--primary); }
+.logo-mark .lm-cursor { stroke: var(--text); stroke-width: 2.4; stroke-linecap: round; }
 .side-nav { display: flex; flex-direction: row; gap: 6px; flex: 1; min-width: 0; }
 .nav-item {
   display: flex;
