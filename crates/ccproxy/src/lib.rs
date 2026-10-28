@@ -24,11 +24,13 @@
     )
 )]
 
+pub mod archive;
 pub mod billing;
 pub mod catalog;
 pub mod cli;
 pub mod cli_version;
 pub mod config;
+pub mod control;
 pub mod dump;
 pub mod generate;
 pub mod image_compress;
@@ -38,12 +40,14 @@ pub mod ndjson;
 pub mod pricing;
 pub mod proxy;
 pub mod server;
+pub mod settings;
 pub mod sse;
 pub mod stream_body;
 pub mod stream_write;
 pub mod time;
 pub mod tool_arguments;
 pub mod translate;
+pub mod update;
 pub mod upstream;
 pub mod usage;
 pub mod validation;

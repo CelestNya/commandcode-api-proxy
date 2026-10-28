@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="jelly">
+<head>
+<meta charset="utf-8">
+<title>主题皮肤 · 静态草图 v2（深果冻 / 浅瓷 / 扁平 / 高对比 + 动效）</title>
+<style>
+/* ═══ 1. 结构令牌：主题无关 ═══════════════════════════════════════
+   间距 / 字号 / 圆角基准 / 动效曲线。主题永远不改这些，否则一换皮肤布局就跳。 */
+:root {
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px;
+  --text-2xs: 11px; --text-xs: 12px; --text-sm: 13px; --text-base: 15px; --text-xl: 22px;
+  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Sarasa Mono", ui-monospace, Consolas, monospace;
+
+  /* 动效：三档时长 × 两条曲线。ease-out 给常规变化，spring 只给"有质量"的位移 */
+  --t-fast: .12s; --t-base: .2s; --t-slow: .32s;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-spring: cubic-bezier(.34, 1.4, .64, 1);
+
+  --radius-panel: 16px; --radius-card: 12px; --radius-control: 10px; --radius-pill: 999px;
+
+  /* 图表系列色：语义固定，色相不变；浅色底只调明度（见 porcelain 块） */
+  --chart-in: #8B7CF6; --chart-out: #4FD1C5; --chart-cache: #7AA2F7; --chart-cost: #F0A868;
+}
+
+/* ═══ 2. FLAT ═════════════════════════════════════════════════ */
+html[data-theme="flat"] {
+  --bg: #0B0C10; --surface: #12141C; --surface-2: #181B24; --surface-3: #1F2330;
+  --outline: #232733; --outline-strong: #2E3342;
+  --text: #EDEFF5; --muted: #8A90A3; --subtle: #6B7280;
+  --primary: #8B7CF6; --cost: #F0A868; --ok: #4FD1C5; --error: #F2668B;
+  --card-bg: var(--surface);
+  --card-border: 1px solid var(--outline);
+  --card-blur: none; --card-ring: none; --card-shadow: none; --card-lift: none;
+  --inset-bg: var(--surface-2); --surface-solid: #12141C;
+  --ambient: 0; --noise: 0;
+  --chart-grid: #232733;
+  --radius-panel: 16px;
+}
+
+/* ═══ 3. JELLY · 深果冻 ════════════════════════════════════════
+   复刻要点（缺一层就会掉成"塑料卡"）：
+   ① 环境光场：极低饱和冷色斑，静态不漂移
+   ② 噪点层：全局 3.5% 湍流噪点，玻璃的"手感"全靠它
+   ③ 边缘光：顶部内高光 + 边框渐变色散（青→白→靛），模拟折射
+   ④ 带色阴影：深蓝黑而非纯黑，纯黑会让卡"浮不起来"
+   ⑤ 半透明底：blur(22px) saturate(160%)，饱和度必须抬，否则发灰 */
+html[data-theme="jelly"] {
+  --bg: #070B11;
+  --surface: rgba(255, 255, 255, .05);
+  --surface-2: rgba(255, 255, 255, .03);
+  --surface-3: rgba(255, 255, 255, .075);
+  --outline: rgba(255, 255, 255, .09);
+  --outline-strong: rgba(255, 255, 255, .16);
+  --text: #EFF6FC; --muted: #A3B6CA; --subtle: #7C90A6;
+  --primary: #7DD3FC; --cost: #F5C77E; --ok: #5EEAD4; --error: #FB7185;
+  --card-bg: var(--surface);
+  --card-border: 1px solid transparent;
+  --card-blur: blur(22px) saturate(160%);
+  --card-ring:
+    inset 0 1px 0 rgba(255, 255, 255, .13),
+    inset 0 0 0 1px rgba(255, 255, 255, .04);
+  --card-shadow: 0 12px 32px -8px rgba(2, 8, 20, .55);
+  --card-lift: 0 18px 40px -10px rgba(2, 8, 20, .62);
+  --inset-bg: rgba(6, 10, 16, .5);
+  --surface-solid: #0C1219;
+  --ambient: 1;
+  --noise: .035;
+  --chart-grid: rgba(255, 255, 255, .09);
+  --radius-panel: 20px;
+}
+
+/* ═══ 4. PORCELAIN · 浅瓷（日间 / 强环境光） ═══════════════════
+   浅色不是把深色反相：底色走冷白（#F4F6F9）而非纯白，卡片纯白才分得开；
+   阴影更轻更散；图表色同色相压明度，保证 4.5:1。 */
+html[data-theme="porcelain"] {
+  --bg: #F4F6F9; --surface: #FFFFFF; --surface-2: #F0F3F7; --surface-3: #E7ECF3;
+  --outline: #DFE6EE; --outline-strong: #C4CFDD;
+  --text: #131820; --muted: #556173; --subtle: #6F7987;
+  --primary: #5B4CD6; --cost: #B26A12; --ok: #0F8A80; --error: #D02A4E;
+  --card-bg: var(--surface);
+  --card-border: 1px solid var(--outline);
+  --card-blur: none; --card-ring: none;
+  --card-shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 8px 20px -12px rgba(16, 24, 40, .16);
+  --card-lift: 0 2px 4px rgba(16, 24, 40, .06), 0 14px 28px -14px rgba(16, 24, 40, .22);
+  --inset-bg: var(--surface-2); --surface-solid: #FFFFFF;
+  --ambient: 0; --noise: 0;
+  --chart-grid: #D5DDE8;
+  --radius-panel: 14px;
+  --chart-in: #6C5CE0; --chart-out: #0F8A80; --chart-cache: #2F72C4; --chart-cost: #B26A12;
+}
+
+/* ═══ 5. CONTRAST ═════════════════════════════════════════════ */
+html[data-theme="contrast"] {
+  --bg: #000; --surface: #0A0A0A; --surface-2: #141414; --surface-3: #1E1E1E;
+  --outline: #3A3A3A; --outline-strong: #6B6B6B;
+  --text: #FFF; --muted: #CFCFCF; --subtle: #A6A6A6;
+  --primary: #A78BFA; --cost: #FFC46B; --ok: #34D399; --error: #FF6B81;
+  --card-bg: var(--surface); --card-border: 1px solid var(--outline-strong);
+  --card-blur: none; --card-ring: none; --card-shadow: none; --card-lift: none;
+  --inset-bg: var(--surface-2); --surface-solid: #0A0A0A;
+  --ambient: 0; --noise: 0;
+  --chart-grid: #3A3A3A;
+  --radius-panel: 8px;
+}
+
+/* ═══ 6. 基础 ═════════════════════════════════════════════════ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 13px/1.5 var(--font-sans); font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased; min-height: 100vh; position: relative;
+  transition: background var(--t-slow) var(--ease-out), color var(--t-slow) var(--ease-out);
+}
+/* 环境光场：三团静态冷斑。不漂移——盯盘时动的背景只会分神，还吃 GPU */
+body::before {
+  content: ""; position: fixed; inset: -10%; z-index: 0; pointer-events: none;
+  opacity: var(--ambient); transition: opacity var(--t-slow) var(--ease-out);
+  background:
+    radial-gradient(46vw 40vh at 14% 4%, rgba(56, 189, 248, .12), transparent 62%),
+    radial-gradient(40vw 36vh at 82% 10%, rgba(129, 140, 248, .10), transparent 64%),
+    radial-gradient(52vw 44vh at 62% 92%, rgba(45, 212, 191, .075), transparent 66%);
+  filter: blur(20px);
+}
+/* 噪点：玻璃的手感层。没有它，半透明卡就是"磨砂塑料" */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  opacity: var(--noise); transition: opacity var(--t-slow) var(--ease-out);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+.shell { position: relative; z-index: 1; display: flex; min-height: 100vh; }
+
+/* 侧栏：宽度过渡 + 折叠后文字淡出（不用 display:none，否则无法过渡） */
+.side {
+  width: 208px; flex: none; align-self: stretch; overflow: hidden;
+  border-right: 1px solid var(--outline);
+  padding: var(--space-4) var(--space-3);
+  display: flex; flex-direction: column; gap: 2px;
+  transition: width var(--t-slow) var(--ease-out), padding var(--t-slow) var(--ease-out);
+}
+.shell[data-collapsed="1"] .side { width: 60px; padding: var(--space-4) 10px; }
+.shell[data-collapsed="1"] .side .lbl { opacity: 0; pointer-events: none; }
+.lbl { transition: opacity var(--t-base) var(--ease-out); white-space: nowrap; }
+.brand { display: flex; align-items: center; gap: var(--space-2); padding: 8px 8px 16px; }
+.brand b { font-size: var(--text-sm); }
+.brand span { font: var(--text-2xs)/1 var(--font-mono); color: var(--subtle); }
+.dot { width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--ok); flex: none; }
+.nav {
+  display: flex; align-items: center; gap: var(--space-2); padding: 7px 8px;
+  border-radius: var(--radius-control); font-size: var(--text-xs); color: var(--muted);
+  cursor: pointer; transition: background var(--t-fast) var(--ease-out), color var(--t-fast);
+}
+.nav:hover { background: var(--surface-2); color: var(--text); }
+.nav.on { background: var(--surface-3); color: var(--text); }
+.nav .ic { width: 14px; text-align: center; flex: none; opacity: .85; }
+.side-foot { margin-top: auto; }
+
+/* 主区 */
+.main { flex: 1; min-width: 0; padding: var(--space-4) var(--space-6) var(--space-8); }
+.top { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.top h1 { font-size: var(--text-base); font-weight: 600; }
+.preview-ctl {
+  margin-left: auto; display: flex; align-items: center; gap: 6px;
+  font: var(--text-2xs)/1 var(--font-mono); color: var(--subtle);
+}
+.seg { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--outline);
+       border-radius: var(--radius-control); background: var(--surface-2); }
+.seg button {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  font: var(--text-2xs)/1 var(--font-sans); padding: 6px 8px; border-radius: 7px;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast);
+}
+.seg button.on { background: var(--surface-3); color: var(--text); }
+
+/* 卡片：材质三层（底色/模糊/边缘光）+ 阴影。hover 只抬 2px，不缩放 */
+.card, .panel {
+  position: relative; border-radius: var(--radius-panel);
+  -webkit-backdrop-filter: var(--card-blur); backdrop-filter: var(--card-blur);
+  box-shadow: var(--card-ring), var(--card-shadow);
+  transition: box-shadow var(--t-base) var(--ease-out),
+              transform var(--t-base) var(--ease-spring),
+              background var(--t-base) var(--ease-out);
+}
+.card { padding: var(--space-3); }
+/* 果冻的玻璃描边：border-box 渐变沿边一圈，青→白→靛，模拟玻璃折射的色散 */
+html[data-theme="jelly"] .card,
+html[data-theme="jelly"] .panel {
+  border: var(--card-border);
+  background:
+    linear-gradient(var(--card-bg), var(--card-bg)) padding-box,
+    linear-gradient(150deg,
+      rgba(125, 211, 252, .38) 0%,
+      rgba(255, 255, 255, .10) 32%,
+      rgba(255, 255, 255, .05) 62%,
+      rgba(167, 139, 250, .32) 100%) border-box;
+}
+html[data-theme="jelly"] .card:hover,
+html[data-theme="jelly"] .panel:hover {
+  box-shadow: var(--card-ring), var(--card-lift);
+  transform: translateY(-2px);
+}
+html[data-theme="flat"] .card, html[data-theme="flat"] .panel,
+html[data-theme="contrast"] .card, html[data-theme="contrast"] .panel,
+html[data-theme="porcelain"] .card, html[data-theme="porcelain"] .panel {
+  border: var(--card-border); background: var(--card-bg);
+}
+html[data-theme="porcelain"] .card:hover,
+html[data-theme="porcelain"] .panel:hover {
+  box-shadow: var(--card-ring), var(--card-lift); transform: translateY(-1px);
+}
+
+.cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--space-3); margin-bottom: var(--space-3); }
+.card .k { font-size: var(--text-2xs); color: var(--muted); margin-bottom: var(--space-1); }
+.card .v { font-size: var(--text-xl); font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+.card .v small { font-size: var(--text-xs); font-weight: 400; color: var(--muted); margin-left: 2px; }
+.card .d { font: var(--text-2xs)/1.4 var(--font-mono); color: var(--subtle); margin-top: var(--space-1); }
+
+.grid2 { display: grid; grid-template-columns: 3fr 2fr; gap: var(--space-3); }
+.panel { padding: var(--space-4); }
+/* 表格面板：玻璃主题下也不给模糊——密集数字必须落在实底 */
+html[data-theme="jelly"] .panel--solid {
+  background: var(--surface-solid) !important;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  border: 1px solid var(--outline); box-shadow: none;
+}
+html[data-theme="jelly"] .panel--solid:hover { transform: none; box-shadow: none; }
+.p-head { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-3); }
+.p-title { font-size: var(--text-xs); font-weight: 600; }
+.p-sub { font: var(--text-2xs)/1 var(--font-mono); color: var(--subtle); }
+.legend { margin-left: auto; display: flex; gap: var(--space-3); }
+.key { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-2xs); color: var(--muted); }
+.key i { width: 8px; height: 2px; border-radius: 1px; }
+svg { display: block; width: 100%; }
+
+table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+th { text-align: left; font-weight: 400; color: var(--subtle); font-size: var(--text-2xs);
+     padding: 6px 8px; border-bottom: 1px solid var(--outline); }
+td { padding: 7px 8px; border-bottom: 1px solid var(--outline); transition: background var(--t-fast); }
+tbody tr:hover td { background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td.n { text-align: right; font-family: var(--font-mono); }
+.m-dot { width: 7px; height: 7px; border-radius: var(--radius-pill); display: inline-block; margin-right: 6px; }
+
+/* 设置页外观面板 mock */
+.mockset { margin-top: var(--space-6); }
+.mockset h2 { font-size: var(--text-2xs); font-weight: 600; color: var(--subtle); margin-bottom: var(--space-2);
+              font-family: var(--font-mono); letter-spacing: .06em; }
+.set-panel { padding: var(--space-4); }
+.set-panel h3 { font-size: var(--text-sm); font-weight: 600; margin-bottom: 2px; }
+.set-panel p { font-size: var(--text-2xs); color: var(--subtle); margin-bottom: var(--space-3); }
+.themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); }
+.tcard {
+  border: 1px solid var(--outline); border-radius: var(--radius-card); padding: 7px;
+  cursor: pointer; background: none; text-align: left; color: inherit;
+  transition: border-color var(--t-fast), background var(--t-fast), transform var(--t-fast);
+}
+.tcard:hover { background: var(--surface-2); transform: translateY(-1px); }
+.tcard.on { border-color: var(--primary); }
+.thumb { height: 46px; border-radius: 7px; margin-bottom: 7px; position: relative; overflow: hidden;
+         border: 1px solid var(--outline); }
+.thumb i { position: absolute; border-radius: 3px; }
+.tcard .nm { font-size: var(--text-2xs); display: flex; align-items: center; gap: 5px; }
+.tcard .tag { margin-left: auto; font: 10px/1 var(--font-mono); color: var(--subtle); }
+
+/* 动效演示条 */
+.motion { margin-top: var(--space-3); display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); }
+.mo { padding: 10px 12px; border: 1px solid var(--outline); border-radius: var(--radius-card);
+      font-size: var(--text-2xs); color: var(--muted); background: var(--surface-2); }
+.mo b { display: block; color: var(--text); font-size: var(--text-xs); margin-bottom: 3px; }
+.mo .demo { margin-top: 8px; height: 20px; border-radius: 6px; background: var(--primary); opacity: .75;
+            transform-origin: left; animation: grow 1.2s var(--ease-out) infinite alternate; }
+@keyframes grow { from { transform: scaleX(.22); } to { transform: scaleX(1); } }
+
+.hint { margin-top: var(--space-4); font-size: var(--text-2xs); color: var(--subtle); line-height: 1.75; }
+.hint b { color: var(--muted); font-weight: 600; }
+code { font-family: var(--font-mono); font-size: 10.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition-duration: .01ms !important; }
+}
+@media (max-width: 1180px) {
+  .cards { grid-template-columns: repeat(3, 1fr); }
+  .grid2 { grid-template-columns: 1fr; }
+  .themes { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 860px) {
+  .side { width: 160px; }
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  .main { padding: var(--space-3) var(--space-3) var(--space-6); }
+  .motion { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="shell" id="shell">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span><b class="lbl">CCProxy</b><span class="lbl">v0.7.5</span></div>
+    <div class="nav on"><span class="ic">◧</span><span class="lbl">概览</span></div>
+    <div class="nav"><span class="ic">≡</span><span class="lbl">请求明细</span></div>
+    <div class="nav"><span class="ic">▤</span><span class="lbl">日志</span></div>
+    <div class="nav"><span class="ic">⚙</span><span class="lbl">设置</span></div>
+    <div class="side-foot">
+      <div class="nav" id="btn-collapse"><span class="ic">«</span><span class="lbl">折叠侧栏</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <h1>概览</h1>
+      <div class="preview-ctl">
+        <span>预览（线上放设置页）</span>
+        <div class="seg" id="seg">
+          <button data-t="flat">扁平</button>
+          <button data-t="jelly" class="on">果冻</button>
+          <button data-t="porcelain">浅瓷</button>
+          <button data-t="contrast">高对比</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="cards" id="cards"></div>
+
+    <div class="grid2">
+      <section class="panel">
+        <div class="p-head">
+          <span class="p-title">Token 用量</span><span class="p-sub">24 桶 · 每小时</span>
+          <div class="legend">
+            <span class="key"><i style="background:var(--chart-in)"></i>输入</span>
+            <span class="key"><i style="background:var(--chart-out)"></i>输出</span>
+            <span class="key"><i style="background:var(--chart-cache)"></i>缓存读</span>
+          </div>
+        </div>
+        <svg id="bars" viewBox="0 0 640 190" preserveAspectRatio="none"></svg>
+      </section>
+
+      <section class="panel panel--solid">
+        <div class="p-head"><span class="p-title">模型分布</span><span class="p-sub">按费用</span></div>
+        <table>
+          <thead><tr><th>模型</th><th style="text-align:right">请求</th><th style="text-align:right">费用</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <section class="mockset">
+      <h2>设置 · 外观（mock）</h2>
+      <div class="panel set-panel">
+        <h3>主题</h3>
+        <p>立即生效，存本机；不写入 ccproxy.json，不改变代理行为。</p>
+        <div class="themes" id="themes"></div>
+      </div>
+    </section>
+
+    <div class="motion">
+      <div class="mo"><b>数字滚动</b>值变化 220ms 补间，不跳变<span class="demo"></span></div>
+      <div class="mo"><b>图表绘制</b>换时间范围时 clip 从左展开 320ms</div>
+      <div class="mo"><b>主题切换</b>跨 280ms 交叉淡入（无 View Transitions 则直切）</div>
+    </div>
+
+    <p class="hint">
+      <b>深果冻复刻的五层</b>　环境光场（静态三团）· 全局噪点 3.5% · 边缘色散描边（青→白→靛渐变框）·
+      带色阴影（深蓝黑，非纯黑）· 半透明底 <code>blur(22px) saturate(160%)</code>。缺任意一层都会掉成"磨砂塑料"。
+      <br>
+      <b>动效定位</b>　取果冻项目的顺滑感（缓动与时长），不取它的循环动画与光脉冲。位移 ≤2px、时长 ≤320ms、
+      hover 用 spring、其余 ease-out；<code>prefers-reduced-motion</code> 全关。
+      <br>
+      <b>浅瓷的坑</b>　不是深色反相：底 <code>#F4F6F9</code> + 纯白卡片才分得开；阴影更轻更散；
+      图表色同色相压明度（紫 <code>#6C5CE0</code>、青 <code>#0F8A80</code>）才够 4.5:1。
+    </p>
+  </main>
+</div>
+
+<script>
+(function () {
+  var N = 24, data = [];
+  for (var i = 0; i < N; i++) {
+    var t = i / (N - 1);
+    data.push({
+      a: .35 + .5 * Math.abs(Math.sin(i * .7)) * (.6 + t * .4),
+      b: .18 + .3 * Math.abs(Math.cos(i * .55)),
+      c: .22 + .55 * Math.abs(Math.sin(i * .33 + 1))
+    });
+  }
+  var max = 0;
+  data.forEach(function (d) { max = Math.max(max, d.a + d.b + d.c); });
+  var W = 640, H = 190, padL = 4, padB = 14, padT = 4;
+  var pw = W - padL * 2, ph = H - padB - padT, slot = pw / N, bw = Math.max(3, slot * .55);
+  var C = { in: "var(--chart-in)", out: "var(--chart-out)", cache: "var(--chart-cache)", grid: "var(--chart-grid)" };
+  var el = function (t, a, p) {
+    var n = document.createElementNS("http://www.w3.org/2000/svg", t);
+    for (var k in a) n.setAttribute(k, a[k]);
+    p.appendChild(n); return n;
+  };
+  var svg = document.getElementById("bars");
+  for (var g = 0; g <= 3; g++) {
+    var y = padT + ph * g / 3;
+    el("line", { x1: padL, y1: y, x2: W - padL, y2: y, stroke: C.grid, "stroke-width": 1 }, svg);
+  }
+  data.forEach(function (d, i) {
+    var x = padL + slot * i + (slot - bw) / 2, base = padT + ph;
+    ["c", "b", "a"].forEach(function (k) {
+      var h = ph * d[k] / max;
+      base -= h;
+      el("rect", { x: x, y: base, width: bw, height: Math.max(0, h), rx: 1,
+        fill: k === "a" ? C.in : k === "b" ? C.out : C.cache }, svg);
+    });
+  });
+
+  var pal = ["var(--chart-in)", "var(--chart-out)", "var(--chart-cache)", "var(--chart-cost)"];
+  var models = [["step-5-preview", "48,120", "¥ 18.42"], ["MiniMax-M3.1-Flash", "21,044", "¥ 4.06"],
+                ["Deepseek-V4.1-Flash", "9,317", "¥ 1.88"], ["Kimi-K2.8-Preview", "3,902", "¥ 0.74"]];
+  document.getElementById("rows").innerHTML = models.map(function (m, i) {
+    return "<tr><td><i class='m-dot' style='background:" + pal[i] + "'></i>" + m[0] +
+      "</td><td class='n'>" + m[1] + "</td><td class='n'>" + m[2] + "</td></tr>";
+  }).join("");
+
+  var cards = [["请求", "82,383", "ok 82,012 / 失败 371"], ["输入 Token", "41.2", "M"],
+    ["输出 Token", "6.84", "M"], ["缓存读", "28.9", "M · 命中 87%"],
+    ["费用", "¥ 25.10", "今日"], ["P95 延迟", "12.4", "s"]];
+  document.getElementById("cards").innerHTML = cards.map(function (c) {
+    var unit = c[2].length <= 1;
+    return "<div class='card'><div class='k'>" + c[0] + "</div><div class='v'>" + c[1] +
+      (unit ? "<small>" + c[2] + "</small>" : "") + "</div>" +
+      (unit ? "" : "<div class='d'>" + c[2] + "</div>") + "</div>";
+  }).join("");
+
+  var meta = [
+    { id: "flat", nm: "扁平", tag: "默认", bg: "#12141C", ln: "#232733", hi: "#8B7CF6" },
+    { id: "jelly", nm: "深果冻", tag: "玻璃", bg: "#0E1620", ln: "rgba(255,255,255,.16)", hi: "#7DD3FC" },
+    { id: "porcelain", nm: "浅瓷", tag: "日间", bg: "#FFFFFF", ln: "#E2E8F0", hi: "#5B4CD6" },
+    { id: "contrast", nm: "高对比", tag: "无障碍", bg: "#0A0A0A", ln: "#6B6B6B", hi: "#A78BFA" }
+  ];
+  document.getElementById("themes").innerHTML = meta.map(function (m) {
+    return "<button class='tcard' data-t='" + m.id + "'>" +
+      "<div class='thumb' style='background:" + m.bg + ";border-color:" + m.ln + "'>" +
+      "<i style='left:6px;top:6px;width:34%;height:9px;background:" + m.hi + ";opacity:.85'></i>" +
+      "<i style='left:6px;top:20px;width:74%;height:5px;background:" + m.ln + "'></i>" +
+      "<i style='left:6px;top:29px;width:56%;height:5px;background:" + m.ln + "'></i>" +
+      "</div><div class='nm'>" + m.nm + "<span class='tag'>" + m.tag + "</span></div></button>";
+  }).join("");
+
+  var html = document.documentElement, seg = document.getElementById("seg");
+  function paint(t) {
+    html.dataset.theme = t;
+    Array.prototype.forEach.call(seg.children, function (b) { b.classList.toggle("on", b.dataset.t === t); });
+    Array.prototype.forEach.call(document.querySelectorAll(".tcard"), function (b) {
+      b.classList.toggle("on", b.dataset.t === t);
+    });
+    try { localStorage.setItem("ccproxy.theme", t); } catch (e) {}
+  }
+  function apply(t) {
+    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return paint(t);
+    document.startViewTransition(function () { paint(t); });
+  }
+  seg.addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (b) apply(b.dataset.t);
+  });
+  document.getElementById("themes").addEventListener("click", function (e) {
+    var b = e.target.closest(".tcard"); if (b) apply(b.dataset.t);
+  });
+  document.getElementById("btn-collapse").addEventListener("click", function () {
+    var s = document.getElementById("shell");
+    s.dataset.collapsed = s.dataset.collapsed === "1" ? "0" : "1";
+  });
+
+  var q = (location.search.match(/[?&]theme=([a-z]+)/) || [])[1];
+  var saved = null; try { saved = localStorage.getItem("ccproxy.theme"); } catch (e) {}
+  if (q) paint(q); else if (saved) paint(saved);
+})();
+</script>
+</body>
+</html>

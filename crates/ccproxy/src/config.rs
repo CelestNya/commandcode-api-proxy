@@ -216,18 +216,15 @@ impl FileConfig {
     }
 }
 
-/// The config file for this process: `ccproxy.json` beside the executable.
+/// The config file the proxy reads: `ccproxy.json` beside its own executable.
 ///
-/// Returns an empty config when the file is absent or unreadable — a missing
-/// file is the normal case, not an error, and a broken one must not stop the
-/// proxy from serving (the environment still applies).
-/// The config file the proxy reads: `ccproxy.json` next to the executable.
-/// Exposed because the tray's image-compress toggle edits this same file.
+/// Delegates to [`crate::settings::config_path`], which is the single
+/// definition of the path — the tray resolves the same file through
+/// [`crate::settings::path_for_proxy`]. Two independent answers here is how the
+/// tray's toggle came to rewrite a file the proxy never read.
 #[must_use]
 pub fn config_file_path() -> Option<std::path::PathBuf> {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("ccproxy.json")))
+    crate::settings::config_path()
 }
 
 /// The image-compress default the tray menu should reflect, resolved exactly
@@ -247,7 +244,17 @@ pub fn load_file_config() -> FileConfig {
     let Some(path) = path else {
         return FileConfig::default();
     };
-    match std::fs::read_to_string(&path) {
+    load_file_config_at(&path)
+}
+
+/// Read the config file at `path`, or an empty config when it is missing or
+/// unreadable.
+///
+/// The explicit-path form exists for the tray: it supervises a proxy that
+/// lives one directory below it, so `current_exe` would name the wrong file.
+#[must_use]
+pub fn load_file_config_at(path: &std::path::Path) -> FileConfig {
+    match std::fs::read_to_string(path) {
         Ok(text) => FileConfig::parse(&text),
         Err(_) => FileConfig::default(),
     }

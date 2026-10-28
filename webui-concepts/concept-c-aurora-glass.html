@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>概念 C · 暗夜辉光 — cc-proxy WebUI</title>
+<!-- 静态概念稿：数据为示例，仅用于确认视觉效果与布局，不含业务逻辑 -->
+<style>
+:root{
+  --bg:#0B0C10; --surface:rgba(255,255,255,.04); --surface-solid:#12141C;
+  --surface-high:rgba(255,255,255,.07);
+  --outline:rgba(255,255,255,.08); --outline-strong:rgba(255,255,255,.16);
+  --text:#EDEFF5; --muted:#8A90A3;
+  --primary:#8B7CF6; --primary-2:#4FD1C5; --cost:#F0A868;
+  --ok:#4FD1C5; --warn:#F0A868; --error:#F2668B; --interrupted:#8B7CF6; --aborted:#6478D8;
+  --mono:"JetBrains Mono","Sarasa Mono",ui-monospace,Consolas,monospace;
+  --sans:Inter,"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",system-ui,sans-serif;
+  --r-panel:16px; --r-card:12px; --r-ctl:10px; --r-pill:999px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{height:100%}
+body{background:var(--bg);color:var(--text);min-height:100%;font:14px/1.6 var(--sans);
+  font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(640px 420px at 12% -8%, rgba(139,124,246,.16), transparent 62%),
+    radial-gradient(720px 520px at 108% 108%, rgba(79,209,197,.11), transparent 60%),
+    radial-gradient(480px 380px at 85% 8%, rgba(139,124,246,.06), transparent 60%);
+}
+::selection{background:rgba(139,124,246,.35)}
+.shell{display:flex;min-height:100vh;position:relative;z-index:1}
+
+/* ── sidebar ── */
+.sidebar{width:240px;flex:none;background:var(--surface);backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);border-right:1px solid var(--outline);
+  display:flex;flex-direction:column;padding:20px 14px;position:sticky;top:0;height:100vh}
+.side-logo{display:flex;align-items:center;gap:11px;padding:2px 10px 20px}
+.side-logo svg{width:30px;height:30px;flex:none;filter:drop-shadow(0 0 10px rgba(139,124,246,.5))}
+.side-logo .name{font-weight:700;font-size:16px;letter-spacing:.2px}
+.side-logo .name i{font-style:normal;color:var(--primary)}
+.side-nav{display:flex;flex-direction:column;gap:6px}
+.nav-item{display:flex;align-items:center;gap:11px;color:var(--muted);text-decoration:none;font-size:14px;
+  padding:11px 14px;border-radius:var(--r-pill);min-height:46px;cursor:pointer;border:1px solid transparent;
+  transition:all .2s ease}
+.nav-item svg{width:19px;height:19px;flex:none}
+.nav-item:hover{color:var(--text);background:var(--surface-high)}
+.nav-item.active{color:var(--text);background:rgba(139,124,246,.14);border-color:rgba(139,124,246,.35);
+  box-shadow:0 0 20px rgba(139,124,246,.18)}
+.nav-item.active svg{color:var(--primary)}
+.side-foot{margin-top:auto;color:var(--muted);font-size:12px;padding:14px 10px 0;
+  border-top:1px solid var(--outline);line-height:1.7;font-family:var(--mono)}
+
+/* ── topbar ── */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:10px;padding:12px 28px;background:rgba(11,12,16,.7);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--outline);position:sticky;top:0;z-index:30}
+.app-name{font-size:15px;font-weight:650;letter-spacing:.2px}
+.app-name em{font-style:normal;color:var(--primary)}
+.app-name small{color:var(--muted);font-weight:400;font-size:11px;margin-left:8px;font-family:var(--mono)}
+.spacer{flex:1}
+.chip{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);
+  font-family:var(--mono);background:var(--surface);border:1px solid var(--outline);
+  border-radius:var(--r-pill);padding:6px 13px;white-space:nowrap;backdrop-filter:blur(8px)}
+.chip b{color:var(--text);font-weight:600}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.chip.on b{color:var(--ok)}
+
+.content{flex:1;padding:28px;max-width:1200px;width:100%;margin:0 auto}
+.view{display:none}
+.view.active{display:block;animation:viewIn .24s ease}
+@keyframes viewIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ── metric cards ── */
+.metric-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.mcard{background:var(--surface);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--outline);border-radius:var(--r-panel);padding:18px 20px 16px;
+  transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}
+.mcard:hover{transform:translateY(-3px);border-color:var(--outline-strong);
+  box-shadow:0 12px 32px rgba(0,0,0,.35),0 0 24px rgba(139,124,246,.08)}
+.mcard .mlabel{color:var(--muted);font-size:13px}
+.mcard .mvalue{font-size:30px;font-weight:700;margin-top:8px;font-family:var(--mono);line-height:1.1}
+.mcard .msub{color:var(--muted);font-size:12.5px;margin-top:8px;font-family:var(--mono)}
+.mcard .msub em{font-style:normal;color:var(--text)}
+.mcard.accent .mvalue{color:var(--cost)}
+.mcard.violet .mvalue{color:var(--primary);text-shadow:0 0 24px rgba(139,124,246,.4)}
+
+/* ── panels ── */
+.ov-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-top:16px}
+.panel{background:var(--surface);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--outline);border-radius:var(--r-panel);padding:20px 22px}
+.panel h2{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.5px;
+  margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.panel h2 .extra{margin-left:auto;display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.pill{font-size:12px;color:var(--muted);border:1px solid var(--outline);border-radius:var(--r-pill);
+  padding:5px 12px;cursor:pointer;background:transparent;transition:all .2s ease}
+.pill:hover{color:var(--text);border-color:var(--outline-strong)}
+.pill.active{color:var(--text);border-color:rgba(139,124,246,.5);background:rgba(139,124,246,.14);
+  box-shadow:0 0 14px rgba(139,124,246,.15)}
+.mini-input{background:var(--surface-high);border:1px solid var(--outline);border-radius:var(--r-pill);
+  color:var(--text);font-size:11.5px;padding:5px 12px}
+.btn-mini{background:var(--surface-high);color:var(--text);border:1px solid var(--outline);
+  border-radius:var(--r-pill);font-size:12px;padding:5px 14px;cursor:pointer;transition:all .2s ease}
+.btn-mini:hover{border-color:rgba(139,124,246,.5);color:var(--text);box-shadow:0 0 14px rgba(139,124,246,.15)}
+
+/* ── chart ── */
+.chart-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:12px;font-family:var(--mono)}
+.chart-legend span{display:inline-flex;align-items:center;gap:7px}
+.chart-legend i{width:16px;height:3px;border-radius:2px;display:inline-block}
+.trend{width:100%;height:auto;display:block}
+.axis{fill:var(--muted);font-size:10.5px;font-family:var(--mono)}
+.grid-l{stroke:rgba(255,255,255,.06);stroke-width:1}
+.glow-v{filter:drop-shadow(0 0 7px rgba(139,124,246,.5))}
+.glow-t{filter:drop-shadow(0 0 7px rgba(79,209,197,.45))}
+@keyframes dotPulse{0%,100%{opacity:.35}50%{opacity:1}}
+.pulse{animation:dotPulse 2.4s ease-in-out infinite}
+.pulse.d1{animation-delay:.4s}.pulse.d2{animation-delay:.8s}.pulse.d3{animation-delay:1.2s}.pulse.d4{animation-delay:1.6s}
+
+/* ── donut ── */
+.donut-wrap{display:flex;flex-direction:column;align-items:center;gap:14px}
+.donut-seg{transition:stroke-width .2s ease;cursor:pointer}
+.donut-seg:hover{stroke-width:26}
+.donut-legend{width:100%;display:flex;flex-direction:column;gap:7px;font-size:12.5px;font-family:var(--mono)}
+.donut-legend .row{display:flex;align-items:center;gap:9px}
+.donut-legend i{width:10px;height:10px;border-radius:3px;flex:none}
+.donut-legend .nm{color:var(--text);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.donut-legend .pct{color:var(--muted);width:44px;text-align:right}
+
+/* ── mini cards / filterbar / table ── */
+.mini-cards{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:16px}
+.mini-card{background:var(--surface);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--outline);border-radius:var(--r-card);padding:14px 16px;transition:transform .2s ease}
+.mini-card:hover{transform:translateY(-2px)}
+.mini-card .mc-label{color:var(--muted);font-size:12.5px}
+.mini-card .mc-value{font-size:24px;font-weight:700;margin-top:5px;font-family:var(--mono);line-height:1.1}
+.filterbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--outline);border-radius:var(--r-card);padding:14px 16px;margin-bottom:16px}
+.filterbar select,.filterbar button,.filterbar input{background:var(--surface-high);color:var(--text);
+  border:1px solid var(--outline);border-radius:var(--r-ctl);padding:8px 14px;font-size:13px;
+  font-family:inherit;min-height:38px}
+.filterbar select{appearance:none;-webkit-appearance:none;padding-right:32px;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A90A3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center}
+.filterbar button{cursor:pointer;color:var(--muted)}
+.filterbar button:hover{color:var(--text);border-color:var(--outline-strong)}
+.filterbar button.active{color:var(--text);background:rgba(139,124,246,.15);border-color:rgba(139,124,246,.4)}
+.filterbar .fgrow{flex:1}
+.filterbar label{color:var(--muted);font-size:12.5px}
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.14) transparent}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:var(--r-pill)}
+
+.table-wrap{background:var(--surface);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--outline);border-radius:var(--r-card)}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+th,td{padding:11px 12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+th{background:rgba(255,255,255,.03);color:var(--muted);font-weight:500;font-size:12px;
+  letter-spacing:.3px;box-shadow:inset 0 -1px 0 var(--outline)}
+thead tr:first-child th:first-child{border-top-left-radius:var(--r-card)}
+thead tr:first-child th:last-child{border-top-right-radius:var(--r-card)}
+td{border-top:1px solid var(--outline)}
+tr{cursor:pointer;transition:background .15s ease}
+tr:hover td{background:rgba(255,255,255,.035)}
+tr.selected td{background:rgba(139,124,246,.09)}
+.badge{display:inline-block;padding:3px 10px;border-radius:var(--r-pill);font-size:12px;font-weight:600;
+  font-family:var(--mono)}
+.badge.ok{color:var(--ok);background:rgba(79,209,197,.12)}
+.badge.error{color:var(--error);background:rgba(242,102,139,.12)}
+.badge.aborted{color:var(--aborted);background:rgba(100,120,216,.15)}
+.badge.interrupted{color:var(--interrupted);background:rgba(139,124,246,.14)}
+.err-tag{color:var(--error);font-size:11px;display:block;margin-top:2px;font-family:var(--mono)}
+.muted{color:var(--muted)}
+.cost-cell{color:var(--primary);font-weight:700;font-family:var(--mono);text-align:right}
+.rid-cell{color:var(--primary);font-family:var(--mono);font-size:12px}
+.tokens-cell .up{color:var(--ok)}
+.tokens-cell .down{color:var(--cost)}
+.tokens-cell small{display:block;color:var(--muted);font-size:11px}
+.pager{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:12px 16px;
+  border-top:1px solid var(--outline);font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+.pager .pg-btn,.pager select{background:var(--surface-high);color:var(--text);border:1px solid var(--outline);
+  border-radius:var(--r-ctl);padding:7px 13px;font-size:12.5px;font-family:var(--mono);min-height:36px;cursor:pointer}
+.pager .pg-btn.active{background:rgba(139,124,246,.16);color:var(--text);border-color:rgba(139,124,246,.4)}
+.pager .pg-count{margin-right:auto}
+.empty{padding:48px;text-align:center;color:var(--muted)}
+
+/* ── drawer ── */
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(460px,92vw);
+  background:rgba(18,20,28,.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-left:1px solid var(--outline-strong);box-shadow:-20px 0 60px rgba(0,0,0,.5);z-index:50;
+  display:flex;flex-direction:column;animation:drawerIn .24s cubic-bezier(.4,0,.2,1)}
+@keyframes drawerIn{from{transform:translateX(28px);opacity:0}to{transform:none;opacity:1}}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;
+  border-bottom:1px solid var(--outline);font-size:15px;font-family:var(--mono)}
+#drawer-body{padding:6px 20px 28px;overflow-y:auto;flex:1}
+#drawer-body h3{font-size:14px;margin:16px 0 10px;font-family:var(--mono);color:var(--primary)}
+#drawer-body h4{font-size:12.5px;color:var(--muted);margin:18px 0 10px;letter-spacing:.4px;font-family:var(--mono)}
+.drawer-table{width:100%;border-collapse:collapse;font-size:13px}
+.drawer-table td{border:none;border-bottom:1px solid var(--outline);padding:8px 4px}
+.drawer-table td:first-child{color:var(--muted);width:40%;font-family:var(--mono);font-size:12px}
+.cost-formula{background:rgba(255,255,255,.04);border:1px solid var(--outline);border-radius:var(--r-card);
+  padding:14px 16px;font-family:var(--mono);font-size:12.5px}
+.cost-formula .ln{display:flex;justify-content:space-between;padding:5px 0;color:var(--muted)}
+.cost-formula .ln b{color:var(--text);font-weight:600}
+.cost-formula .total{display:flex;justify-content:space-between;margin-top:9px;padding-top:9px;
+  border-top:1px dashed var(--outline-strong);font-weight:700}
+.cost-formula .total b{color:var(--cost);font-size:16px}
+.attempt-chain{margin:0;padding-left:22px;font-size:12.5px;font-family:var(--mono)}
+.attempt-chain li{margin:7px 0;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.drawer-tools{display:flex;flex-wrap:wrap;gap:7px}
+.tool-chip{background:var(--surface-high);border:1px solid var(--outline);border-radius:var(--r-pill);
+  padding:4px 12px;font-size:12px;font-family:var(--mono)}
+
+/* ── logs ── */
+.logbar{display:flex;align-items:center;gap:10px;margin:12px 0 10px;color:var(--muted);
+  font-size:12.5px;min-width:0;font-family:var(--mono)}
+.logbar .logpath{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.logbar .logmeta{margin-left:auto;flex:none}
+.logpane{background:rgba(5,6,9,.75);border:1px solid var(--outline);border-radius:var(--r-panel);
+  padding:14px 16px;height:calc(100vh - 300px);min-height:240px;overflow:auto;
+  font-family:var(--mono);font-size:12.5px;line-height:1.75;white-space:pre;tab-size:4}
+.logpane .ln{display:block}
+.logpane .lv-error{color:var(--error)}
+.logpane .lv-warn{color:var(--warn)}
+.logpane .lv-info{color:var(--text)}
+.logpane .lv-debug{color:var(--muted)}
+.logpane .ts{color:var(--muted)}
+.logpane .cost{color:var(--cost)}
+
+@media (max-width:900px){
+  .sidebar{display:none}
+  .ov-grid{grid-template-columns:1fr}
+  .metric-cards{grid-template-columns:repeat(2,1fr)}
+  .mini-cards{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="side-logo">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#12141C" stroke="rgba(255,255,255,.16)"/><path d="M8 10l8 6-8 6z" fill="#8B7CF6"/><path d="M17 22h7" stroke="#D3E3FD" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <span class="name">cc-<i>proxy</i></span>
+    </div>
+    <nav class="side-nav">
+      <a class="nav-item active" data-view="stats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+        <span>概览</span></a>
+      <a class="nav-item" data-view="attempts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="18" r="1.2" fill="currentColor"/></svg>
+        <span>明细</span></a>
+      <a class="nav-item" data-view="logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9L20 9.5v9A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5z"/><path d="M14 4v5.5h5.5M8 13h8M8 16.5h5"/></svg>
+        <span>日志</span></a>
+    </nav>
+    <div class="side-foot">本机代理服务<br>127.0.0.1:8787 · 数据本机存储</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="app-name"><em>cc-proxy</em><small>v2.4.1</small></div>
+      <div class="spacer"></div>
+      <span class="chip on"><span class="dot"></span><b>已连接</b></span>
+      <span class="chip">消耗 <b>¥12.34</b></span>
+      <span class="chip">内存 <b>84MB</b></span>
+      <span class="chip">运行 <b>3h12m</b></span>
+    </header>
+
+    <main class="content">
+      <!-- ===== 概览 ===== -->
+      <section class="view active" id="view-stats">
+        <div class="metric-cards">
+          <div class="mcard"><div class="mlabel">窗口请求</div><div class="mvalue">1,284</div><div class="msub">总计 <em>8,932</em></div></div>
+          <div class="mcard violet"><div class="mlabel">窗口 Token</div><div class="mvalue">2.41M</div><div class="msub">输入 <em>1.80M</em>（含缓存 1.21M）/ 输出 <em>0.61M</em></div></div>
+          <div class="mcard accent"><div class="mlabel">费用</div><div class="mvalue">¥12.34</div><div class="msub">终身 <em>¥86.42</em></div></div>
+          <div class="mcard"><div class="mlabel">缓存命中率</div><div class="mvalue">67.3%</div><div class="msub">窗口内命中 / 输入 · 节省 <em>¥0.86</em></div></div>
+        </div>
+
+        <div class="ov-grid">
+          <div class="panel">
+            <h2>Token &amp; 费用趋势
+              <span class="extra">
+                <a class="pill">近1小时</a><a class="pill active">24小时</a><a class="pill">7天</a><a class="pill">30天</a>
+                <input class="mini-input" type="datetime-local"><input class="mini-input" type="datetime-local">
+                <button class="btn-mini">应用</button>
+              </span>
+            </h2>
+            <div class="chart-legend">
+              <span><i style="background:linear-gradient(90deg,#8B7CF6,#4FD1C5)"></i>输入 Token</span>
+              <span><i style="background:#F0A868"></i>输出 Token</span>
+            </div>
+            <svg class="trend" viewBox="0 0 880 280" preserveAspectRatio="xMidYMid meet">
+              <line class="grid-l" x1="20" y1="40" x2="860" y2="40"/>
+              <line class="grid-l" x1="20" y1="90" x2="860" y2="90"/>
+              <line class="grid-l" x1="20" y1="140" x2="860" y2="140"/>
+              <line class="grid-l" x1="20" y1="190" x2="860" y2="190"/>
+              <line class="grid-l" x1="20" y1="240" x2="860" y2="240"/>
+              <text class="axis" x="4" y="44">40k</text><text class="axis" x="4" y="94">30k</text>
+              <text class="axis" x="4" y="144">20k</text><text class="axis" x="4" y="194">10k</text>
+              <text class="axis" x="4" y="244">0</text>
+              <text class="axis" x="20" y="262">00:00</text><text class="axis" x="215" y="262">06:00</text>
+              <text class="axis" x="425" y="262">12:00</text><text class="axis" x="640" y="262">18:00</text>
+              <text class="axis" x="830" y="262">24:00</text>
+              <defs>
+                <linearGradient id="cArea" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#8B7CF6" stop-opacity=".3"/>
+                  <stop offset="1" stop-color="#8B7CF6" stop-opacity="0"/>
+                </linearGradient>
+                <linearGradient id="cLine" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#8B7CF6"/>
+                  <stop offset="1" stop-color="#4FD1C5"/>
+                </linearGradient>
+              </defs>
+              <path d="M20,205 C60,196 100,210 140,172 S220,150 260,128 S340,106 380,92 S460,80 500,98 S580,132 620,114 S700,86 740,76 S820,70 860,82 L860,244 L20,244 Z" fill="url(#cArea)"/>
+              <path class="glow-v" d="M20,205 C60,196 100,210 140,172 S220,150 260,128 S340,106 380,92 S460,80 500,98 S580,132 620,114 S700,86 740,76 S820,70 860,82" fill="none" stroke="url(#cLine)" stroke-width="2.5" stroke-linecap="round"/>
+              <path class="glow-t" d="M20,230 C60,224 100,232 140,214 S220,204 260,196 S340,184 380,180 S460,172 500,186 S580,206 620,200 S700,190 740,184 S820,180 860,186" fill="none" stroke="#F0A868" stroke-width="1.8" stroke-dasharray="1 6" stroke-linecap="round"/>
+              <g fill="#8B7CF6">
+                <circle class="pulse" cx="260" cy="128" r="4"/>
+                <circle class="pulse d1" cx="380" cy="92" r="4"/>
+                <circle class="pulse d2" cx="500" cy="98" r="4"/>
+                <circle class="pulse d3" cx="620" cy="114" r="4"/>
+                <circle class="pulse d4" cx="860" cy="82" r="5" fill="#4FD1C5"/>
+              </g>
+            </svg>
+          </div>
+
+          <div class="panel">
+            <h2>费用分布</h2>
+            <div class="donut-wrap">
+              <svg viewBox="0 0 200 200" width="200" height="200">
+                <circle cx="100" cy="100" r="70" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="22"/>
+                <g transform="rotate(-90 100 100)" stroke-width="22" fill="none">
+                  <circle class="donut-seg" cx="100" cy="100" r="70" stroke="#8B7CF6" stroke-dasharray="176.3 263.5" stroke-dashoffset="0"/>
+                  <circle class="donut-seg" cx="100" cy="100" r="70" stroke="#4FD1C5" stroke-dasharray="114.8 325" stroke-dashoffset="-180.3"/>
+                  <circle class="donut-seg" cx="100" cy="100" r="70" stroke="#F0A868" stroke-dasharray="70.8 369" stroke-dashoffset="-299.1"/>
+                  <circle class="donut-seg" cx="100" cy="100" r="70" stroke="#6478D8" stroke-dasharray="40 399.8" stroke-dashoffset="-373.9"/>
+                  <circle class="donut-seg" cx="100" cy="100" r="70" stroke="rgba(255,255,255,.14)" stroke-dasharray="18 421.8" stroke-dashoffset="-417.9"/>
+                </g>
+                <text x="100" y="96" text-anchor="middle" fill="#F0A868" style="font-size:24px;font-weight:700;font-family:var(--mono)">¥12.34</text>
+                <text x="100" y="118" text-anchor="middle" fill="#8A90A3" style="font-size:11.5px;font-family:var(--mono)">窗口费用</text>
+              </svg>
+              <div class="donut-legend">
+                <div class="row"><i style="background:#8B7CF6"></i><span class="nm">deepseek-v4-pro</span><span class="pct">41%</span></div>
+                <div class="row"><i style="background:#4FD1C5"></i><span class="nm">glm-5.3</span><span class="pct">27%</span></div>
+                <div class="row"><i style="background:#F0A868"></i><span class="nm">kimi-k3</span><span class="pct">17%</span></div>
+                <div class="row"><i style="background:#6478D8"></i><span class="nm">qwen3.8-max</span><span class="pct">10%</span></div>
+                <div class="row"><i style="background:rgba(255,255,255,.14)"></i><span class="nm">其他 4 个模型</span><span class="pct">5%</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 明细 ===== -->
+      <section class="view" id="view-attempts">
+        <div class="mini-cards">
+          <div class="mini-card"><div class="mc-label">窗口请求</div><div class="mc-value">1,284</div></div>
+          <div class="mini-card"><div class="mc-label">Token</div><div class="mc-value">2.41M</div></div>
+          <div class="mini-card"><div class="mc-label">费用</div><div class="mc-value" style="color:var(--cost)">¥12.34</div></div>
+          <div class="mini-card"><div class="mc-label">成功率</div><div class="mc-value">98.2%</div></div>
+          <div class="mini-card"><div class="mc-label">平均延迟</div><div class="mc-value">1.1s</div></div>
+        </div>
+        <div class="filterbar">
+          <label>时段</label>
+          <input type="datetime-local" value="2026-10-17T12:00">
+          <input type="datetime-local" value="2026-10-18T12:00">
+          <button class="btn-mini">应用</button>
+          <label>模型</label>
+          <select><option>全部</option><option>deepseek-v4-pro</option><option>glm-5.3</option><option>kimi-k3</option></select>
+          <label>类型</label>
+          <select><option>全部</option><option>流式</option><option>非流式</option></select>
+          <label>状态</label>
+          <select><option>全部</option><option>ok</option><option>error</option><option>aborted</option><option>interrupted</option></select>
+          <input type="text" placeholder="关键词 / 请求 ID" style="min-width:160px">
+          <span class="fgrow"></span>
+          <button>刷新</button>
+          <button>重置</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <colgroup><col style="width:4%"><col style="width:13%"><col style="width:14%"><col style="width:6%"><col style="width:6%"><col style="width:9%"><col style="width:13%"><col style="width:10%"><col style="width:7%"><col style="width:9%"><col style="width:6%"></colgroup>
+            <thead><tr>
+              <th>#</th><th>请求 ID</th><th>模型</th><th>端点</th><th>类型</th><th>状态</th>
+              <th>TOKEN (入/出)</th><th>费用</th><th>延迟</th><th>时间</th><th>尝试</th>
+            </tr></thead>
+            <tbody>
+              <tr class="selected"><td>12</td><td class="rid-cell">req_a3f9c2</td><td>deepseek-v4-pro</td><td>/v1/msgs</td><td>流式</td><td><span class="badge ok">ok</span></td><td class="tokens-cell"><span class="up">12.0k</span> / <span class="down">3.2k</span><small>缓存 8.1k</small></td><td class="cost-cell">¥0.0352</td><td>1.2s</td><td>12:03:44</td><td>1</td></tr>
+              <tr><td>11</td><td class="rid-cell">req_9c1e4b</td><td>glm-5.3</td><td>/v1/msgs</td><td>流式</td><td><span class="badge error">error</span><span class="err-tag">http-429</span></td><td class="tokens-cell"><span class="up">8.0k</span> / <span class="down">0</span></td><td class="cost-cell">¥0.0000</td><td>0.4s</td><td>12:01:02</td><td>3</td></tr>
+              <tr><td>10</td><td class="rid-cell">req_77b2aa</td><td>kimi-k3</td><td>/v1/chat</td><td>非流式</td><td><span class="badge ok">ok</span></td><td class="tokens-cell"><span class="up">3.4k</span> / <span class="down">1.1k</span></td><td class="cost-cell">¥0.0086</td><td>0.9s</td><td>11:58:31</td><td>1</td></tr>
+              <tr><td>09</td><td class="rid-cell">req_5d0f31</td><td>qwen3.8-max</td><td>/v1/msgs</td><td>流式</td><td><span class="badge ok">ok</span></td><td class="tokens-cell"><span class="up">21.2k</span> / <span class="down">5.6k</span><small>缓存 18.4k</small></td><td class="cost-cell">¥0.0421</td><td>1.6s</td><td>11:55:12</td><td>1</td></tr>
+              <tr><td>08</td><td class="rid-cell">req_2a8e10</td><td>minimax-m3</td><td>/v1/chat</td><td>流式</td><td><span class="badge aborted">aborted</span></td><td class="tokens-cell"><span class="up">6.1k</span> / <span class="down">2.0k</span></td><td class="cost-cell">¥0.0148</td><td>2.3s</td><td>11:52:47</td><td>2</td></tr>
+              <tr><td>07</td><td class="rid-cell">req_c4199f</td><td>ds-v4-flash</td><td>/v1/msgs</td><td>流式</td><td><span class="badge interrupted">interrupted</span><span class="err-tag">idle-timeout</span></td><td class="tokens-cell"><span class="up">1.2k</span> / <span class="down">0.8k</span></td><td class="cost-cell">¥0.0004</td><td>2.0s</td><td>11:49:03</td><td>2</td></tr>
+            </tbody>
+          </table>
+          <div class="pager">
+            <span class="pg-count">共 1,284 条</span>
+            <button class="pg-btn">‹</button>
+            <button class="pg-btn active">1</button><button class="pg-btn">2</button><button class="pg-btn">3</button>
+            <span>…</span><button class="pg-btn">26</button>
+            <button class="pg-btn">›</button>
+            <select><option>每页 50</option><option>每页 100</option></select>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 日志 ===== -->
+      <section class="view" id="view-logs">
+        <div class="filterbar">
+          <label>日志</label>
+          <select><option>代理日志 proxy.log</option><option>托盘日志 tray.log</option></select>
+          <label class="lvl-filter" style="display:inline-flex;gap:8px;align-items:center">
+            <input type="checkbox" checked>DEBUG <input type="checkbox" checked>INFO
+            <input type="checkbox" checked>WARN <input type="checkbox" checked>ERROR
+          </label>
+          <span class="chip on"><span class="dot"></span><b>跟随中</b></span>
+          <span class="fgrow"></span>
+          <button class="active">自动滚动</button>
+          <button>刷新</button>
+        </div>
+        <div class="logbar">
+          <span class="logpath">service\logs\proxy.log</span>
+          <span class="logmeta">最后更新 12:03:44 · 8,120 行</span>
+        </div>
+        <div class="logpane">
+<span class="ln"><span class="ts">12:03:44.812</span> [INFO]  POST /v1/messages 200 1.2s model=deepseek-v4-pro tokens=12,032/3,214 <span class="cost">¥0.0352</span></span>
+<span class="ln"><span class="ts">12:03:41.205</span> [WARN]  idle-timeout req_7f2a91 流开始后中断，尝试续写（第 1 次）</span>
+<span class="ln"><span class="ts">12:03:38.977</span> [ERROR] http-429 req_9c1e4b 上游限流，60s 后重试</span>
+<span class="ln"><span class="ts">12:03:30.114</span> [INFO]  GET /v1/models 200 3ms 客户端=claude-code</span>
+<span class="ln"><span class="ts">12:03:12.556</span> [DEBUG] 模型目录刷新完成（38 个模型，缓存 TTL 300s）</span>
+<span class="ln"><span class="ts">12:02:58.330</span> [INFO]  POST /v1/chat/completions 200 0.9s model=kimi-k3 tokens=3,412/1,108 <span class="cost">¥0.0086</span></span>
+<span class="ln"><span class="ts">12:02:41.002</span> [WARN]  transport-header-timeout req_5510cd 超过 30s，丢弃重发（第 2 次）</span>
+<span class="ln"><span class="ts">12:02:30.887</span> [INFO]  POST /v1/messages 200 1.6s model=qwen3.8-max tokens=21,204/5,612 <span class="cost">¥0.0421</span></span>
+<span class="ln"><span class="ts">12:02:12.441</span> [ERROR] transport-dns api.commandcode.ai 解析失败，回退直连成功</span>
+<span class="ln"><span class="ts">12:01:58.120</span> [DEBUG] SSE 心跳正常，活跃连接 2</span>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- 静态演示：请求详情抽屉（默认展开） -->
+<div class="drawer" id="req-drawer">
+  <div class="drawer-head"><b>请求详情</b><button class="btn-mini" onclick="document.getElementById('req-drawer').style.display='none'">×</button></div>
+  <div id="drawer-body">
+    <h3>req_a3f9c2</h3>
+    <table class="drawer-table">
+      <tr><td>模型</td><td>deepseek/deepseek-v4-pro</td></tr>
+      <tr><td>端点</td><td>POST /v1/messages</td></tr>
+      <tr><td>类型 / 状态</td><td>流式 · <span class="badge ok">ok</span></td></tr>
+      <tr><td>客户端</td><td>claude-code</td></tr>
+      <tr><td>时间</td><td>12:03:44.812</td></tr>
+    </table>
+    <h4>费用公式（与 NewAPI 计价一致）</h4>
+    <div class="cost-formula">
+      <div class="ln"><span>输入 3,930 × ¥2.00/M</span><b>¥0.0079</b></div>
+      <div class="ln"><span>缓存 8,102 × ¥0.20/M</span><b>¥0.0016</b></div>
+      <div class="ln"><span>输出 3,214 × ¥8.00/M</span><b>¥0.0257</b></div>
+      <div class="total"><span>合计</span><b>¥0.0352</b></div>
+    </div>
+    <h4>尝试链</h4>
+    <ol class="attempt-chain">
+      <li>✓ attempt-1 · deepseek-v4-pro · ok 1.2s · <span class="cost-cell">¥0.0352</span></li>
+    </ol>
+    <h4>工具</h4>
+    <div class="drawer-tools">
+      <span class="tool-chip">Read</span><span class="tool-chip">Edit</span><span class="tool-chip">Bash</span><span class="tool-chip">Grep</span>
+    </div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.nav-item').forEach(function(a){
+  a.addEventListener('click', function(e){
+    e.preventDefault();
+    document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});
+    a.classList.add('active');
+    document.querySelectorAll('.view').forEach(function(s){s.classList.remove('active')});
+    document.getElementById('view-' + a.getAttribute('data-view')).classList.add('active');
+  });
+});
+document.querySelectorAll('.panel .pill').forEach(function(p){
+  p.addEventListener('click', function(){
+    p.parentElement.querySelectorAll('.pill').forEach(function(x){x.classList.remove('active')});
+    p.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>

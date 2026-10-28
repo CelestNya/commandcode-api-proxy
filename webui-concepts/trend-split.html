@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>趋势图拆分 · 静态草图 v4</title>
+<style>
+  :root {
+    --bg: #0B0C10; --surface: #12141C; --surface-2: #181B24; --surface-3: #1F2330;
+    --outline: #232733; --outline-strong: #2E3342;
+    --text: #EDEFF5; --muted: #8A90A3;
+    --primary: #8B7CF6; --cost: #F0A868; --ok: #4FD1C5;
+    --chart-hit: #9D8FF8; --chart-7: #7AA2F7;
+    --radius-panel: 16px; --radius-card: 12px; --radius-pill: 999px;
+    --font-sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", "Sarasa Mono", ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 13.5px/1.5 var(--font-sans);
+         padding: 24px; min-height: 100vh; }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 14px; font-weight: 600; color: var(--muted); letter-spacing: .02em;
+       margin-bottom: 14px; font-family: var(--font-mono); }
+  .panel { background: var(--surface); border: 1px solid var(--outline);
+           border-radius: var(--radius-panel); padding: 18px 18px 10px; }
+  .p-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .p-title { font-size: 13px; font-weight: 600; }
+  .p-sub { font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); }
+  .p-range { margin-left: auto; display: flex; gap: 6px; }
+  .chip { font: 11px/1 var(--font-mono); color: var(--muted); padding: 5px 9px;
+          border: 1px solid var(--outline-strong); border-radius: var(--radius-pill); }
+  .chip.on { color: var(--text); background: var(--surface-3); border-color: var(--surface-3); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+  .key { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+  .key i { width: 8px; height: 8px; border-radius: var(--radius-pill); display: inline-block; }
+  .key.line i { width: 14px; height: 2px; border-radius: 1px; }
+  .key.bar i { width: 7px; height: 10px; border-radius: 2px; opacity: .8; }
+  svg { display: block; width: 100%; }
+  .sec { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--outline); }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+  .sec-title { font-size: 12.5px; font-weight: 600; }
+  .sec-note { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+  .tip { position: fixed; pointer-events: none; background: var(--surface-2);
+         border: 1px solid var(--outline-strong); border-radius: var(--radius-card);
+         padding: 8px 10px; font: 11.5px/1.6 var(--font-mono); color: var(--text);
+         opacity: 0; transition: opacity .12s; z-index: 9; white-space: nowrap; }
+  .tip b { color: var(--muted); font-weight: 400; }
+  .tip .row { display: flex; gap: 10px; justify-content: space-between; }
+  .foot { margin-top: 10px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>趋势 · 按量 / 按率 分图（静态草图）</h1>
+
+  <div class="panel">
+    <div class="p-head">
+      <span class="p-title">Token 用量 · 按时间桶</span>
+      <span class="p-sub" id="bucketNote"></span>
+      <div class="legend" id="legend1"></div>
+      <div class="p-range">
+        <span class="chip on">1d</span><span class="chip">7d</span><span class="chip">30d</span>
+      </div>
+    </div>
+    <svg id="chart1" role="img" aria-label="Token 用量分组柱状图"></svg>
+
+    <div class="sec">
+      <div class="sec-head">
+        <span class="sec-title">费用</span>
+        <span class="sec-note">同 x 轴 · 独立量程（USD）</span>
+      </div>
+      <svg id="chartCost" role="img" aria-label="费用柱条"></svg>
+    </div>
+
+    <div class="sec">
+      <div class="sec-head">
+        <span class="sec-title">缓存命中率</span>
+        <span class="sec-note">空桶断线，不插值</span>
+        <div class="legend" style="margin-left:auto">
+          <span class="key line"><i style="background:var(--chart-hit)"></i>命中率</span>
+          <span class="key bar"><i style="background:#2A3040"></i>请求数</span>
+        </div>
+      </div>
+      <svg id="chart2" role="img" aria-label="缓存命中率折线与请求数背景柱"></svg>
+    </div>
+
+    <div class="foot">桶 = 24h 窗口按小时 / 更长窗口按天 · 空桶无柱、命中率断开 · 悬停看整桶明细</div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  var N = 24;
+  // 采样不均的真实感：03/04 点无请求；总量带晚高峰
+  var DATA = [
+    { i: 12000, o: 2100, c: 96000,  cost: 0.041, hit: .89, reqs: 2 },
+    { i: 9800,  o: 1700, c: 78000,  cost: 0.033, hit: .88, reqs: 1 },
+    { i: 6400,  o: 900,  c: 41000,  cost: 0.019, hit: .86, reqs: 1 },
+    { i: 0,     o: 0,    c: 0,      cost: 0,     hit: null, reqs: 0 },
+    { i: 0,     o: 0,    c: 0,      cost: 0,     hit: null, reqs: 0 },
+    { i: 15200, o: 2600, c: 132000, cost: 0.052, hit: .90, reqs: 3 },
+    { i: 28400, o: 4100, c: 302000, cost: 0.098, hit: .91, reqs: 4 },
+    { i: 41200, o: 6200, c: 468000, cost: 0.141, hit: .92, reqs: 6 },
+    { i: 52800, o: 7300, c: 611000, cost: 0.180, hit: .93, reqs: 7 },
+    { i: 61400, o: 8100, c: 742000, cost: 0.212, hit: .93, reqs: 8 },
+    { i: 58200, o: 7600, c: 705000, cost: 0.199, hit: .92, reqs: 7 },
+    { i: 49600, o: 6400, c: 566000, cost: 0.168, hit: .92, reqs: 6 },
+    { i: 38600, o: 5200, c: 421000, cost: 0.131, hit: .91, reqs: 5 },
+    { i: 44100, o: 5900, c: 498000, cost: 0.149, hit: .92, reqs: 6 },
+    { i: 67200, o: 9400, c: 812000, cost: 0.231, hit: .94, reqs: 9 },
+    { i: 88600, o: 12100, c: 1102000, cost: 0.305, hit: .95, reqs: 11 },
+    { i: 94200, o: 13400, c: 1208000, cost: 0.328, hit: .95, reqs: 12 },
+    { i: 71800, o: 9900, c: 880000, cost: 0.246, hit: .94, reqs: 9 },
+    { i: 56200, o: 7800, c: 648000, cost: 0.191, hit: .93, reqs: 7 },
+    { i: 33400, o: 4700, c: 356000, cost: 0.113, hit: .91, reqs: 4 },
+    { i: 21800, o: 3100, c: 224000, cost: 0.073, hit: .90, reqs: 3 },
+    { i: 17600, o: 2400, c: 172000, cost: 0.058, hit: .90, reqs: 2 },
+    { i: 9200,  o: 1400, c: 74000,  cost: 0.031, hit: .88, reqs: 1 },
+    { i: 4600,  o: 700,  c: 33000,  cost: 0.015, hit: .87, reqs: 1 }
+  ];
+  function label(i) { return (i < 10 ? "0" : "") + i + ":00"; }
+
+  var C = {
+    input: "#8B7CF6", output: "#4FD1C5", cached: "#7AA2F7",
+    cost: "#F0A868", hit: "#9D8FF8", reqBg: "#20252F",
+    grid: "#232733", muted: "#8A90A3", text: "#EDEFF5"
+  };
+  var tip = document.getElementById("tip");
+
+  function fmt(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, "") + "M";
+    if (n >= 1e3) return Math.round(n / 1e3) + "K";
+    return String(n);
+  }
+  function usd(v) { return v >= 1 ? "$" + v.toFixed(2) : "$" + v.toFixed(3); }
+  function pct(v) { return (v * 100).toFixed(0) + "%"; }
+  // 取整刻度：把 max 分成 divs 段，段长取 1/2/2.5/5/10 × 10^n，柱顶不浪费
+  function niceScale(max, divs) {
+    var raw = max / divs;
+    var exp = Math.pow(10, Math.floor(Math.log10(raw)));
+    var f = raw / exp;
+    var nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+    return { step: nice * exp, divs: divs };
+  }
+  function el(tag, attrs, parent) {
+    var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function txt(parent, x, y, s, o) {
+    var t = el("text", Object.assign({
+      x: x, y: y, fill: o.fill || C.muted, "font-size": o.size || 10.5,
+      "font-family": "var(--font-mono)", "text-anchor": o.anchor || "start"
+    }, o.dom ? {} : {}), parent);
+    t.textContent = s;
+    return t;
+  }
+
+  var legend1 = document.getElementById("legend1");
+  [["Input", C.input], ["Output", C.output], ["Cache Read", C.cached]].forEach(function (p) {
+    var s = document.createElement("span");
+    s.className = "key";
+    s.innerHTML = '<i style="background:' + p[1] + '"></i>' + p[0];
+    legend1.appendChild(s);
+  });
+
+  // ── 图一：分组柱（绝对量） ──────────────────────────────
+  function drawBars(svg, w) {
+    var h = 232, padL = 46, padR = 12, padT = 10, padB = 22;
+    var pw = w - padL - padR, ph = h - padT - padB;
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("height", h);
+    svg.textContent = "";
+    var max = 0;
+    DATA.forEach(function (d) { max = Math.max(max, d.i, d.o, d.c); });
+    var scale = niceScale(max, 5), top = scale.step * scale.divs;
+
+    for (var g = 0; g <= scale.divs; g++) {
+      var y = padT + ph * g / scale.divs;
+      el("line", { x1: padL, y1: y, x2: w - padR, y2: y, stroke: C.grid, "stroke-width": 1 }, svg);
+      txt(svg, padL - 8, y + 3.5, fmt(top * (1 - g / scale.divs)), { anchor: "end" });
+    }
+    var slot = pw / N, gw = slot * 0.66, bw = gw / 3 - 1.5;
+    DATA.forEach(function (d, idx) {
+      var x0 = padL + slot * idx + (slot - gw) / 2;
+      var vals = [d.i, d.o, d.c], cols = [C.input, C.output, C.cached];
+      vals.forEach(function (v, j) {
+        if (v <= 0) return;
+        var bh = ph * v / top;
+        el("rect", {
+          x: x0 + j * (bw + 1.5), y: padT + ph - bh, width: bw, height: bh,
+          fill: cols[j], rx: 1.5
+        }, svg);
+      });
+      if (idx % 3 === 0) txt(svg, padL + slot * idx + slot / 2, h - 6, label(idx), { anchor: "middle" });
+    });
+    return { padL: padL, padR: padR, pw: pw, h: h };
+  }
+
+  // ── 费用条（同 x 轴、独立量程） ─────────────────────────
+  function drawCost(svg, w) {
+    var h = 62, padL = 46, padR = 12, padT = 6, padB = 4;
+    var pw = w - padL - padR, ph = h - padT - padB;
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("height", h);
+    svg.textContent = "";
+    var max = 0;
+    DATA.forEach(function (d) { max = Math.max(max, d.cost); });
+    max = max * 1.1;
+    el("line", { x1: padL, y1: padT + ph, x2: w - padR, y2: padT + ph, stroke: C.grid, "stroke-width": 1 }, svg);
+    var slot = pw / N, bw = slot * 0.6;
+    DATA.forEach(function (d, idx) {
+      if (d.cost <= 0) return;
+      var bh = Math.max(1.5, ph * d.cost / max);
+      el("rect", {
+        x: padL + slot * idx + (slot - bw) / 2, y: padT + ph - bh,
+        width: bw, height: bh, fill: C.cost, opacity: .85, rx: 1.5
+      }, svg);
+    });
+    txt(svg, padL - 8, padT + 8, usd(max / 1.1), { anchor: "end", size: 10 });
+  }
+
+  // ── 图二：命中率折线 + 请求数淡柱 ───────────────────────
+  function drawRate(svg, w) {
+    var h = 186, padL = 46, padR = 46, padT = 10, padB = 22;
+    var pw = w - padL - padR, ph = h - padT - padB;
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("height", h);
+    svg.textContent = "";
+    var maxReqs = 0;
+    DATA.forEach(function (d) { maxReqs = Math.max(maxReqs, d.reqs); });
+    for (var g = 0; g <= 4; g++) {
+      var y = padT + ph * g / 4;
+      el("line", { x1: padL, y1: y, x2: w - padR, y2: y, stroke: C.grid, "stroke-width": 1 }, svg);
+      txt(svg, padL - 8, y + 3.5, (100 - g * 25) + "%", { anchor: "end" });
+      txt(svg, w - padR + 8, y + 3.5, Math.round(maxReqs * (1 - g / 4)), { anchor: "start", size: 10 });
+    }
+    var slot = pw / N, bw = slot * 0.6;
+    DATA.forEach(function (d, idx) {
+      if (d.reqs <= 0) return;
+      // 背景柱按真实比例（口径诚实），靠低对比色退到线后面
+      var bh = ph * d.reqs / (maxReqs || 1);
+      el("rect", {
+        x: padL + slot * idx + (slot - bw) / 2, y: padT + ph - bh,
+        width: bw, height: bh, fill: C.reqBg, rx: 1.5
+      }, svg);
+    });
+    // 命中率：null 断线，分段画
+    var seg = [], segs = [];
+    DATA.forEach(function (d, idx) {
+      var x = padL + slot * idx + slot / 2;
+      if (d.hit == null) { if (seg.length) segs.push(seg); seg = []; return; }
+      seg.push([x, padT + ph * (1 - d.hit)]);
+    });
+    if (seg.length) segs.push(seg);
+    segs.forEach(function (s) {
+      if (s.length < 2) return;
+      el("polyline", {
+        points: s.map(function (p) { return p[0] + "," + p[1]; }).join(" "),
+        fill: "none", stroke: C.hit, "stroke-width": 2,
+        "stroke-linejoin": "round", "stroke-linecap": "round"
+      }, svg);
+    });
+    DATA.forEach(function (d, idx) {
+      if (idx % 3 === 0) txt(svg, padL + slot * idx + slot / 2, h - 6, label(idx), { anchor: "middle" });
+    });
+    return { padL: padL, padR: padR, pw: pw };
+  }
+
+  // ── 悬停十字线 + 明细气泡（三张图共用桶索引） ────────────
+  var marks = [];
+  function addHover(svg, geo, yTop, yH) {
+    var line = el("line", { x1: 0, y1: yTop, x2: 0, y2: yTop + yH,
+      stroke: "#3A4155", "stroke-width": 1, "stroke-dasharray": "3 3", opacity: 0 }, svg);
+    var hit = el("rect", { x: geo.padL, y: yTop, width: geo.pw, height: yH,
+      fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", function (e) {
+      var r = svg.getBoundingClientRect();
+      var x = (e.clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
+      var idx = Math.floor((x - geo.padL) / (geo.pw / N));
+      idx = Math.max(0, Math.min(N - 1, idx));
+      var cx = geo.padL + geo.pw / N * (idx + .5);
+      line.setAttribute("x1", cx); line.setAttribute("x2", cx);
+      line.setAttribute("opacity", 1);
+      var d = DATA[idx];
+      tip.innerHTML =
+        "<div><b>" + label(idx) + "</b> · " + d.reqs + " 请求</div>" +
+        "<div class='row'><b>Input</b><span>" + fmt(d.i) + "</span></div>" +
+        "<div class='row'><b>Output</b><span>" + fmt(d.o) + "</span></div>" +
+        "<div class='row'><b>Cache Read</b><span>" + fmt(d.c) + "</span></div>" +
+        "<div class='row'><b>费用</b><span style='color:var(--cost)'>" + (d.cost ? usd(d.cost) : "—") + "</span></div>" +
+        "<div class='row'><b>命中率</b><span>" + (d.hit == null ? "—" : pct(d.hit)) + "</span></div>";
+      tip.style.opacity = 1;
+      var tw = tip.offsetWidth, th = tip.offsetHeight;
+      var left = e.clientX + 14, top = e.clientY - th - 10;
+      if (left + tw > innerWidth - 8) left = e.clientX - tw - 14;
+      if (top < 8) top = e.clientY + 16;
+      tip.style.left = left + "px"; tip.style.top = top + "px";
+    });
+    hit.addEventListener("mouseleave", function () {
+      line.setAttribute("opacity", 0); tip.style.opacity = 0;
+    });
+  }
+
+  function render() {
+    var w = document.querySelector(".panel").clientWidth - 36;
+    var svg1 = document.getElementById("chart1");
+    var g1 = drawBars(svg1, w);
+    addHover(svg1, g1, 10, g1.h - 32);
+    drawCost(document.getElementById("chartCost"), w);
+    var svg2 = document.getElementById("chart2");
+    var g2 = drawRate(svg2, w);
+    addHover(svg2, g2, 10, 154);
+    var active = DATA.filter(function (d) { return d.reqs > 0; }).length;
+    document.getElementById("bucketNote").textContent =
+      active + "/" + N + " 桶有数据 · 24h 按小时";
+  }
+
+  var t;
+  window.addEventListener("resize", function () { clearTimeout(t); t = setTimeout(render, 80); });
+  render();
+})();
+</script>
+</body>
+</html>

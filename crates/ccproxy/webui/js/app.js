@@ -10,7 +10,8 @@
 function currentView() {
   var h = location.hash || "#/stats";
   return h.indexOf("logs") >= 0 ? "logs"
-       : h.indexOf("attempts") >= 0 ? "attempts" : "stats";
+       : h.indexOf("attempts") >= 0 ? "attempts"
+       : h.indexOf("settings") >= 0 ? "settings" : "stats";
 }
 
 /* 概览/明细的轮询走同一定时器：一个 tick 按当前视图取对应的数。 */
@@ -150,6 +151,7 @@ document.addEventListener("DOMContentLoaded", function () {
   state.windowHours = 24;
   syncWindowPickerUI();
   syncAttemptsWindowUI(); /* 明细时段框首屏即有值（跟随概览窗口） */
+  initSettings(); /* 设置页（主线新增）：更新检测 + 配置读写 */
   ["f-model", "f-stream", "f-status"].forEach(function (id) {
     el(id).addEventListener("change", function () {
       state.filters[id.replace("f-", "")] = el(id).value;

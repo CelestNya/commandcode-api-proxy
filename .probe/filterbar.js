@@ -1,0 +1,43 @@
+/* filterbar layout: no lone wrapped items, actions right-aligned */
+const { spawn } = require("child_process");
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const port = 9340;
+const BASE = "http://127.0.0.1:8799/webui/";
+const EXPR = `(() => {
+  const fb = document.querySelector(".filterbar");
+  const r = fb.getBoundingClientRect();
+  const kids = [...fb.children];
+  const rows = {};
+  kids.forEach(k => { const y = Math.round(k.getBoundingClientRect().y); (rows[y] = rows[y] || []).push((k.textContent || "").trim().slice(0, 4) || k.className); });
+  return JSON.stringify({ w: Math.round(r.width), h: Math.round(r.height), rows });
+})()`;
+async function main() {
+  const chrome = spawn(CHROME, ["--headless", "--disable-gpu", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1440,900", "--user-data-dir=/tmp/cdp-fb2", "about:blank"], { stdio: "ignore" });
+  process.on("exit", () => { try { chrome.kill(); } catch {} });
+  let target = null;
+  for (let i = 0; i < 40; i++) {
+    try { const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); target = list.find((t) => t.type === "page"); if (target) break; } catch {}
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+  let id = 0;
+  const send = (m, p) => new Promise((res, rej) => { const mid = ++id; ws.onmessage = (e) => { const x = JSON.parse(e.data); if (x.id === mid) x.error ? rej(new Error(x.error.message)) : res(x.result); }; ws.send(JSON.stringify({ id: mid, method: m, params: p })); });
+  await send("Runtime.enable", {}); await send("Page.enable", {});
+  await send("Page.navigate", { url: BASE + "#/attempts" });
+  await new Promise((r) => setTimeout(r, 3000));
+  for (const w of [901, 1000, 1100, 1240, 1280, 1366, 1440, 1920]) {
+    await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: false });
+    await new Promise((r) => setTimeout(r, 900));
+    const a = await send("Runtime.evaluate", { expression: EXPR, returnByValue: true });
+    await send("Page.navigate", { url: BASE + "#/logs" });
+    await new Promise((r) => setTimeout(r, 900));
+    const l = await send("Runtime.evaluate", { expression: EXPR, returnByValue: true });
+    await send("Page.navigate", { url: BASE + "#/attempts" });
+    await new Promise((r) => setTimeout(r, 900));
+    console.log(`W${w} ATT ${a.result.value}`);
+    console.log(`W${w} LOG ${l.result.value}`);
+  }
+  ws.close();
+}
+main().catch((e) => { console.error("ERR", e.message); process.exit(1); });

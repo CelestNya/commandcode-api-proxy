@@ -169,6 +169,25 @@ impl TransportFault {
             Self::Other(_) => "transport error",
         }
     }
+
+    /// Whether this fault points at the egress proxy rather than the upstream.
+    ///
+    /// [`Self::ProxyFailed`] is unambiguous. [`Self::Reset`] is not — an
+    /// upstream can drop a connection too — but it is exactly what a tunnel
+    /// that accepts the `CONNECT` and then closes it produces (rustls reports
+    /// the missing handshake as `unexpected end of file`), and it is the only
+    /// class that failure ever showed up as in production. The caller only acts
+    /// on a *streak* of these, and only under a policy that already permits
+    /// falling back, so a false positive costs one switch to the route the
+    /// user asked for anyway.
+    ///
+    /// Everything else is either proof the tunnel carried the traffic
+    /// (`HeaderTimeout` needs a completed handshake and a sent request) or
+    /// belongs to the far side, so none of it may condemn the proxy.
+    #[must_use]
+    pub fn is_proxy_attributable(&self) -> bool {
+        matches!(self, Self::ProxyFailed | Self::Reset)
+    }
 }
 
 /// Walk an error's `source` chain looking for an `io::Error`, returning its kind
@@ -757,8 +776,16 @@ pub fn send_to_cc(
         );
 
         match outcome {
-            Ok(Attempt::Streaming(stream)) => return Ok(stream),
+            Ok(Attempt::Streaming(stream)) => {
+                // A response — headers and all — proves the egress carried the
+                // request, so it clears any streak against the proxy.
+                crate::proxy::report_attempt(None);
+                return Ok(stream);
+            }
             Ok(Attempt::Failed(err)) => {
+                // A non-2xx answer is still an answer: the tunnel works and the
+                // upstream spoke. Only the transport classes can condemn a proxy.
+                crate::proxy::report_attempt(err.fault.as_ref());
                 if err.retryable && attempt <= MAX_RETRIES {
                     log::warn(&retry_log_line(
                         &format!("http-{}", err.status_code),
@@ -776,6 +803,9 @@ pub fn send_to_cc(
                 return Err(err);
             }
             Err(err) => {
+                // Reported before the retry decision: a proxy that dies mid-run
+                // should be abandoned on the third failed attempt either way.
+                crate::proxy::report_attempt(err.fault.as_ref());
                 if err.retryable && attempt <= MAX_RETRIES {
                     // The class is in the line, not just the raw error: an
                     // operator scanning retries wants to see
