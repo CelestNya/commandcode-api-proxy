@@ -9,14 +9,15 @@
 <!-- Stylesheets. Order matters (the cascade depends on it): design tokens
      first, then the shell, then each screen, then the responsive overrides
      last so a media query always wins over the rule it adjusts.
-     build.rs inlines these in exactly this order, so this list is the whole
-     composition — to add a file, add a line here. -->
+     The order below is the cascade order, so a file that adjusts another
+     (responsive.css) must stay after it. -->
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/content.css">
 <link rel="stylesheet" href="css/overview.css">
 <link rel="stylesheet" href="css/detail.css">
 <link rel="stylesheet" href="css/log.css">
+<link rel="stylesheet" href="css/controls.css">
 <link rel="stylesheet" href="css/settings.css">
 <link rel="stylesheet" href="css/responsive.css">
 </head>

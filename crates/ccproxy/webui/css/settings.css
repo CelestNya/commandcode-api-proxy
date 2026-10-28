@@ -1,7 +1,8 @@
 /* 设置页
  *
- * 两张卡片：更新与设置。控件的样式一律取自 tokens.css 的变量，不写字面色值，
- * 这样改主题不需要动这个文件。
+ * 这个文件只负责「怎么排」：两张卡片、分组的标题、每行的两栏布局、底部操作条。
+ * 控件自己长什么样在 controls.css 里——那是全站共用的一层，这里只决定它放在哪、
+ * 多宽。
  */
 
 /* ── 卡片通用 ── */
@@ -61,54 +62,6 @@
 .set-note { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .set-env { color: var(--aborted); font-size: 11.5px; margin-top: 3px; }
 .set-control { flex: 0 0 240px; display: flex; align-items: center; gap: 8px; }
-.set-control .unit { color: var(--muted); font-size: 12px; }
-
-/* 输入控件：与 filterbar 的选择器保持一套观感。 */
-.set-control input[type="text"],
-.set-control input[type="number"],
-.set-control select {
-  width: 100%; min-height: 32px; padding: 6px 10px;
-  background: var(--surface-high); color: var(--text);
-  border: 1px solid var(--outline); border-radius: var(--radius-control);
-  font: inherit; font-variant-numeric: tabular-nums;
-}
-.set-control input:hover, .set-control select:hover { border-color: var(--outline); }
-.set-control input:focus, .set-control select:focus {
-  outline: 1px solid var(--primary); border-color: var(--primary);
-}
-.set-control input:disabled, .set-control select:disabled {
-  color: var(--muted); cursor: not-allowed;
-}
-.set-control input[type="checkbox"] {
-  width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer;
-}
-
-/* ── 底部操作条 ── */
-.set-foot {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--outline-variant);
-}
-.set-foot .fgrow { flex: 1; }
-.set-status { font-size: 12.5px; color: var(--muted); min-height: 18px; }
-.set-status.good { color: var(--ok); }
-.set-status.bad { color: var(--error); }
-.set-status.warn { color: var(--aborted); }
-
-button.btn {
-  min-height: 32px; padding: 6px 14px; cursor: pointer;
-  background: var(--surface-high); color: var(--muted);
-  border: 1px solid var(--outline); border-radius: var(--radius-control);
-  font: inherit; font-variant-numeric: tabular-nums;
-  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
-}
-button.btn:hover:not(:disabled) { color: var(--text); border-color: var(--primary); }
-button.btn:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; }
-button.btn:disabled { opacity: .5; cursor: not-allowed; }
-button.btn.primary {
-  background: var(--primary-container); color: var(--on-primary-container);
-  border-color: var(--primary-container);
-}
-button.btn.primary:hover:not(:disabled) { border-color: var(--primary); }
 
 @media (max-width: 720px) {
   .set-row { flex-direction: column; gap: 8px; }

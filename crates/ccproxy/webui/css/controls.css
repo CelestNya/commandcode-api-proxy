@@ -1,0 +1,143 @@
+/* 控件（control kit）
+ *
+ * 这一层不是"某个页面的样式"，而是一组可以被任意页面拿去用的控件：
+ *
+ *   .ctl-text    文本输入
+ *   .ctl-select  下拉（自绘箭头）
+ *   .ctl-step    数值步进器（.ctl-num + .step-btn + .step-unit）
+ *   .ctl-switch  开关（.sw-track + .sw-thumb）
+ *   .btn         按钮（.primary 为主操作）
+ *
+ * 为什么单独成文件：之前设置页直接用了原生 checkbox / number / select，三者在
+ * 深色面板里各自带着系统皮肤——白方块、系统箭头、系统微调器——页面的排版再
+ * 精致，看起来也像别人的截图贴进来。控件的观感必须只有一个来源，页面只决定
+ * 它放在哪、多宽。
+ *
+ * 约定：
+ *   1. 只用 tokens.css 的变量，不写字面色值，也不写裸圆角（有测试盯着）。
+ *   2. 状态全部交给原生控件的伪类（:checked / :disabled / :focus-visible），
+ *      JS 只负责值。否则每次重绘都得记得同步一遍 class，早晚会漏。
+ *   3. 尺寸统一 34px 高，四个控件放在同一行里必须能对齐。
+ */
+
+/* ── 输入框 / 下拉 / 步进器：共用一副骨架 ── */
+.ctl-text,
+.ctl-select,
+.ctl-step {
+  width: 100%; min-height: 34px;
+  background-color: var(--surface-high); color: var(--text);
+  border: 1px solid var(--outline); border-radius: var(--radius-control);
+  font: inherit; font-variant-numeric: tabular-nums;
+  transition: border-color var(--t-base), background-color var(--t-base);
+}
+.ctl-text,
+.ctl-select { padding: 6px 11px; }
+.ctl-text:hover,
+.ctl-select:hover,
+.ctl-step:hover { border-color: var(--muted); }
+.ctl-text:focus,
+.ctl-select:focus,
+.ctl-step:focus-within {
+  outline: 1px solid var(--primary); border-color: var(--primary);
+}
+.ctl-text:disabled,
+.ctl-select:disabled,
+.ctl-step.disabled {
+  color: var(--muted); cursor: not-allowed; opacity: .7;
+}
+
+/* ── 下拉 ──
+ * 系统箭头是一套不属于这里的图形语言，换成自绘的。下拉列表本身仍是系统的：
+ * 给 option 上色不可移植。这一取舍和筛选栏（detail.css）保持一致。
+ */
+.ctl-select {
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B94A3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  padding-right: 30px;
+  cursor: pointer;
+}
+.ctl-select:disabled { cursor: not-allowed; }
+
+/* ── 步进器 ──
+ * 左右各一个自绘按钮，中间的输入框裸着——给它边框就成了框里套框。系统的上下
+ * 微调器必须显式杀掉，它会顶着圆角画在右边，正是最难看的那个零件。
+ * 按钮不带 tabindex：键盘用方向键改数值更快，夹在中间只会让 Tab 多按两次。
+ */
+.ctl-step { display: flex; align-items: stretch; overflow: hidden; }
+.ctl-step .ctl-num {
+  flex: 1 1 auto; min-width: 0;
+  border: 0; background: transparent; color: inherit;
+  font: inherit; font-variant-numeric: tabular-nums;
+  padding: 6px 4px 6px 11px; text-align: right;
+  appearance: textfield; -webkit-appearance: none;
+}
+.ctl-step .ctl-num:focus { outline: none; }
+.ctl-step .ctl-num::-webkit-outer-spin-button,
+.ctl-step .ctl-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.step-unit {
+  flex: 0 0 auto; align-self: center;
+  color: var(--muted); font-size: 11.5px;
+  padding: 0 7px 0 2px; pointer-events: none;
+}
+.step-btn {
+  flex: 0 0 auto; width: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  transition: color var(--t-fast), background-color var(--t-fast);
+}
+.step-btn svg {
+  width: 13px; height: 13px;
+  fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round;
+}
+.step-btn.down { border-right: 1px solid var(--outline-variant); }
+.step-btn.up { border-left: 1px solid var(--outline-variant); }
+.step-btn:hover:not(:disabled) { color: var(--text); background-color: var(--surface-variant); }
+.step-btn:disabled { opacity: .3; cursor: not-allowed; }
+
+/* ── 开关 ──
+ * 原生 checkbox 是系统画的白方块，accent-color 只在勾上之后生效；未勾的时候
+ * 它就是一块和这面板毫无关系的白。换成轨道 + 滑块，状态仍由那个透明 input 管。
+ */
+.ctl-switch { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
+.ctl-switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.sw-track {
+  width: 40px; height: 22px; padding: 0 2px;
+  display: flex; align-items: center;
+  border: 1px solid var(--outline); border-radius: var(--radius-pill);
+  background-color: var(--surface-high);
+  transition: background-color var(--t-base), border-color var(--t-base);
+}
+.sw-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background-color: var(--muted);
+  transition: transform var(--t-base), background-color var(--t-base);
+}
+.ctl-switch input:checked + .sw-track {
+  background-color: var(--primary-container); border-color: var(--primary-container);
+}
+.ctl-switch input:checked + .sw-track .sw-thumb {
+  transform: translateX(16px); background-color: var(--on-primary-container);
+}
+.ctl-switch:hover .sw-track { border-color: var(--muted); }
+.ctl-switch input:focus-visible + .sw-track { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ctl-switch input:disabled { cursor: not-allowed; }
+.ctl-switch input:disabled + .sw-track { opacity: .45; }
+
+/* ── 按钮 ── */
+button.btn {
+  min-height: 32px; padding: 6px 14px; cursor: pointer;
+  background-color: var(--surface-high); color: var(--muted);
+  border: 1px solid var(--outline); border-radius: var(--radius-control);
+  font: inherit; font-variant-numeric: tabular-nums;
+  transition: color var(--t-fast), border-color var(--t-fast), background-color var(--t-fast);
+}
+button.btn:hover:not(:disabled) { color: var(--text); border-color: var(--primary); }
+button.btn:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; }
+button.btn:disabled { opacity: .5; cursor: not-allowed; }
+button.btn.primary {
+  background-color: var(--primary-container); color: var(--on-primary-container);
+  border-color: var(--primary-container);
+}
+button.btn.primary:hover:not(:disabled) { border-color: var(--primary); }

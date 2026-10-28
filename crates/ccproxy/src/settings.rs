@@ -98,6 +98,10 @@ pub enum Kind {
     Int {
         min: u64,
         max: u64,
+        /// How far one tap of the stepper moves the value. Not 1 for every
+        /// field: nudging a millisecond budget by 1 ms is unusable, and the
+        /// page has no room for "type the number, then press up 60000 times".
+        step: u64,
         /// Shown after the input, e.g. `ms`.
         unit: &'static str,
     },
@@ -113,8 +117,13 @@ impl Kind {
     fn describe(&self) -> Value {
         match self {
             Self::Bool => serde_json::json!({"kind": "bool"}),
-            Self::Int { min, max, unit } => {
-                serde_json::json!({"kind": "int", "min": min, "max": max, "unit": unit})
+            Self::Int {
+                min,
+                max,
+                step,
+                unit,
+            } => {
+                serde_json::json!({"kind": "int", "min": min, "max": max, "step": step, "unit": unit})
             }
             Self::Text { max_len } => serde_json::json!({"kind": "text", "maxLen": max_len}),
             Self::Choice(options) => serde_json::json!({"kind": "choice", "options": options}),
@@ -156,6 +165,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 1,
             max: 100,
+            step: 1,
             unit: "",
         },
         env: Some("CC_IMAGE_COMPRESS_QUALITY"),
@@ -169,6 +179,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 33_554_432,
+            step: 65_536,
             unit: "字节",
         },
         env: None,
@@ -191,6 +202,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 1_000,
             max: 1_800_000,
+            step: 60_000,
             unit: "ms",
         },
         env: Some("CC_UPSTREAM_TIMEOUT_MS"),
@@ -204,6 +216,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 1_800_000,
+            step: 30_000,
             unit: "ms",
         },
         env: Some("CC_IDLE_TIMEOUT_MS"),
@@ -217,6 +230,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 1_800_000,
+            step: 5_000,
             unit: "ms",
         },
         env: Some("CC_NO_OUTPUT_TIMEOUT_MS"),
@@ -230,6 +244,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 10,
+            step: 1,
             unit: "次",
         },
         env: Some("CC_NO_OUTPUT_RETRIES"),
@@ -264,7 +279,7 @@ pub fn validate(key: &str, value: &Value) -> Result<Value, String> {
             Value::Bool(b) => Ok(Value::Bool(*b)),
             _ => Err(format!("{} 需要一个布尔值", field.label)),
         },
-        Kind::Int { min, max, unit } => {
+        Kind::Int { min, max, unit, .. } => {
             let n = value
                 .as_u64()
                 .or_else(|| value.as_i64().and_then(|v| u64::try_from(v).ok()))

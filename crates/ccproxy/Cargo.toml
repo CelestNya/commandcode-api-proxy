@@ -28,6 +28,7 @@ assets = [
   ["target/release/ccproxy", "usr/bin/commandcode-proxy", "755"],
   ["webui/index.html", "usr/share/commandcode-proxy/webui/", "644"],
   ["webui/css/content.css", "usr/share/commandcode-proxy/webui/css/", "644"],
+  ["webui/css/controls.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/detail.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/layout.css", "usr/share/commandcode-proxy/webui/css/", "644"],
   ["webui/css/log.css", "usr/share/commandcode-proxy/webui/css/", "644"],

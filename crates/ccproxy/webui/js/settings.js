@@ -25,25 +25,54 @@ function setStatus(text, kind) {
 
 /* ── 表单渲染 ── */
 
+/* ── 控件 ──
+ *
+ * 每个控件都是一段会自己说明用途的标记，而不是一个原生元素加几行补丁样式。
+ * 原生的 checkbox 是白方块、number 带系统上下箭头、select 带系统箭头——在
+ * 深色面板里它们各自是一套不属于这里的语言。所以：
+ *
+ *   bool   → 开关（轨道 + 滑块，原生 input 透明地躺在里面管状态与键盘）
+ *   int    → 步进器（左右各一个自绘按钮，步长由后端按字段给出）
+ *   choice → 自绘箭头的 select（下拉列表本身仍是系统的，那部分不可移植）
+ *   text   → 统一的输入框
+ *
+ * 所有状态都交给原生控件的伪类表达（:checked / :disabled / :focus-visible），
+ * JS 不参与外观——否则每次重绘都要记得同步一遍 class。
+ */
+
+var ICON_MINUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>';
+var ICON_PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+
 function fieldControl(f) {
   var v = setState.dirty.hasOwnProperty(f.key) ? setState.dirty[f.key] : f.value;
-  var dis = f.envValue != null ? " disabled" : "";
+  var dis = f.envValue != null;
+  var d = dis ? " disabled" : "";
+  var k = esc(f.key);
   if (f.kind === "bool") {
-    return '<input type="checkbox" data-key="' + esc(f.key) + '"' +
-      (v ? " checked" : "") + dis + ">";
+    return '<label class="ctl-switch">' +
+      '<input type="checkbox" data-key="' + k + '"' + (v ? " checked" : "") + d + ">" +
+      '<span class="sw-track"><span class="sw-thumb"></span></span>' +
+      "</label>";
   }
   if (f.kind === "choice") {
     var opts = (f.options || []).map(function (o) {
       return '<option value="' + esc(o) + '"' + (o === v ? " selected" : "") + ">" + esc(o) + "</option>";
     }).join("");
-    return '<select data-key="' + esc(f.key) + '"' + dis + ">" + opts + "</select>";
+    return '<select class="ctl-select" data-key="' + k + '"' + d + ">" + opts + "</select>";
   }
   if (f.kind === "int") {
-    return '<input type="number" data-key="' + esc(f.key) + '" value="' + esc(v) +
-      '" min="' + f.min + '" max="' + f.max + '" step="1"' + dis + ">" +
-      (f.unit ? '<span class="unit">' + esc(f.unit) + "</span>" : "");
+    /* 两个按钮不参与 Tab 序列：键盘用户用方向键改数值更快，夹在输入框中间的
+       两个按钮反而会让 Tab 多按两次才出得去。 */
+    return '<div class="ctl-step' + (dis ? " disabled" : "") + '">' +
+      '<button type="button" class="step-btn down" data-step="-1" data-for="' + k + '" tabindex="-1"' +
+      d + ' aria-label="减少">' + ICON_MINUS + "</button>" +
+      '<input class="ctl-num" type="number" data-key="' + k + '" value="' + esc(v) +
+      '" min="' + f.min + '" max="' + f.max + '" step="' + (f.step || 1) + '"' + d + ">" +
+      (f.unit ? '<span class="step-unit">' + esc(f.unit) + "</span>" : "") +
+      '<button type="button" class="step-btn up" data-step="1" data-for="' + k + '" tabindex="-1"' +
+      d + ' aria-label="增加">' + ICON_PLUS + "</button></div>";
   }
-  return '<input type="text" data-key="' + esc(f.key) + '" value="' + esc(v) + '"' + dis + ">";
+  return '<input class="ctl-text" type="text" data-key="' + k + '" value="' + esc(v) + '"' + d + ">";
 }
 
 function renderSettings(doc) {
@@ -76,7 +105,11 @@ function renderSettings(doc) {
   host.querySelectorAll("[data-key]").forEach(function (input) {
     input.addEventListener("input", onFieldInput);
     input.addEventListener("change", onFieldInput);
+    if (input.type === "number") syncStepperBounds(input);
   });
+
+  /* 步进按钮走事件委托，只挂一次：重绘会替换 innerHTML，逐个绑定就得跟着重绑。 */
+  host.onclick = onStepClick;
 
   var pending = doc.revision !== doc.runningRevision;
   el("set-rev").textContent = "配置 " + doc.path;
@@ -103,10 +136,48 @@ function onFieldInput(ev) {
   else setState.dirty[key] = value;
   var row = document.querySelector('[data-row="' + key + '"]');
   if (row) row.classList.toggle("dirty", setState.dirty.hasOwnProperty(key));
+  if (input.type === "number") syncStepperBounds(input);
   var count = Object.keys(setState.dirty).length;
   el("set-apply").disabled = count === 0 || setState.busy;
   el("set-revert").disabled = count === 0 || setState.busy;
   if (count > 0) setStatus("有 " + count + " 项改动未应用");
+}
+
+/* 点一下就派发 input 事件，让脏值判断、按钮启用、状态文案都走同一条路径——
+ * 步进和手输没有第二种真相。 */
+function onStepClick(ev) {
+  var btn = ev.target.closest && ev.target.closest(".step-btn");
+  if (!btn || btn.disabled) return;
+  var key = btn.getAttribute("data-for");
+  var input = document.querySelector('.set-control [data-key="' + key + '"]');
+  if (!input) return;
+  var step = Number(btn.getAttribute("data-step")) * Number(input.step || 1);
+  var min = input.min === "" ? -Infinity : Number(input.min);
+  var max = input.max === "" ? Infinity : Number(input.max);
+  var cur = Number(input.value);
+  if (!isFinite(cur)) cur = isFinite(min) ? min : 0;
+  var next = Math.min(max, Math.max(min, cur + step));
+  if (next === cur) return;
+  input.value = String(next);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  /* 值被夹在边界上时按钮该灰掉。focus 让方向键能接着用。 */
+  input.focus();
+  syncStepperBounds(input);
+}
+
+/* 到达 min/max 时禁用对应方向的按钮，让"点了没反应"这件事有视觉解释。
+ * 被环境变量压住的控件整组都是停用的——它的值在这里本来就改不了。 */
+function syncStepperBounds(input) {
+  var box = input.closest(".ctl-step");
+  if (!box) return;
+  var lock = input.disabled;
+  var cur = Number(input.value);
+  var min = input.min === "" ? -Infinity : Number(input.min);
+  var max = input.max === "" ? Infinity : Number(input.max);
+  var down = box.querySelector(".step-btn.down");
+  var up = box.querySelector(".step-btn.up");
+  if (down) down.disabled = lock || !(cur > min);
+  if (up) up.disabled = lock || !(cur < max);
 }
 
 /* ── 读写 ── */
