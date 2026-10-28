@@ -23,9 +23,9 @@
 //! every request pointed at it until someone noticed and restarted the proxy.
 //! Under the `default` policy that gap is now closed at runtime: an attempt
 //! that fails with [`TransportFault::is_proxy_attributable`] increments a
-//! streak, any attempt that reaches the upstream clears it, and
-//! [`PROXY_FAULT_LIMIT`] consecutive faults abandon the proxy for the rest of
-//! the process (a warning names the streak and says how to force it back). The
+//! streak, any attempt that reaches the upstream clears it, and three
+//! consecutive faults abandon the proxy for the rest of the process (a warning
+//! names the streak and says how to force it back). The
 //! policy is a preference, so honouring it early is the behaviour its own
 //! documentation promises; the explicit-URL policy keeps failing loudly
 //! instead, because there the operator asked for that hop specifically.
