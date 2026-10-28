@@ -69,6 +69,10 @@ base64 = "0.22"
 jpeg-encoder = "0.6"
 png = "0.17"
 sha2 = "0.10"
+# Decode only: re-encoding always goes out as JPEG. `default-features` off
+# drops `rayon` (thread-pool per image buys nothing for one screenshot and
+# pulls five more crates into the build).
+jpeg-decoder = { version = "0.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # Reading the Windows system proxy for `proxy = "default"`. A safe wrapper over
