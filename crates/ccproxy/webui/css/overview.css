@@ -47,6 +47,15 @@
    short list compact instead of leaving an empty scroll area. */
 .model-table-wrap {
   max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
+  /* No border-radius here, deliberately. Rounding the scroller also rounds the
+     sticky header (it is clipped by this box), which leaves a curved notch at
+     each top corner — and the square rows scrolling underneath show through
+     those notches. The panel already owns the rounded outline; this box sits
+     inside its padding and never reaches the curve. */
+  /* A row boundary never lands on the box edge by itself, so scrolling sliced
+     the next row through its glyphs. Fade the last few pixels instead. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
   /* Room for the sticky header's bottom border, which would otherwise be the
      one pixel a scrollbar-less render clips at the box edge. */
   padding-bottom: 1px;
