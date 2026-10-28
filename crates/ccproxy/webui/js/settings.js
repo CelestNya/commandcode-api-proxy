@@ -111,6 +111,9 @@ function renderSettings(doc) {
   /* 步进按钮走事件委托，只挂一次：重绘会替换 innerHTML，逐个绑定就得跟着重绑。 */
   host.onclick = onStepClick;
 
+  /* 下拉同理，只是它要换掉整块控件而不只是挂个监听。 */
+  Dropdown.enhanceAll(host);
+
   var pending = doc.revision !== doc.runningRevision;
   el("set-rev").textContent = "配置 " + doc.path;
   el("set-apply").disabled = true;

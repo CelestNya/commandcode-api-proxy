@@ -20,16 +20,18 @@
   background: var(--surface); border: 1px solid var(--outline-variant); border-radius: var(--radius-card);
   padding: 12px 14px; margin-bottom: 12px; box-shadow: var(--shadow);
 }
-.filterbar select, .filterbar button {
+.filterbar select, .filterbar .sd-trigger, .filterbar button {
   background: var(--surface-variant); color: var(--text); border: 1px solid var(--outline-variant);
   border-radius: var(--radius-control); padding: 7px 14px; font-size: 12.5px; font-family: inherit;
   min-height: 34px;
 }
-/* Native selects render a system arrow and system popup, which read as a
-   different design language next to the pill buttons. The arrow is drawn as
-   a background SVG; the popup itself stays native (styling the option list
-   is not portable), which is the same trade NewAPI makes. */
-.filterbar select, .pager select {
+/* Native selects bring a system arrow and a system popup, both of which read
+   as a different design language next to the pill buttons. dropdown.js swaps
+   the whole control for a drawn one (.sd-trigger + .sd-menu), so these rules
+   now dress that pair instead — same geometry, same borders, no system parts.
+   The rules for the hidden original are kept for the no-JS fallback. */
+.filterbar select, .filterbar .sd-trigger,
+.pager select, .pager .sd-trigger {
   appearance: none; -webkit-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B94A3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -38,12 +40,15 @@
   cursor: pointer;
   transition: border-color var(--t-base), background-color var(--t-base);
 }
-.filterbar select:hover, .pager select:hover { border-color: var(--outline); }
-.filterbar select:focus-visible, .pager select:focus-visible,
+.filterbar select:hover, .filterbar .sd-trigger:hover,
+.pager select:hover, .pager .sd-trigger:hover { border-color: var(--outline); }
+.filterbar select:focus-visible, .filterbar .sd-trigger:focus-visible,
+.pager select:focus-visible, .pager .sd-trigger:focus-visible,
 .filterbar button:focus-visible, .pager .pg-btn:focus-visible {
   outline: 2px solid var(--primary); outline-offset: 1px;
 }
-.filterbar select:focus { outline: 1px solid var(--primary); }
+.filterbar select:focus,
+.filterbar .sd-trigger:focus-visible { outline: 1px solid var(--primary); }
 .filterbar button { cursor: pointer; color: var(--muted); }
 .filterbar button:hover { color: var(--text); border-color: var(--primary); }
 .filterbar button.active {

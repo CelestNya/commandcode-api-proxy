@@ -65,6 +65,8 @@ function renderPager(totalPages, shown) {
     renderAttempts(state.attempts);
     fetchAttempts(); /* widen the fetched window to match the new page size */
   });
+  /* 分页条是整块重建的，里面的 select 每次都是新元素。 */
+  Dropdown.enhanceAll(pager);
 }
 
 function setPage(n) {

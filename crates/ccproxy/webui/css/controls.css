@@ -47,10 +47,12 @@
 }
 
 /* ── 下拉 ──
- * 系统箭头是一套不属于这里的图形语言，换成自绘的。下拉列表本身仍是系统的：
- * 给 option 上色不可移植。这一取舍和筛选栏（detail.css）保持一致。
+ * 原生 select 被 dropdown.js 降级成"只存值"（.sd-native），看得见的是下面这套
+ * 触发器 + 列表。箭头自绘；选项列表也自绘——原生 option 的底色、高亮和行高由
+ * 系统决定，正是深色面板里最刺眼的一块。
  */
-.ctl-select {
+.ctl-select,
+.sd-trigger {
   appearance: none; -webkit-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B94A3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -59,6 +61,49 @@
   cursor: pointer;
 }
 .ctl-select:disabled { cursor: not-allowed; }
+
+.sd-native { display: none; }
+
+.sd-trigger {
+  display: inline-flex; align-items: center;
+  min-height: 34px; padding: 6px 30px 6px 11px;
+  background-color: var(--surface-high); color: var(--text);
+  border: 1px solid var(--outline); border-radius: var(--radius-control);
+  font: inherit; font-variant-numeric: tabular-nums; text-align: left;
+  vertical-align: middle;
+  transition: border-color var(--t-base), background-color var(--t-base);
+}
+.sd-trigger:hover:not(:disabled) { border-color: var(--muted); }
+.sd-trigger:focus-visible { outline: 1px solid var(--primary); border-color: var(--primary); }
+.sd-trigger:disabled { color: var(--muted); cursor: not-allowed; opacity: .7; }
+.sd-trigger.open { border-color: var(--primary); }
+.sd-trigger .sd-label {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 菜单挂在 body 上而不是触发器旁边：筛选栏和表格都有 overflow，挂在里面会被
+   裁掉；固定定位让它永远浮在最上层，位置由 JS 按触发器的视口坐标算。 */
+.sd-menu {
+  position: fixed; z-index: 900;
+  max-height: 280px; overflow-y: auto;
+  padding: 4px;
+  background-color: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+}
+.sd-opt {
+  padding: 7px 10px; border-radius: var(--radius-control);
+  color: var(--text); font-size: 12.5px; line-height: 1.35;
+  white-space: nowrap; cursor: pointer;
+  transition: background-color var(--t-fast), color var(--t-fast);
+}
+.sd-opt:hover { background-color: var(--surface-variant); }
+.sd-opt.on {
+  background-color: var(--primary-container); color: var(--on-primary-container);
+  font-weight: 600;
+}
 
 /* ── 步进器 ──
  * 左右各一个自绘按钮，中间的输入框裸着——给它边框就成了框里套框。系统的上下

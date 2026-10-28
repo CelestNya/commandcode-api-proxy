@@ -28,6 +28,8 @@ function startDataPolling() {
 
 document.addEventListener("DOMContentLoaded", function () {
   route();
+  /* 静态的那几个下拉一次到位；之后重建出来的（分页条、设置页）各自调一次。 */
+  Dropdown.enhanceAll();
   initSettings();
   el("days-7").addEventListener("click", function () { setDays(7); });
   el("days-14").addEventListener("click", function () { setDays(14); });

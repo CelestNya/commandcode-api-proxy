@@ -40,6 +40,7 @@ assets = [
   ["webui/js/app.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/attempts.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/core.js", "usr/share/commandcode-proxy/webui/js/", "644"],
+  ["webui/js/dropdown.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/logs.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/router.js", "usr/share/commandcode-proxy/webui/js/", "644"],
   ["webui/js/settings.js", "usr/share/commandcode-proxy/webui/js/", "644"],
