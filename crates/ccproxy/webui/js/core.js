@@ -13,17 +13,24 @@ var state = {
   page: 1, pageSize: 50,
   filters: { model: "", stream: "", status: "" }
 };
-/* Chart series palette, expressed as CSS variables (see tokens.css): the first
-   four slots map to the semantic status colours, the rest to dedicated chart
-   hues. SVG presentation attributes accept `var(--…)`, so a theme change in
-   tokens.css re-colours every chart without touching JS. */
-var PALETTE = ["var(--primary)", "var(--ok)", "var(--aborted)", "var(--error)",
-  "var(--chart-hit)", "var(--chart-6)", "var(--chart-7)", "var(--chart-8)",
+/* Chart series palette, expressed as CSS variables (see tokens.css): used by
+   the model-distribution donut (stats.js), one hue per model. SVG presentation
+   attributes accept `var(--…)`, so a theme change in tokens.css re-colours
+   the charts without touching JS. */
+var PALETTE = ["var(--primary)", "var(--cost)", "var(--ok)", "var(--error)",
+  "var(--aborted)", "var(--chart-6)", "var(--chart-7)", "var(--chart-8)",
   "var(--chart-9)", "var(--chart-10)"];
 
 function el(id) { return document.getElementById(id); }
 function fmtNum(n) { return (n == null) ? "—" : Number(n).toLocaleString("en-US"); }
-function fmtUsd(v) { if (v == null || isNaN(v)) return "—"; return v >= 1 ? "$" + v.toFixed(2) : "$" + v.toFixed(4); }
+function fmtUsd(v) {
+  if (v == null || isNaN(v)) return "—";
+  if (v >= 1) return "$" + v.toFixed(2);
+  /* A real but sub-0.0001 cost reads "$0.0000", which lies about the value;
+     show the floor instead. True zero stays "$0.0000". */
+  if (v > 0 && v < 0.0001) return "<$0.0001";
+  return "$" + v.toFixed(4);
+}
 function fmtTokens(n) {
   if (n == null) return "—";
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";

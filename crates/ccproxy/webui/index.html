@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cc-proxy WebUI</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2312161D'/%3E%3Cpath d='M8 10l8 6-8 6z' fill='%238AB4F8'/%3E%3Cpath d='M17 22h7' stroke='%23D3E3FD' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2312141C'/%3E%3Cpath d='M8 10l8 6-8 6z' fill='%238B7CF6'/%3E%3Cpath d='M17 22h7' stroke='%23EDEFF5' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
 
 <!-- Stylesheets. Order matters (the cascade depends on it): design tokens
      first, then the shell, then each screen, then the responsive overrides
      last so a media query always wins over the rule it adjusts.
-     build.rs inlines these in exactly this order, so this list is the whole
-     composition — to add a file, add a line here. -->
+     These are served loose from webui/ (no build-time inlining — see
+     webui_site.rs); to add a file, add a line here. -->
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/content.css">
@@ -23,7 +23,7 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="side-logo">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#1E3A5F"/><path d="M8 10l8 6-8 6z" fill="#8AB4F8"/><path d="M17 22h7" stroke="#D3E3FD" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#181B24" stroke="#2E3342"/><path d="M8 10l8 6-8 6z" fill="#8B7CF6"/><path d="M17 22h7" stroke="#EDEFF5" stroke-width="2.4" stroke-linecap="round"/></svg>
     </div>
     <nav class="side-nav">
       <a href="#/stats" class="nav-item active" id="nav-stats">
@@ -44,7 +44,7 @@
 
   <div class="main">
     <header class="topbar">
-      <div class="app-name">cc-proxy<small id="ver"></small></div>
+      <div class="app-name">cc-<em>proxy</em><small id="ver"></small></div>
       <div class="spacer"></div>
       <span class="chip" id="chip-live"><span class="dot"></span><b id="chip-live-text">连接中</b></span>
       <span class="chip">消耗 <b id="chip-cost">—</b></span>
@@ -58,24 +58,43 @@
       <section class="view active" id="view-stats">
         <div class="metric-cards" id="metric-cards"></div>
 
+        <div class="ov-grid">
+          <div class="panel">
+            <h2>
+              Token 使用趋势
+              <span class="extra window-picker">
+                <a data-h="1">近1小时</a>
+                <a data-h="24" class="active">24小时</a>
+                <a data-h="168">7天</a>
+                <a data-h="720">30天</a>
+                <input type="datetime-local" id="w-from" title="起始时间">
+                <input type="datetime-local" id="w-to" title="结束时间">
+                <button id="w-apply" class="btn-mini">应用</button>
+                <span class="win-range" id="window-range"></span>
+              </span>
+            </h2>
+            <div class="trend-chart">
+              <div class="legend" id="trend-legend"></div>
+              <svg id="trend-chart" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
+            </div>
+          </div>
 
-        <div class="panel" style="margin-top:12px">
-          <h2>
-            Token 使用趋势
-            <span class="extra window-picker">
-              <a data-h="1">近1小时</a>
-              <a data-h="24" class="active">24小时</a>
-              <a data-h="168">7天</a>
-              <a data-h="720">30天</a>
-              <input type="datetime-local" id="w-from" title="起始时间">
-              <input type="datetime-local" id="w-to" title="结束时间">
-              <button id="w-apply" class="btn-mini">应用</button>
-              <span class="win-range" id="window-range"></span>
-            </span>
-          </h2>
-          <div class="trend-chart">
-            <div class="legend" id="trend-legend"></div>
-            <svg id="trend-chart" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
+          <div class="panel">
+            <h2>
+              模型分布
+              <span class="extra model-note" id="model-note"></span>
+            </h2>
+            <div class="model-layout">
+              <svg id="model-donut" viewBox="0 0 200 200" role="img" aria-label="模型费用分布"></svg>
+              <div class="model-table-wrap">
+                <table class="model-table">
+                  <thead>
+                    <tr><th>模型</th><th>请求</th><th>Token</th><th>费用</th></tr>
+                  </thead>
+                  <tbody id="model-body"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -84,29 +103,38 @@
       <section class="view" id="view-attempts">
         <div class="mini-cards" id="mini-cards"></div>
         <div class="filterbar">
-          <label>时段</label>
-          <input type="datetime-local" id="a-from" title="起始时间">
-          <input type="datetime-local" id="a-to" title="结束时间">
-          <button id="a-apply" class="btn-mini">应用</button>
-          <label>模型</label>
-          <select id="f-model"><option value="">全部</option></select>
-          <label>类型</label>
-          <select id="f-stream">
-            <option value="">全部</option>
-            <option value="1">流式</option>
-            <option value="0">非流式</option>
-          </select>
-          <label>状态</label>
-          <select id="f-status">
-            <option value="">全部</option>
-            <option value="ok">ok</option>
-            <option value="error">error</option>
-            <option value="aborted">aborted</option>
-            <option value="interrupted">interrupted</option>
-          </select>
-          <span class="fgrow"></span>
-          <button id="btn-refresh">刷新</button>
-          <button id="btn-reset">重置</button>
+          <div class="f-group">
+            <label>时段</label>
+            <input type="datetime-local" id="a-from" title="起始时间">
+            <input type="datetime-local" id="a-to" title="结束时间">
+            <button id="a-apply" class="btn-mini">应用</button>
+          </div>
+          <div class="f-group">
+            <label>模型</label>
+            <select id="f-model"><option value="">全部</option></select>
+          </div>
+          <div class="f-group">
+            <label>类型</label>
+            <select id="f-stream">
+              <option value="">全部</option>
+              <option value="1">流式</option>
+              <option value="0">非流式</option>
+            </select>
+          </div>
+          <div class="f-group">
+            <label>状态</label>
+            <select id="f-status">
+              <option value="">全部</option>
+              <option value="ok">ok</option>
+              <option value="error">error</option>
+              <option value="aborted">aborted</option>
+              <option value="interrupted">interrupted</option>
+            </select>
+          </div>
+          <div class="f-actions">
+            <button id="btn-refresh">刷新</button>
+            <button id="btn-reset">重置</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -136,21 +164,24 @@
       <!-- ===== 视图：日志 ===== -->
       <section class="view" id="view-logs">
         <div class="filterbar">
-          <label>日志</label>
-          <select id="log-which">
-            <option value="proxy">代理日志 proxy.log</option>
-            <option value="tray">托盘日志 tray.log</option>
-          </select>
-          <label class="lvl-filter">
-            <input type="checkbox" data-lvl="DEBUG" checked>DEBUG
-            <input type="checkbox" data-lvl="INFO" checked>INFO
-            <input type="checkbox" data-lvl="WARN" checked>WARN
-            <input type="checkbox" data-lvl="ERROR" checked>ERROR
-          </label>
-          <span class="chip" id="log-follow-chip"><span class="dot"></span><b id="log-follow-text">连接中</b></span>
-          <span class="fgrow"></span>
-          <button id="log-autoscroll" class="active">自动滚动</button>
-          <button id="log-refresh">刷新</button>
+          <div class="f-group">
+            <label>日志</label>
+            <select id="log-which">
+              <option value="proxy">代理日志 proxy.log</option>
+              <option value="tray">托盘日志 tray.log</option>
+            </select>
+            <label class="lvl-filter">
+              <input type="checkbox" data-lvl="DEBUG" checked>DEBUG
+              <input type="checkbox" data-lvl="INFO" checked>INFO
+              <input type="checkbox" data-lvl="WARN" checked>WARN
+              <input type="checkbox" data-lvl="ERROR" checked>ERROR
+            </label>
+            <span class="chip" id="log-follow-chip"><span class="dot"></span><b id="log-follow-text">连接中</b></span>
+          </div>
+          <div class="f-actions">
+            <button id="log-autoscroll" class="active">自动滚动</button>
+            <button id="log-refresh">刷新</button>
+          </div>
         </div>
         <div class="logbar">
           <span class="logpath" id="log-path" title="">—</span>
@@ -166,9 +197,9 @@
 <!-- Scripts, in load order. These are classic scripts (no modules): they share
      one global scope, and app.js wires everything up on DOMContentLoaded, so
      order is what makes the earlier files' functions visible to the later
-     ones. build.rs concatenates them in exactly this order. The page itself is
-     static (no inline snapshot): its body is cache-stable, so a reload is a
-     304, and the first paint hydrates from the JSON APIs in parallel. -->
+     ones. The page itself is static (no inline snapshot): its body is
+     cache-stable, so a reload is a 304, and the first paint hydrates from
+     the JSON APIs in parallel. -->
 <script src="js/core.js"></script>
 <script src="js/router.js"></script>
 <script src="js/stats.js"></script>

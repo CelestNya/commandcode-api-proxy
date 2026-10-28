@@ -1,49 +1,94 @@
 /* 外壳：侧边栏 + 顶栏
  *
  * 页面骨架。左栏导航、顶部状态条（连接/消耗/内存/运行）。
+ *
+ * mobile-first（Astro 惯例）：基础样式按窄屏写——侧栏是顶部横向滚动导航条，
+ * 三个入口在手机上不损失宽度；≥901px 的桌面形态全部在 responsive.css 里
+ * 用 min-width 增强，这里不放任何断点。
  */
 
-/* ── sidebar ── */
+/* ── shell ──
+   弹性外壳：窄屏纵向堆叠（侧栏横条在上），≥901px 由 responsive.css 切成
+   横向（侧栏 240px 通高左栏 + 主区）。.main 的 flex:1 只有在它是弹性子项
+   时才有意义——这条 display:flex 是整套桌面布局的地基，不能丢。
+   确定高度（100dvh，旧浏览器回退 100vh）让 .content 成为唯一的滚动容器：
+   min-height 会被内容撑破（移动端 shell 涨到 1109px 变成整页滚），侧栏和
+   顶栏钉死、只有内容区滚，才是应用壳该有的行为。 */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* ── sidebar（窄屏：顶部横向导航条） ── */
 .sidebar {
-  width: 208px; flex: none; background: var(--surface);
-  border-right: 1px solid var(--outline-variant);
-  display: flex; flex-direction: column; padding: 18px 12px;
-  /* The sidebar is its own scroll context so the footer stays pinned to the
-     bottom when the nav outgrows the viewport instead of being pushed out of
-     sight. Height comes from the flex row (stretch), not a fixed value. */
-  min-height: 0; overflow-y: auto;
+  background: var(--surface);
+  border-bottom: 1px solid var(--outline);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  /* 三个入口 + logo 在窄屏一字排不开时整条横向滚动，不换行不截断 */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.side-logo { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; }
+.sidebar::-webkit-scrollbar { display: none; }
+.side-logo { display: flex; align-items: center; gap: 10px; padding: 0; flex: none; }
 .side-logo svg { width: 26px; height: 26px; flex: none; }
-.side-nav { display: flex; flex-direction: column; gap: 4px; }
+.side-nav { display: flex; flex-direction: row; gap: 6px; flex: 1; min-width: 0; }
 .nav-item {
-  display: flex; align-items: center; gap: 10px;
-  color: var(--muted); text-decoration: none; font-size: 13.5px;
-  padding: 10px 14px; border-radius: var(--radius-pill); min-height: 44px;
-  transition: background var(--t-base), color var(--t-base), transform var(--t-base);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13.5px;
+  padding: 9px 14px;
+  border-radius: var(--radius-pill);
+  min-height: 38px;
+  white-space: nowrap;
+  flex: none;
+  transition: background var(--t-base), color var(--t-base);
 }
-.nav-item svg { width: 18px; height: 18px; flex: none; transition: transform var(--t-base); }
-.nav-item:hover { color: var(--text); background: var(--surface-variant); transform: translateX(3px); }
-.nav-item:hover svg { transform: scale(1.08); }
+.nav-item svg { width: 18px; height: 18px; flex: none; }
+.nav-item:hover { color: var(--text); background: var(--surface-2); }
 .nav-item.active { color: var(--on-primary-container); background: var(--primary-container); }
-.side-foot { margin-top: auto; color: var(--muted); font-size: 12px; padding: 12px 10px 0; border-top: 1px solid var(--outline-variant); line-height: 1.7; }
+.nav-item.active svg { color: var(--primary); }
+/* 本机信息行在窄屏没有位置，≥901px 恢复（responsive.css） */
+.side-foot { display: none; }
 
 /* ── topbar ── */
 .topbar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 24px; background: var(--surface);
-  border-bottom: 1px solid var(--outline-variant);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--outline);
 }
-.topbar .app-name { font-size: 15px; font-weight: 650; letter-spacing: .2px; }
+.topbar .app-name { font-size: 15px; font-weight: 650; letter-spacing: 0.2px; }
+.topbar .app-name em { font-style: normal; color: var(--primary); }
 .topbar .app-name small { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 8px; }
 .topbar .spacer { flex: 1; } /* deliberate whitespace, per the requirement */
 .chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
-  background: var(--surface-variant); border: 1px solid var(--outline-variant);
-  border-radius: var(--radius-pill); padding: 5px 12px; white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-pill);
+  padding: 5px 12px;
+  white-space: nowrap;
 }
 .chip b { color: var(--text); font-weight: 600; }
-.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--aborted); }
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
 .chip.on .dot { background: var(--ok); }
 .chip.on b { color: var(--ok); }

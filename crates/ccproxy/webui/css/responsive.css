@@ -1,63 +1,91 @@
 /* 响应式覆盖
  *
- * 窄屏适配。必须排在最后：媒体查询要能压过它调整的那条规则。
+ * mobile-first（Astro 惯例）：基础样式按窄屏写，这里只用 min-width 向上增强，
+ * 所以每条规则都天然压过它调整的那条。必须排在最后。
+ *
+ *   901px  侧栏竖排 / 顶栏单行 / 筛选栏横排 / 内容区桌面留白
+ *   1240px 概览双栏（趋势图 + 模型分布并排）/ 固定数量卡片网格转密排
+ *          （指标 1×6 / 迷你 1×5）
+ *
+ * 卡片网格：<901px 由 overview.css / detail.css 的 auto-fit minmax 流式重排；
+ * ≥901px 张数固定，auto-fit 在 1036–1439px 会留下 4+2 / 5+1 孤行，改显式列数。
  */
 
-@media (max-width: 1000px) {
-  .metric-cards { grid-template-columns: repeat(2, 1fr); }
-  .mini-cards { grid-template-columns: repeat(2, 1fr); }
-  .ov-row { grid-template-columns: 1fr; }
-  /* Donut above the table, not beside it: at this width the two-column
-     layout squeezed the table into an unreadable column. */
-  .model-layout { grid-template-columns: 1fr; justify-items: center; gap: 10px; }
-  /* The donut is a direct grid child (not wrapped in a div); both it and the
-     table column must shrink to the panel, or the SVG keeps its intrinsic
-     200px box and overlaps the table below it. */
-  .model-layout > * { width: 100%; min-width: 0; }
-  #model-donut { max-width: 190px; height: auto; }
-  .sidebar { width: 64px; padding: 14px 8px; }
-  .nav-item { justify-content: center; padding: 10px 0; }
-  .nav-item span { display: none; }
-  .side-logo { justify-content: center; }
-  .side-foot { display: none; }
+@media (min-width: 901px) {
+  /* 侧栏：顶部横条 → 左侧竖排 */
+  .shell { flex-direction: row; }
+  .sidebar {
+    width: 240px;
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    /* 撑满 shell 高度：height:100% 在 min-height 撑起的弹性容器上解析不了
+       （退回内容高度 278px），显式 stretch 才通高，side-foot 的
+       margin-top:auto 也才能沉到底。 */
+    align-self: stretch;
+    gap: 0;
+    padding: 18px 12px;
+    border-right: 1px solid var(--outline);
+    border-bottom: none;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: visible;
+    position: static;
+  }
+  .side-logo { padding: 4px 10px 18px; }
+  .side-nav { flex-direction: column; gap: 4px; flex: none; }
+  .nav-item { min-height: 44px; padding: 10px 14px; white-space: normal; }
+  .side-foot {
+    display: block;
+    margin-top: auto;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 12px 10px 0;
+    border-top: 1px solid var(--outline-variant);
+    line-height: 1.7;
+  }
+
+  .content-inner { padding: 20px 24px 40px; }
+  .topbar { padding: 10px 24px; flex-wrap: nowrap; }
+  .logpane { height: calc(100vh - 260px); }
+
+  /* 筛选栏：分组紧凑横排、控件定宽、按钮不拉伸 */
+  .filterbar { align-items: center; }
+  .f-group { flex: 0 0 auto; flex-wrap: nowrap; }
+  .f-group select,
+  .f-group input { flex: none; }
+  .f-group input[type="datetime-local"] { width: 168px; }
+  .filterbar > button { flex: none; }
+  /* 操作组：同一行放得下就跟在筛选后，放不下整体换行并右对齐——
+     不会出现单个按钮孤守第二行左侧的尴尬。 */
+  .filterbar .f-actions { flex: none; margin-left: auto; }
+  .filterbar .f-actions button { flex: none; }
 }
-@media (max-width: 640px) {
-  .metric-cards { grid-template-columns: repeat(2, 1fr); }
-  .topbar { padding: 10px 14px; flex-wrap: wrap; }
-  /* Padding lives on .content-inner, never here: padding on the scroll
-     container is what reintroduces the sticky-header seam. */
-  .content-inner { padding: 12px 12px 32px; }
-  .filterbar { padding: 10px; gap: 8px; }
-  .filterbar label { width: 100%; }
-  .filterbar select, .filterbar button { min-height: 44px; flex: 1 1 auto; min-width: 0; }
-  .pager .pg-btn, .pager select { min-height: 44px; min-width: 44px; }
-  /* A 900x300 viewBox scaled to a phone width collapses the chart to a few
-     dozen pixels, so the plot keeps an explicit aspect ratio instead. */
-  .trend-chart svg { height: 240px; }
-  .legend { gap: 10px 14px; }
-  /* Narrow cards: shrink the value so it does not wrap mid-number. */
-  .mcard { padding: 12px 12px 10px; }
-  .mcard .mvalue, .mini-card .mc-value { font-size: 19px; }
-  .mini-cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  /* The icon sidebar is too wide for a phone; a bottom-aligned icon rail
-     keeps the two screens reachable without eating the content width. */
-  .sidebar { width: 52px; padding: 12px 6px; }
-  .nav-item { padding: 8px 0; }
-  .side-logo { padding: 2px 0 12px; }
-  /* Ten table columns cannot fit a phone. The table keeps a readable minimum
-     and the page scrolls sideways: a nested scroller (.table-wrap) would
-     become the sticky header's containing block and break pinning. */
-  .table-wrap table { min-width: 800px; }
-  /* Pin the model table to the panel width instead of the fixed 40/18/22/20
-     split, which left the name column too narrow to read. */
-  .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 40%; }
-  .model-table th:nth-child(2), .model-table td:nth-child(2) { width: 18%; }
-  .model-table th:nth-child(3), .model-table td:nth-child(3) { width: 22%; }
-  .model-table th:nth-child(4), .model-table td:nth-child(4) { width: 20%; }
-  /* The chip row is the last thing to fit; letting the app name and the
-     chips share one line keeps the topbar from doubling in height. */
-  .topbar { gap: 6px; }
-  .topbar .app-name { font-size: 14px; }
-  .topbar .app-name small { display: none; }
-  .chip { padding: 4px 9px; font-size: 11.5px; }
+
+/* 概览双栏。起点取 1240 而非 1100：该档模型面板只有 267–313px，
+   四列明细表（色点+名/请求/Token/费用）放不下。1240–1439px 用 1:1
+   让模型面板拿到 ≥438px，≥1440px 趋势图更重要，改 3:2。 */
+@media (min-width: 1240px) and (max-width: 1439px) {
+  .ov-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 1440px) {
+  .ov-grid { grid-template-columns: 3fr 2fr; }
+}
+
+/* 固定数量卡片网格：桌面中段（1036–1439px）auto-fit 会产出孤行，
+   按平衡排布改显式列数——6 张指标卡 3+3 → 1×6，5 张迷你卡 3+2 → 1×5。 */
+@media (min-width: 901px) and (max-width: 1239px) {
+  .metric-cards { grid-template-columns: repeat(3, 1fr); }
+  .mini-cards { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 1240px) {
+  .metric-cards { grid-template-columns: repeat(6, 1fr); }
+  .mini-cards { grid-template-columns: repeat(5, 1fr); }
+}
+
+/* 模型表：窄屏退回 auto 布局 + 名称折行，数值列不被固定列宽截断 */
+@media (max-width: 900px) {
+  .model-table { table-layout: auto; }
+  .model-table .m-name { white-space: normal; overflow-wrap: break-word; }
+  .model-table th, .model-table td { padding: 6px; }
 }

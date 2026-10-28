@@ -1,29 +1,59 @@
 /* 设计令牌（Design tokens）
  *
- * 颜色、圆角、阴影等 CSS 变量。其余样式只引用这些变量，改主题只动这一个文件。
+ * 颜色、圆角、过渡、字体。其余样式只引用这些变量，改主题只动这一个文件。
+ *
+ * 「暗夜辉光」扁平修正版：无辉光、无脉冲——层次由底色三级（页面/卡片/内嵌块）
+ * 与 1px 描边构建，强调只靠色相。 money 用琥珀，主色用紫，状态各占一个色相。
+ *
+ * JS 契约（改名前先搜 js/）：stats.js 图表色与 core.js 的 PALETTE 通过
+ * `var(--…)` 读这些变量（SVG 呈现属性接受 CSS 变量），所以改 token 即换图表色。
+ * 必须保留的名字：--primary --ok --aborted --error --interrupted --cost
+ * --chart-hit --chart-6..10 --outline-variant --muted --bg。
  */
 
-/* Material 3 dark tonal palette, distilled from the Shirone reference */
 :root {
-  --bg: #0F1115; --surface: #161A21; --surface-variant: #1D222B; --surface-high: #232A36;
-  --outline: #2A3140; --outline-variant: #232A36;
-  --primary: #8AB4F8; --primary-container: #1E3A5F; --on-primary-container: #D3E3FD;
-  --text: #E3E7EC; --muted: #8B94A3;
-  --ok: #81C995; --error: #F28B82; --aborted: #FDD663; --interrupted: #8AB4F8;
+  /* 底色三级：页面 / 卡片 / 卡片内嵌块（输入框、表头、代码底） */
+  --bg: #0B0C10;
+  --surface: #12141C;
+  --surface-2: #181B24;
+  --surface-3: #1F2330;
+  --outline: #232733;
+  --outline-variant: #232733; /* JS 契约名：图表网格线 */
+  --outline-strong: #2E3342;
 
-  /* Chart series colours. The trend legend and the model donut read these via
-     `var(--…)` from JS (SVG presentation attributes accept CSS variables), so
-     a theme change re-colours the charts too. The first four map to the
-     semantic status colours; `--chart-hit` is the cache-hit-rate line. */
-  --chart-hit: #C58AF9;
-  --chart-6: #F2B8B5; --chart-7: #A8DAB5; --chart-8: #FFD8A8;
-  --chart-9: #B3C7F9; --chart-10: #D0B8F0;
+  --text: #EDEFF5;
+  --muted: #8A90A3;
 
-  /* Log pane background: one step darker than the app surface so the code
-     block reads as inset, kept as a token instead of a bare hex. */
-  --log-bg: #0B0E13;
-  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.22);
-  --shadow-hover: 0 2px 4px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.3);
+  /* 主色紫（品牌/输入 token/请求 ID）；费用琥珀（money 的专属色） */
+  --primary: #8B7CF6;
+  --cost: #F0A868;
+  --primary-container: rgba(139, 124, 246, 0.13);
+  --on-primary-container: #EDEFF5;
+
+  /* 状态色：成功青 / 警告琥珀 / 错误玫红 / 中断紫 / 中止蓝灰 */
+  --ok: #4FD1C5;
+  --warn: #F0A868;
+  --error: #F2668B;
+  --interrupted: #8B7CF6;
+  --aborted: #6478D8;
+
+  /* 图表系列色。趋势图四条线：输入紫/输出青/缓存读蓝灰/费用琥珀；
+     模型分布环形图从这里往后取色。前四个与状态色同源，改状态色即换图。 */
+  --chart-hit: #9D8FF8;
+  --chart-6: #C9A0DC;
+  --chart-7: #7AA2F7;
+  --chart-8: #E9C46A;
+  --chart-9: #6FBFA5;
+  --chart-10: #D98E8E;
+
+  /* 日志面板：比卡片再暗一档，读作“内嵌代码块” */
+  --log-bg: #090A0E;
+
+  /* 字体。数字一律等宽（tabular-nums 已全局兜底），等宽字体给工具感。 */
+  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", -apple-system,
+    "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Sarasa Mono", ui-monospace, "Cascadia Mono",
+    Consolas, monospace;
 
   /* Corner radii. Four steps, by container size — not one global value: a
      16px radius on an 11px badge reads as a blob, and a 4px radius on a whole
@@ -36,16 +66,19 @@
 
   /* Transitions. Three durations by distance/size of the change, so hover and
      state feedback across the panel feel like one system. */
-  --t-fast: .13s ease;     /* colour-only feedback: row hover, badge states */
-  --t-base: .18s ease;     /* the default: buttons, cards, nav items */
-  --t-slow: .24s ease;     /* larger movement: panel reveal, chart draw-in */
+  --t-fast: 0.13s ease;    /* colour-only feedback: row hover, badge states */
+  --t-base: 0.18s ease;    /* the default: buttons, cards, nav items */
+  --t-slow: 0.24s ease;    /* larger movement: panel reveal, chart draw-in */
 }
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { height: 100%; }
 body {
-  background: var(--bg); color: var(--text); height: 100%;
-  font: 13.5px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100%;
+  font: 13.5px/1.5 var(--font-sans);
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
-.shell { display: flex; height: 100%; }
+::selection { background: rgba(139, 124, 246, 0.3); }

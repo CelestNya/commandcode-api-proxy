@@ -104,8 +104,10 @@ function renderAttempts(list) {
     var ridShow = rid.length > 6 ? rid.slice(0, 6) + "…" : rid;
     var wire = (a.wire || "?").toUpperCase();
     var streamTxt = a.stream ? "流式" : "非流式";
-    var lat = (a.ttfbMs != null ? "首字 " + fmtDur(a.ttfbMs) : "首字 —") + " / " +
-              (a.durationMs != null ? "总耗时 " + fmtDur(a.durationMs) : "总耗时 —");
+    /* 延迟两行：单行 "首字 X / 总耗时 Y" 在 12% 列宽（≈148px）里必被
+       ellipsis 截断，拆两行各 ~80px 才放得下。 */
+    var lat = '<small>首字 ' + (a.ttfbMs != null ? fmtDur(a.ttfbMs) : "—") + '</small>' +
+              '<small>总耗时 ' + (a.durationMs != null ? fmtDur(a.durationMs) : "—") + '</small>';
     var retry = (a.attempts || 1) > 1 ? '<span class="muted" title="' + a.attempts + ' 次尝试">x' + a.attempts + '</span>' : "";
     var costTxt = a.costUsd != null ? fmtUsd(a.costUsd) : "—";
     var statusCell = '<span class="badge ' + esc(a.status || "") + '">' + esc(a.status || "?") + '</span>';

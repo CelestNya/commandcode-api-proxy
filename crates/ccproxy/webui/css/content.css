@@ -4,15 +4,18 @@
  */
 
 /* ── content ── */
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* min-height:0 不能少：弹性子项默认 min-height:auto = 内容高度，会阻止
+   .main 收缩，把 shell 撑出 100vh——内部滚动失效变成整页滚。 */
+.main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* The scroll container carries no padding: a sticky header measures `top: 0`
    against the *padding box*, so padding here pushed the header up under the
    topbar and let row data surface through the seam. The spacing lives on the
    inner wrapper instead, leaving the scroll origin flush with the topbar. */
-.content { flex: 1; overflow: auto; }
-.content-inner { padding: 20px 24px 40px; max-width: 1280px; width: 100%; margin: 0 auto; }
+.content { flex: 1; min-height: 0; overflow: auto; }
+/* 窄屏 16px 呼吸感，桌面 24px（responsive.css 的 min-width 增强） */
+.content-inner { padding: 16px; max-width: 1280px; width: 100%; margin: 0 auto; }
 .view { display: none; }
-.view.active { display: block; animation: viewIn .22s ease; }
+.view.active { display: block; animation: viewIn 0.22s ease; }
 @keyframes viewIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }

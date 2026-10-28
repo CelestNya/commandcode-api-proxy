@@ -106,15 +106,28 @@ function wireWindowPicker() {
 }
 
 /* ── details window (independent state, R1) ── */
+/* aWindow 未设置时回退到概览当前窗口（默认 24h 预设，与后端
+   DEFAULT_WINDOW_HOURS 一致）——否则两个输入框从首屏就是空的占位符，
+   看起来像没初始化。 */
 function syncAttemptsWindowUI() {
-  var w = state.aWindow;
+  /* state.aWindow 初始是 {from:null,to:null}（真值对象），只有真正设过
+     自定义窗口（from 非空）才用它，否则回退概览当前窗口。 */
+  var w = (state.aWindow && state.aWindow.from) ? state.aWindow : currentWindow();
   el("a-from").value = w && w.from ? dtLocalFromIso(w.from) : "";
   el("a-to").value = w && w.to ? dtLocalFromIso(w.to) : "";
 }
 function wireAttemptsWindow() {
   el("a-apply").addEventListener("click", function () {
     var f = el("a-from").value, t = el("a-to").value;
-    if (!f && !t) { syncAttemptsWindowUI(); return; } /* empty → show what's active */
+    if (!f && !t) {
+      /* 清空 + 应用 = 放弃固定窗口，回到随轮询滑动的默认窗口 */
+      state.aWindow = null;
+      syncAttemptsWindowUI();
+      state.page = 1;
+      fetchAttempts();
+      fetchStats(false);
+      return;
+    }
     state.aWindow = {
       from: f ? new Date(f).toISOString().slice(0, 19) : null,
       to: t ? new Date(t).toISOString().slice(0, 19) : null
@@ -136,6 +149,7 @@ document.addEventListener("DOMContentLoaded", function () {
   state.windowMode = "preset";
   state.windowHours = 24;
   syncWindowPickerUI();
+  syncAttemptsWindowUI(); /* 明细时段框首屏即有值（跟随概览窗口） */
   ["f-model", "f-stream", "f-status"].forEach(function (id) {
     el(id).addEventListener("change", function () {
       state.filters[id.replace("f-", "")] = el(id).value;

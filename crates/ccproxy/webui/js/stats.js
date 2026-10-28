@@ -1,6 +1,6 @@
 /* 概览渲染
  *
- * 指标卡、汇总、趋势图（含 PCHIP 平滑与降采样）、模型分布表。
+ * 指标卡、汇总、趋势图（含 PCHIP 平滑与降采样）、模型分布（环形图 + 明细表）。
  */
 
 /* ── overview ── */
@@ -8,6 +8,7 @@ function renderStats(s, animate) {
   state.stats = s;
   renderSummary(s);
   renderTrend(s.trend || [], animate === true);
+  renderModels(s.models || []);
 }
 
 /* Cost axis ticks: no trailing zeros and a stable digit count, so the right
@@ -48,7 +49,7 @@ function renderSummary(s) {
     { label: "窗口请求", value: fmtNum(w.attempts), sub: "总计: " + fmtNum(t.attempts), cls: "" },
     { label: "窗口 Token", value: fmtTokens(wTok), sub: "输入 " + fmtTokens(w.promptTokens) + "（含缓存 " + fmtTokens(w.cachedTokens) + "）/ 输出 " + fmtTokens(w.completionTokens), cls: "" },
     { label: "累计 Token", value: fmtTokens(tTok), sub: "输入 " + fmtTokens(t.promptTokens) + "（含缓存 " + fmtTokens(t.cachedTokens) + "）/ 输出 " + fmtTokens(t.completionTokens), cls: "accent" },
-    { label: "费用", value: fmtUsd(w.costUsd), sub: "终身 " + fmtUsd(t.costUsd), cls: "accent" },
+    { label: "费用", value: fmtUsd(w.costUsd), sub: "终身 " + fmtUsd(t.costUsd), cls: "cost" },
     { label: "缓存命中率", value: fmtPct(w.hitRate), sub: "窗口内命中 / 输入", cls: hrCls },
     { label: "总尝试", value: fmtNum(t.attempts), sub: "成功 " + fmtNum(t.ok) + " / 失败 " + fmtNum(fail), cls: "" }
   ];
@@ -93,7 +94,7 @@ function renderTrend(raw, animate) {
     { key: "prompt", name: "Input", color: "var(--primary)" },
     { key: "completion", name: "Output", color: "var(--ok)" },
     { key: "cached", name: "Cache Read", color: "var(--aborted)" },
-    { key: "costUsd", name: "Cost", color: "var(--chart-6)" }
+    { key: "costUsd", name: "Cost", color: "var(--cost)" }
   ];
   el("trend-legend").innerHTML = LEG.map(function (l) {
     return '<span><i style="background:' + l.color + '"></i>' + l.name + '</span>';
@@ -231,11 +232,27 @@ function renderTrend(raw, animate) {
      data attribute, so a CSS stagger can animate them one after another and
      the legend could highlight them later. */
   var SERIES = [
-    { pts: sCost, color: "var(--chart-6)", width: 1.8, name: "costUsd" },
-    { pts: sOut, color: "var(--ok)", width: 2, name: "completion" },
-    { pts: sCa, color: "var(--aborted)", width: 2, name: "cached" },
-    { pts: sIn, color: "var(--primary)", width: 2, name: "prompt" }
+    { pts: sCost, color: "var(--cost)", width: 1.8, name: "costUsd" },
+    { pts: sOut, color: "var(--ok)", width: 2, name: "completion", fill: 0.09 },
+    { pts: sCa, color: "var(--aborted)", width: 2, name: "cached", fill: 0.1 },
+    { pts: sIn, color: "var(--primary)", width: 2, name: "prompt", fill: 0.12 }
   ];
+  /* Area fills under the three token series, drawn before the lines. Cost
+     stays a bare line: it lives on the right axis, and a filled amber area
+     would read as token volume. The fills exist for the tails — after the
+     last request the curves descend to the baseline as visible sloped areas
+     instead of vanishing, which is what made the right side of the chart
+     look broken. */
+  var baseY = MT + ph;
+  SERIES.forEach(function (se) {
+    if (!se.fill || se.pts.length < 2) return;
+    var d = pchipPath(se.pts);
+    if (!d) return;
+    out += '<path d="' + d +
+           ' L' + se.pts[se.pts.length - 1][0].toFixed(1) + ' ' + baseY.toFixed(1) +
+           ' L' + se.pts[0][0].toFixed(1) + ' ' + baseY.toFixed(1) + ' Z" ' +
+           'fill="' + se.color + '" fill-opacity="' + se.fill + '" stroke="none"/>';
+  });
   SERIES.forEach(function (se, idx) {
     var d = pchipPath(se.pts);
     out += '<path class="trend-line" data-series="' + se.name + '" style="--i:' + idx + '" ' +
@@ -264,4 +281,65 @@ function renderTrend(raw, animate) {
   } else {
     svg.classList.remove("trend-animate");
   }
+}
+
+/* ── model distribution（环形图 + 明细表） ──
+ *
+ * 数据来自 stats API 的 `models`（后端已按峰/谷分桶计价）。占比口径：
+ * 全部模型都有价格时按费用，否则退化为按 Token——未定价的模型不会把
+ * 别人占比压成 0。环形图用 stroke-dasharray 分段，扁平无动画。 */
+function renderModels(models) {
+  var list = Array.isArray(models) ? models.slice() : [];
+  var donut = el("model-donut");
+  var note = el("model-note");
+  var body = el("model-body");
+  if (!list.length) {
+    donut.innerHTML =
+      '<text x="100" y="104" fill="var(--muted)" font-size="12" text-anchor="middle" font-family="var(--font-mono)">暂无模型数据</text>' +
+      '<circle cx="100" cy="100" r="70" fill="none" stroke="var(--surface-3)" stroke-width="20"/>';
+    note.textContent = "";
+    body.innerHTML = "";
+    return;
+  }
+  var costSum = 0, tokSum = 0, allPriced = true;
+  list.forEach(function (m) {
+    if (m.costUsd != null) costSum += m.costUsd; else allPriced = false;
+    tokSum += m.tokens || 0;
+  });
+  var byCost = allPriced && costSum > 0;
+  var total = byCost ? costSum : tokSum;
+  note.textContent = byCost
+    ? "按费用占比 · 窗口合计 " + fmtUsd(costSum)
+    : "按 Token 占比" + (allPriced ? "" : "（含未定价模型）");
+
+  /* donut: one dash segment per model, clockwise from 12 o'clock */
+  var R = 70, C = 2 * Math.PI * R;
+  var out = '<circle cx="100" cy="100" r="' + R + '" fill="none" stroke="var(--surface-3)" stroke-width="20"/>';
+  var acc = 0;
+  list.forEach(function (m, i) {
+    var share = total > 0 ? ((byCost ? (m.costUsd || 0) : (m.tokens || 0)) / total) : 0;
+    if (share <= 0) return;
+    var seg = Math.max(share * C, 0); /* 0-width models simply skip */
+    out += '<circle cx="100" cy="100" r="' + R + '" fill="none" stroke="' + PALETTE[i % PALETTE.length] + '"' +
+           ' stroke-width="20" stroke-dasharray="' + seg.toFixed(2) + ' ' + (C - seg).toFixed(2) + '"' +
+           ' stroke-dashoffset="' + (-acc).toFixed(2) + '" transform="rotate(-90 100 100)"/>';
+    acc += seg;
+  });
+  out += '<text x="100" y="96" fill="var(--text)" font-size="15" font-weight="700" text-anchor="middle" font-family="var(--font-mono)">' +
+         (byCost ? fmtUsd(costSum) : fmtTokens(tokSum)) + "</text>";
+  out += '<text x="100" y="114" fill="var(--muted)" font-size="10" text-anchor="middle" font-family="var(--font-mono)">' +
+         (byCost ? "窗口费用" : "窗口 Token") + "</text>";
+  donut.innerHTML = out;
+
+  /* table: 模型（色点对齐环形图分段）/ 请求 / Token / 费用——占比由环形图表达，
+     不再单列一栏，窄面板下避免嵌套横滚把数据挤出可视区。 */
+  body.innerHTML = list.map(function (m, i) {
+    var color = PALETTE[i % PALETTE.length];
+    return "<tr>" +
+      '<td class="m-name" title="' + esc(m.model) + '"><i class="m-dot" style="background:' + color + '"></i>' + esc(m.model) + "</td>" +
+      "<td>" + fmtNum(m.attempts) + "</td>" +
+      "<td>" + fmtTokens(m.tokens) + "</td>" +
+      '<td class="m-cost">' + (m.costUsd != null ? fmtUsd(m.costUsd) : "—") + "</td>" +
+      "</tr>";
+  }).join("");
 }
