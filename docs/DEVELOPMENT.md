@@ -73,6 +73,11 @@ production are separate acts.
 Older version folders are kept on purpose: rolling back is renaming the older
 folder to `CCProxy-current` and launching its tray, no rebuild.
 
+The script reads `%CARGO_TARGET_DIR%` when it is set and falls back to
+`target\` otherwise, so build output can live on another drive without the
+packaging step losing sight of the binaries. Cargo itself honours the same
+variable, so the two stay in step by construction.
+
 **The no-arg build must never target a live instance's directory.** It once did
 (reading the version from Cargo.toml, which equalled the running folder) and
 `rmdir /s /q` deleted a running install's directory; the process survived on the
