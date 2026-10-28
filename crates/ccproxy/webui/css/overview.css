@@ -40,6 +40,15 @@
 
 
 .model-layout { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: start; }
+/* The list lives in its own card, inset in the panel. A square table inside a
+   rounded panel has no boundary of its own: whatever the scroller fails to clip
+   ends up looking like a sliver of row peeking past the panel's curve. The card
+   draws that boundary — border, radius, and the clipping that goes with it — so
+   the table has an edge to be cut along instead of the panel's. */
+.model-table-card {
+  background: var(--surface); border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-card); overflow: hidden;
+}
 /* The model list is unbounded: a busy gateway racks up dozens of entries, and an
    uncapped table then dictates the height of the whole .ov-row — the panel grows
    past the viewport on every poll and drags 状态分布 (and the page scroll length)
@@ -47,26 +56,27 @@
    short list compact instead of leaving an empty scroll area. */
 .model-table-wrap {
   max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
-  /* No border-radius here, deliberately. Rounding the scroller also rounds the
-     sticky header (it is clipped by this box), which leaves a curved notch at
-     each top corner — and the square rows scrolling underneath show through
-     those notches. The panel already owns the rounded outline; this box sits
-     inside its padding and never reaches the curve. */
-  /* A row boundary never lands on the box edge by itself, so scrolling sliced
-     the next row through its glyphs. Fade the last few pixels instead. */
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
-  /* Room for the sticky header's bottom border, which would otherwise be the
-     one pixel a scrollbar-less render clips at the box edge. */
+  /* No fade-out mask here. It looked fine mid-scroll but dimmed the last row
+     once you reached the bottom — the one moment every row has to be readable.
+     The card's own frame is the boundary; a row clipped by it reads as content
+     continuing below, which is exactly what it is. */
+  /* The extra pixel keeps the sticky header's bottom border from being clipped
+     at the box edge. */
   padding-bottom: 1px;
 }
 .model-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
-.model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--outline-variant); font-size: 11.5px; letter-spacing: .2px; }
+.model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 7px 6px 5px; border-bottom: 1px solid var(--outline-variant); font-size: 11.5px; letter-spacing: .2px; }
 .model-table th:first-child { text-align: left; }
 /* Pin the header inside .model-table-wrap; the opaque fill is mandatory, or the
-   rows show through it while scrolling. */
+   rows show through it while scrolling. It is --surface on purpose: that is also
+   the card's fill, so the corners clipped by the card's radius stay invisible. */
 .model-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
 .model-table td { padding: 6px 6px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--outline-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The table runs edge to edge inside the card (no wrapper padding, or the row
+   rules would stop short of the frame). The outer columns get the breathing
+   room instead, so the first and last cells never touch the border. */
+.model-table th:first-child, .model-table td:first-child { padding-left: 10px; }
+.model-table th:last-child, .model-table td:last-child { padding-right: 10px; }
 .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 40%; }
 .model-table th:nth-child(2), .model-table td:nth-child(2) { width: 18%; }
 .model-table th:nth-child(3), .model-table td:nth-child(3) { width: 22%; }
