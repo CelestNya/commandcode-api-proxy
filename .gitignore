@@ -25,4 +25,11 @@ __pycache__/
 
 # Tool session state (not project content)
 .zcode/
-_shots/
+# Verification screenshots and probe scripts live under .probe/ — never in the
+# repository root, which stays reserved for tracked project content.
+.probe/shots/
+# Ad-hoc API dumps written by the probes (the fixture data-light/ stays).
+.probe/*.json
+# Runtime state of the probe instance (pid file, refreshed price cache).
+.probe/data-light/ccproxy.pid
+.probe/data-light/pricing.json
