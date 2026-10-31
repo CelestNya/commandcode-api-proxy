@@ -364,11 +364,11 @@ pub fn migrate_legacy_config(root: &Path, log: &crate::process::LogFile) {
         return;
     }
     match doc.save() {
-        Ok(()) => log.append(&format!(
+        Ok(()) => log.info(&format!(
             "[tray] 已从旧位置合并 {copied} 项配置到 {}",
             target.display()
         )),
-        Err(err) => log.append(&format!(
+        Err(err) => log.warn(&format!(
             "[tray] 旧配置合并失败（{}）：{err}",
             target.display()
         )),

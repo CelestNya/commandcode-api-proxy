@@ -234,7 +234,7 @@ fn windows_main() {
                 let request = match ccproxy::control::take(&config) {
                     Ok(request) => request,
                     Err(err) => {
-                        tick_log.append(&format!("[tray] 控制文件有问题：{err}"));
+                        tick_log.warn(&format!("[tray] 控制文件有问题：{err}"));
                         ccproxy::control::Request::default()
                     }
                 };
@@ -242,7 +242,7 @@ fn windows_main() {
                     // A requested restart supersedes a pending crash-restart:
                     // the child is about to be replaced on purpose.
                     tick_supervision.borrow_mut().cancel();
-                    tick_log.append(&format!(
+                    tick_log.info(&format!(
                         "[tray] 收到重启请求（{}，配置 {}）",
                         restart.reason, restart.revision
                     ));
@@ -322,7 +322,7 @@ fn dispatch(
         }
         tray::Action::InstallUpdate => {
             let Some(config) = settings::proxy_config_path() else {
-                log.append("[tray] 更新切换失败：无法定位 ccproxy.json");
+                log.warn("[tray] 更新切换失败：无法定位 ccproxy.json");
                 return;
             };
             let state = ccproxy::update::load_at(&config);
@@ -336,14 +336,14 @@ fn dispatch(
                         &tray_exe,
                         &staged.version,
                     ) {
-                        Ok(()) => log.append(&format!(
+                        Ok(()) => log.info(&format!(
                             "[tray] 已请求切换到 v{}（{}），下一次检查时执行",
                             staged.version, staged.root
                         )),
-                        Err(err) => log.append(&format!("[tray] 更新切换请求写入失败：{err}")),
+                        Err(err) => log.warn(&format!("[tray] 更新切换请求写入失败：{err}")),
                     }
                 }
-                None => log.append("[tray] 没有已就绪的更新（请先在 WebUI 中下载）"),
+                None => log.info("[tray] 没有已就绪的更新（请先在 WebUI 中下载）"),
             }
         }
         tray::Action::Quit => {
@@ -372,19 +372,19 @@ fn dispatch(
 fn switch_to(handover: &ccproxy::control::Handover, log: &process::LogFile) {
     let tray = std::path::PathBuf::from(&handover.tray);
     if !tray.is_file() {
-        log.append(&format!(
+        log.warn(&format!(
             "[tray] 更新切换失败：找不到 {}（暂存目录可能已被删除）",
             tray.display()
         ));
         return;
     }
     match std::process::Command::new(&tray).spawn() {
-        Ok(child) => log.append(&format!(
+        Ok(child) => log.info(&format!(
             "[tray] 已启动 v{} 的托盘 pid={}，等待其接管",
             handover.version,
             child.id()
         )),
-        Err(err) => log.append(&format!("[tray] 更新切换失败：无法启动新托盘（{err}）")),
+        Err(err) => log.warn(&format!("[tray] 更新切换失败：无法启动新托盘（{err}）")),
     }
 }
 
