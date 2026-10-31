@@ -316,4 +316,48 @@ function initSettings() {
   el("set-restart").addEventListener("click", restartProxy);
   el("upd-check").addEventListener("click", onUpdateCheck);
   el("upd-install").addEventListener("click", onUpdateInstall);
+  initThemePicker();
+}
+
+/* ── 外观：主题切换 ──
+ *
+ * 主题只存在浏览器 localStorage（键 ccproxy.theme），不写 ccproxy.json：
+ * 它是「这台机器上这个浏览器怎么看」的本机偏好，不是代理的行为配置，
+ * 换浏览器或清缓存回到默认深色是可接受的。
+ *
+ * 生效方式是给 <html> 加/去 data-theme —— 主题 CSS 以
+ * `:root[data-theme="…"]` 选择器覆盖颜色令牌，结构令牌与图表系列色不变，
+ * 所以切主题不会重排布局。
+ */
+var THEME_KEYS = ["dark", "light", "jelly"];
+
+function currentTheme() {
+  var t = document.documentElement.getAttribute("data-theme");
+  return THEME_KEYS.indexOf(t) === -1 ? "dark" : t;
+}
+
+function applyTheme(key) {
+  if (THEME_KEYS.indexOf(key) === -1) key = "dark";
+  if (key === "dark") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", key);
+  try { localStorage.setItem("ccproxy.theme", key); } catch (e) { /* 隐私模式：仅本次会话 */ }
+  syncThemeCards();
+}
+
+function syncThemeCards() {
+  var cur = currentTheme();
+  document.querySelectorAll(".theme-card").forEach(function (btn) {
+    btn.setAttribute("aria-pressed", btn.getAttribute("data-theme-key") === cur ? "true" : "false");
+  });
+}
+
+function initThemePicker() {
+  var grid = el("theme-grid");
+  if (!grid) return;
+  grid.addEventListener("click", function (ev) {
+    var btn = ev.target.closest(".theme-card");
+    if (!btn) return;
+    applyTheme(btn.getAttribute("data-theme-key"));
+  });
+  syncThemeCards();
 }

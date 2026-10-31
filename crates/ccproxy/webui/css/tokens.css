@@ -69,6 +69,7 @@
   --radius-card: 12px;     /* inset blocks: the request table's frame, dropdowns */
   --radius-control: 10px;  /* buttons and inputs — the row that used to mix 8px and 999px */
   --radius-pill: 999px;    /* fully round: chips, badges, nav items, self-contained toggles */
+  --radius-micro: 3px;     /* miniatures only: the theme-preview swatch's bars and dots */
 
   /* Transitions. Three durations by distance/size of the change, so hover and
      state feedback across the panel feel like one system. */

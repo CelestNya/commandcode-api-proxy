@@ -25,14 +25,16 @@
 <link rel="stylesheet" href="css/responsive.css">
 
 <!-- 主题在绘制前定下来，否则浅色用户会先看到一帧深色。
-     默认（无 data-theme）是深色；`?theme=` 只给本地对比两套外观用。 -->
+     默认（无 data-theme）是深色；`?theme=` 只给本地对比两套外观用。
+     键名与设置页「外观」面板的主题卡一一对应。 -->
 <script>
 (function () {
+  var THEMES = ["light", "jelly"];
   var want = null;
   var q = new URLSearchParams(location.search).get("theme");
   if (q) want = q;
   else { try { want = localStorage.getItem("ccproxy.theme"); } catch (e) {} }
-  if (want === "light" || want === "jelly") document.documentElement.dataset.theme = want;
+  if (THEMES.indexOf(want) !== -1) document.documentElement.dataset.theme = want;
 })();
 </script>
 </head>
@@ -82,7 +84,7 @@
         <div class="ov-grid">
           <div class="panel">
             <h2>
-              Token 使用趋势
+              用量趋势
               <span class="extra window-picker">
                 <a data-h="1">近1小时</a>
                 <a data-h="24" class="active">24小时</a>
@@ -94,10 +96,36 @@
                 <span class="win-range" id="window-range"></span>
               </span>
             </h2>
-            <div class="trend-chart">
-              <div class="legend" id="trend-legend"></div>
-              <svg id="trend-chart" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
+            <!-- 绝对量与比率分家：Token 和费用是"量"（柱状图，各自独立量程），
+                 命中率是"率"（0–100% 折线）。三张图共用同一套桶几何
+                 （padL/padR/viewBox 宽一致），x 轴刻度只画在最底部一张。 -->
+            <div class="trend-chart" id="trend-chart">
+              <div class="trend-sec">
+                <div class="trend-sec-head">
+                  <span class="trend-sec-title">Token 用量</span>
+                  <span class="trend-sec-note" id="trend-bucket-note"></span>
+                  <div class="legend" id="trend-legend"></div>
+                </div>
+                <svg id="trend-tokens" viewBox="0 0 900 210" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Token 用量分组柱状图"></svg>
+              </div>
+              <div class="trend-sec">
+                <div class="trend-sec-head">
+                  <span class="trend-sec-title">费用</span>
+                  <span class="trend-sec-note">同 x 轴 · 独立量程（USD）</span>
+                </div>
+                <svg id="trend-cost" viewBox="0 0 900 64" preserveAspectRatio="xMidYMid meet" role="img" aria-label="费用柱条"></svg>
+              </div>
+              <div class="trend-sec">
+                <div class="trend-sec-head">
+                  <span class="trend-sec-title">缓存命中率</span>
+                  <span class="trend-sec-note">空桶断线，不插值</span>
+                  <div class="legend" id="trend-rate-legend"></div>
+                </div>
+                <svg id="trend-rate" viewBox="0 0 900 172" preserveAspectRatio="xMidYMid meet" role="img" aria-label="缓存命中率折线与请求数背景柱"></svg>
+              </div>
+              <div class="trend-foot" id="trend-foot"></div>
             </div>
+            <div class="trend-tip" id="trend-tip" hidden></div>
           </div>
 
           <div class="panel">
@@ -250,6 +278,30 @@
             <button class="btn" id="set-restart">重启代理</button>
             <button class="btn primary" id="set-apply" disabled>应用</button>
           </div>
+        </div>
+
+        <!-- 外观：主题存在浏览器本地（localStorage），不写 ccproxy.json。
+             放在设置页而不是侧栏：换主题是低频动作，不该占侧栏的常驻位置。 -->
+        <div class="panel set-panel">
+          <h2>外观</h2>
+          <div class="theme-grid" id="theme-grid">
+            <button class="theme-card" type="button" data-theme-key="dark" aria-pressed="false">
+              <span class="theme-swatch sw-dark" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="theme-name">深色</span>
+              <span class="theme-note">扁平 · 默认</span>
+            </button>
+            <button class="theme-card" type="button" data-theme-key="light" aria-pressed="false">
+              <span class="theme-swatch sw-light" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="theme-name">浅瓷</span>
+              <span class="theme-note">一比一浅色</span>
+            </button>
+            <button class="theme-card" type="button" data-theme-key="jelly" aria-pressed="false">
+              <span class="theme-swatch sw-jelly" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="theme-name">冰态果冻</span>
+              <span class="theme-note">粉紫玻璃</span>
+            </button>
+          </div>
+          <p class="theme-hint">主题只保存在本机浏览器，不写入 ccproxy.json；换浏览器或清缓存会回到默认深色。</p>
         </div>
       </section>
       </div>
