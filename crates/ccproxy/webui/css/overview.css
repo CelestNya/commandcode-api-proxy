@@ -113,23 +113,57 @@
   white-space: nowrap;
 }
 
-/* ── trend chart ── */
+/* ── trend charts（按量 / 按率拆分：Token 柱 / 费用条 / 命中率线） ── */
 .trend-chart svg { width: 100%; height: auto; display: block; }
-/* Chart entrance: each line draws itself (stroke-dashoffset), staggered by
-   its `--i` index, then the data points fade in behind it. */
+.trend-sec { margin-top: 14px; }
+.trend-sec:first-child { margin-top: 0; }
+.trend-sec-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.trend-sec-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.trend-sec-note { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.trend-sec-head .legend { margin-bottom: 0; margin-left: auto; gap: 10px; font-size: 11.5px; }
+/* Square swatch: bar series get a square, line series the default pill.
+   No radius on purpose — the 2px it used to carry is not on the token scale,
+   and a crisp square is what distinguishes it from the pill swatch. */
+.legend i.k-sq { width: 8px; height: 8px; }
+.trend-foot { margin-top: 8px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+
+/* Chart entrance: the hit-rate line draws itself (stroke-dashoffset), bars
+   fade in — one-shot, on explicit refresh only (see applyAnimate). */
 .trend-animate .trend-line {
   stroke-dasharray: 4000;
   stroke-dashoffset: 4000;
   animation: trendDraw 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   animation-delay: calc(var(--i) * 110ms);
 }
-.trend-animate .trend-dot {
+.trend-animate .t-bar {
   opacity: 0;
-  animation: trendDot 0.35s ease forwards;
-  animation-delay: calc(500ms + var(--i) * 110ms);
+  animation: trendFade 0.35s ease forwards;
+  animation-delay: calc(var(--i) * 70ms);
 }
 @keyframes trendDraw { to { stroke-dashoffset: 0; } }
-@keyframes trendDot { from { opacity: 0; } to { opacity: 1; } }
+@keyframes trendFade { to { opacity: 1; } }
+
+/* 悬停明细：fixed 定位跟随光标，深底描边卡，等宽字体 */
+.trend-tip {
+  position: fixed; z-index: 30; pointer-events: none;
+  min-width: 190px; padding: 9px 11px;
+  background: var(--surface-2); border: 1px solid var(--outline-strong);
+  border-radius: var(--radius-card);
+  font: 11.5px/1.7 var(--font-mono); color: var(--text);
+  box-shadow: none;
+}
+.trend-tip .tt-head {
+  display: flex; justify-content: space-between; gap: 12px;
+  border-bottom: 1px solid var(--outline); padding-bottom: 4px; margin-bottom: 4px;
+}
+.trend-tip .tt-head b { color: var(--text); font-weight: 600; }
+.trend-tip .tt-head span { color: var(--muted); }
+.trend-tip .tt-row { display: flex; justify-content: space-between; gap: 12px; }
+.trend-tip .tt-row b { color: var(--muted); font-weight: 400; }
+.trend-tip .tt-cost { color: var(--cost); }
 .legend {
   display: flex;
   gap: 14px;

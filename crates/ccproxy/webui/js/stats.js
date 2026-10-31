@@ -11,15 +11,6 @@ function renderStats(s, animate) {
   renderModels(s.models || []);
 }
 
-/* Cost axis ticks: no trailing zeros and a stable digit count, so the right
-   scale reads "$1 / $0.75 / $0.5 / $0" instead of mixing $1.00 with $0.7500.
-   Cards keep the richer fmtUsd; this is axis-only. */
-function fmtTickUsd(v) {
-  if (v == null || isNaN(v)) return "";
-  if (v >= 1) return "$" + v.toFixed(2);
-  var r = Math.round(v * 1000) / 1000;
-  return "$" + String(r);
-}
 /* X-axis ticks: daily buckets are "10-16", hourly buckets drop the raw ISO
    "T" and read "10-16 15:00" — the machine stamp never reaches the axis. */
 function fmtTickDate(s) {
@@ -64,217 +55,296 @@ function renderSummary(s) {
   renderMiniCards(s);
 }
 
-/* Reduce the daily series to at most `n` points by *picking* days, never by
-   averaging groups of them.
+/* ── 趋势拆分（按量 / 按率） ──
+ *
+ * 绝对量与比率不挤一张图：Token 与费用是"量"，柱状图各自独立量程最直观；
+ * 命中率是"率"，固定 0–100% 折线才诚实（轴被截断会把 93% 的平稳夸成波动）。
+ * 三张图共用同一套桶几何（viewBox 宽、左右边距一致），x 轴刻度只画在最底部。
+ *
+ * 口径：cachedTokens 是 promptTokens 的子集（命中率 = cached / prompt），
+ * 所以 Token 图三根柱（Input / Output / Cache Read）互不叠加，Cache Read
+ * 只是 Input 的一部分 —— 脚注里明说，避免读者把三根柱加总。
+ */
 
-   Averaging was the source of the lumpy curves: a 14-day window bucketed into
-   12 points merged some adjacent days and not others (bucket sizes 1 and 2 in
-   the same series), so a day with 1 token vanished into a bucket that averaged
-   it with a 200k day, and the two busiest days collapsed into a single mean.
-   Picking one representative day per slot keeps every plotted value a real
-   day's value, so the curve's shape is the data's shape. */
-function downsampleTrend(arr, n) {
-  var L = arr.length;
-  if (L <= n) return arr;
+/* 桶数超过 maxGroups 时合并相邻桶：绝对量按求和（柱高 = 覆盖时段总量），
+ * 命中率必须用合并后的 cached/prompt 重算而非取平均——一个小桶会把大桶
+ * 的率拉偏。费用任一子桶计价即求和，全未计价保持 null。 */
+function foldBuckets(raw, maxGroups) {
+  var list = (raw || []).map(function (d) {
+    return {
+      date: d.date,
+      attempts: d.attempts || 0,
+      prompt: d.prompt || 0,
+      completion: d.completion || 0,
+      cached: d.cached || 0,
+      costUsd: d.costUsd == null ? null : d.costUsd,
+      hitRate: d.hitRate == null ? null : d.hitRate
+    };
+  });
+  if (list.length <= maxGroups) return list;
+  var step = Math.ceil(list.length / maxGroups);
   var out = [];
-  var step = L / n;
-  for (var i = 0; i < n; i++) {
-    // The slot's first day is its representative; slots are even in count, so
-    // the gaps between picks stay even too.
-    out.push(arr[Math.floor(i * step)]);
+  for (var i = 0; i < list.length; i += step) {
+    var chunk = list.slice(i, i + step);
+    var t = { date: chunk[0].date, attempts: 0, prompt: 0, completion: 0, cached: 0, cost: 0, priced: false };
+    chunk.forEach(function (c) {
+      t.attempts += c.attempts;
+      t.prompt += c.prompt;
+      t.completion += c.completion;
+      t.cached += c.cached;
+      if (c.costUsd != null) { t.cost += c.costUsd; t.priced = true; }
+    });
+    t.costUsd = t.priced ? t.cost : null;
+    t.hitRate = t.prompt > 0 ? t.cached / t.prompt : null;
+    out.push(t);
   }
-  // Always keep the newest day, which is the one the user is looking at.
-  if (out[out.length - 1] !== arr[L - 1]) out[out.length - 1] = arr[L - 1];
   return out;
 }
 
+/* 取整刻度：段长取 1/2/2.5/5/10 × 10^n，柱顶不顶格浪费 */
+function niceScale(max, divs) {
+  if (max <= 0) max = 1;
+  var raw = max / divs;
+  var exp = Math.pow(10, Math.floor(Math.log10(raw)));
+  var f = raw / exp;
+  var nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+  return { step: nice * exp, top: nice * exp * divs };
+}
+
+/* 三张图共用的取色（CSS 变量，改 token 即换色，见 tokens.css 的 JS 契约） */
+var TREND_COLORS = {
+  input: "var(--primary)", output: "var(--ok)", cached: "var(--chart-7)",
+  cost: "var(--cost)", hit: "var(--chart-hit)", reqBg: "var(--surface-3)"
+};
+
+/* 悬停状态：三张图共享桶索引与十字线。每次渲染重建线元素后按 idx 复原，
+ * 轮询每秒重画时悬停不闪断。 */
+var trendHover = { idx: -1, lines: [] };
+
+function trendBucketX(i, n, ML, MR, W) {
+  var slot = (W - ML - MR) / n;
+  return ML + slot * (i + 0.5);
+}
+
 function renderTrend(raw, animate) {
-  var trend = downsampleTrend(raw, 12);
-  var LEG = [
-    { key: "prompt", name: "Input", color: "var(--primary)" },
-    { key: "completion", name: "Output", color: "var(--ok)" },
-    { key: "cached", name: "Cache Read", color: "var(--aborted)" },
-    { key: "costUsd", name: "Cost", color: "var(--cost)" }
-  ];
-  el("trend-legend").innerHTML = LEG.map(function (l) {
-    return '<span><i style="background:' + l.color + '"></i>' + l.name + '</span>';
-  }).join("");
-  var svg = el("trend-chart");
-  /* The viewBox shrinks to a phone-friendly aspect on narrow screens: a 900x300
-     box scaled into a 300px-wide column renders its 10px labels at ~3px. A
-     squarer box keeps the type legible, at the cost of a shorter time axis. */
-  var narrow = svg.clientWidth > 0 && svg.clientWidth < 520;
-  var W = narrow ? 420 : 900, H = narrow ? 300 : 300;
-  var ML = narrow ? 56 : 78, MR = narrow ? 46 : 62, MT = 14, MB = 34;
-  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-  var pw = W - ML - MR, ph = H - MT - MB;
-  if (!trend.length) {
-    svg.innerHTML =
-      '<g stroke="var(--outline-variant)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M' + (W / 2 - 100) + ' 152 L' + (W / 2 - 55) + ' 152 L' + (W / 2 - 10) + ' 128 L' + (W / 2 + 35) + ' 176 L' + (W / 2 + 80) + ' 176"/>' +
-      '<circle cx="' + (W / 2 - 100) + '" cy="152" r="2.4" fill="var(--bg)"/>' +
-      '<circle cx="' + (W / 2 - 55) + '" cy="152" r="2.4" fill="var(--bg)"/>' +
-      '<circle cx="' + (W / 2 - 10) + '" cy="128" r="2.4" fill="var(--bg)"/>' +
-      '<circle cx="' + (W / 2 + 35) + '" cy="176" r="2.4" fill="var(--bg)"/>' +
-      '<circle cx="' + (W / 2 + 80) + '" cy="176" r="2.4" fill="var(--bg)"/>' +
-      '</g>' +
-      '<text x="' + (W / 2) + '" y="200" fill="var(--muted)" font-size="13" text-anchor="middle">所选时段内暂无请求</text>';
+  var svgT = el("trend-tokens"), svgC = el("trend-cost"), svgR = el("trend-rate");
+  var narrow = svgT.clientWidth > 0 && svgT.clientWidth < 520;
+  var W = narrow ? 420 : 900;
+  var ML = narrow ? 40 : 48, MR = narrow ? 44 : 48;
+  var buckets = foldBuckets(raw, narrow ? 24 : 48);
+  var n = buckets.length;
+  trendHover.lines = [];
+
+  /* 悬停明细（含命中率与费用），跟随光标。 */
+  var tip = el("trend-tip");
+  function showTip(d, ev) {
+    var totalIn = (d.prompt || 0);
+    tip.innerHTML =
+      "<div class='tt-head'><b>" + esc(fmtTickDate(d.date)) + "</b><span>" + fmtNum(d.attempts) + " 请求</span></div>" +
+      "<div class='tt-row'><b>Input</b><span>" + fmtNum(d.prompt) + (d.cached > 0 ? "（含缓存 " + fmtNum(d.cached) + "）" : "") + "</span></div>" +
+      "<div class='tt-row'><b>Output</b><span>" + fmtNum(d.completion) + "</span></div>" +
+      "<div class='tt-row'><b>Cache Read</b><span>" + fmtNum(d.cached) + "</span></div>" +
+      "<div class='tt-row'><b>费用</b><span class='tt-cost'>" + (d.costUsd != null ? fmtUsd(d.costUsd) : "—") + "</span></div>" +
+      "<div class='tt-row'><b>命中率</b><span>" + fmtPct(d.hitRate) + "</span></div>" +
+      (totalIn > 0 && d.attempts > 0 ? "<div class='tt-row'><b>单请求均费</b><span class='tt-cost'>" + fmtUsd(d.costUsd / d.attempts) + "</span></div>" : "");
+    tip.hidden = false;
+    var tw = tip.offsetWidth, th = tip.offsetHeight;
+    var left = ev.clientX + 14, top = ev.clientY - th - 10;
+    if (left + tw > window.innerWidth - 8) left = ev.clientX - tw - 14;
+    if (top < 8) top = ev.clientY + 16;
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  }
+  function hideTip() {
+    tip.hidden = true;
+    trendHover.idx = -1;
+    trendHover.lines.forEach(function (l) { l.setAttribute("opacity", 0); });
+  }
+  function moveHover(ev) {
+    if (!n) return;
+    var r = svgT.getBoundingClientRect();
+    if (!r.width) return;
+    var x = (ev.clientX - r.left) * (W / r.width);
+    var slot = (W - ML - MR) / n;
+    var idx = Math.max(0, Math.min(n - 1, Math.floor((x - ML) / slot)));
+    trendHover.idx = idx;
+    var cx = trendBucketX(idx, n, ML, MR, W);
+    trendHover.lines.forEach(function (l) {
+      l.setAttribute("x1", cx); l.setAttribute("x2", cx); l.setAttribute("opacity", 1);
+    });
+    showTip(buckets[idx], ev);
+  }
+  [svgT, svgC, svgR].forEach(function (svg) {
+    svg.onmousemove = moveHover;
+    svg.onmouseleave = hideTip;
+  });
+
+  /* 空态：三张图各给一句短文案，不再画装饰折线 */
+  if (!n || buckets.every(function (d) { return d.attempts === 0 && !d.prompt && !d.completion && !d.cached; })) {
+    function emptySvg(svg, H, msg) {
+      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+      svg.innerHTML = "<text x='" + W / 2 + "' y='" + H / 2 + "' fill='var(--muted)' font-size='12' text-anchor='middle'>" + msg + "</text>";
+    }
+    emptySvg(svgT, 210, "所选时段内暂无请求");
+    emptySvg(svgC, 64, "无费用数据");
+    emptySvg(svgR, 172, "无请求数据");
+    el("trend-legend").innerHTML = "";
+    el("trend-rate-legend").innerHTML = "";
+    el("trend-bucket-note").textContent = "";
+    el("trend-foot").textContent = "";
+    [svgT, svgC, svgR].forEach(function (svg) { svg.classList.remove("trend-animate"); });
     return;
   }
-  var maxTok = 0, maxCost = 0;
-  trend.forEach(function (d) {
-    maxTok = Math.max(maxTok, (d.prompt || 0), (d.completion || 0), (d.cached || 0));
-    if (d.costUsd != null) maxCost = Math.max(maxCost, d.costUsd);
+
+  /* 图一：Token 分组柱（Input / Output / Cache Read，同一量程） */
+  el("trend-legend").innerHTML =
+    "<span><i class='k-sq' style='background:" + TREND_COLORS.input + "'></i>Input</span>" +
+    "<span><i class='k-sq' style='background:" + TREND_COLORS.output + "'></i>Output</span>" +
+    "<span><i class='k-sq' style='background:" + TREND_COLORS.cached + "'></i>Cache Read</span>";
+  drawTokenBars(svgT, buckets, W, ML, MR, narrow, animate);
+  /* 图二：费用条（同 x 轴，独立量程） */
+  drawCostBars(svgC, buckets, W, ML, MR, animate);
+  /* 图三：命中率折线 + 请求数淡柱（x 轴刻度画在这里） */
+  el("trend-rate-legend").innerHTML =
+    "<span><i style='background:" + TREND_COLORS.hit + "'></i>命中率</span>" +
+    "<span><i class='k-sq' style='background:" + TREND_COLORS.reqBg + "'></i>请求数</span>";
+  drawRateChart(svgR, buckets, W, ML, MR, narrow, animate);
+
+  var active = buckets.filter(function (d) { return d.attempts > 0; }).length;
+  el("trend-bucket-note").textContent = active + "/" + n + " 桶有数据";
+  el("trend-foot").textContent =
+    (narrow ? "" : "Cache Read 含在 Input 内，三根柱互不叠加 · ") +
+    "空桶无柱、命中率断开 · 悬停看整桶明细";
+}
+
+/* Token 分组柱：三根一组，同一量程，取整刻度。 */
+function drawTokenBars(svg, buckets, W, ML, MR, narrow, animate) {
+  var H = 210, MT = 10, MB = 6;
+  var pw = W - ML - MR, ph = H - MT - MB;
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  var maxTok = 0;
+  buckets.forEach(function (d) {
+    maxTok = Math.max(maxTok, d.prompt, d.completion, d.cached);
   });
-  if (maxTok <= 0) maxTok = 1;
-  if (maxCost <= 0) maxCost = 1;
-  function x(i) { return ML + (trend.length === 1 ? pw / 2 : pw * i / (trend.length - 1)); }
-  function yTok(v) { return MT + ph - (v / maxTok) * ph; }
-  function yCost(v) { return MT + ph - ((v == null ? 0 : v) / maxCost) * ph; }
+  var sc = niceScale(maxTok, 5), top = sc.top;
+  var out = "";
+  for (var g = 0; g <= 5; g++) {
+    var y = MT + ph * g / 5;
+    out += "<line x1='" + ML + "' y1='" + y + "' x2='" + (W - MR) + "' y2='" + y + "' stroke='var(--outline-variant)' stroke-width='1'/>";
+    out += "<text x='" + (ML - 8) + "' y='" + (y + 3.5) + "' fill='var(--muted)' font-size='10' text-anchor='end'>" + fmtTokens(Math.round(top * (1 - g / 5))) + "</text>";
+  }
+  var n = buckets.length, slot = pw / n;
+  var gw = Math.min(slot * 0.66, 34);           /* 宽桶（≤10 根）不铺满，居中留白 */
+  var bw = Math.max(1, (gw - 3) / 3);
+  var vals = ["prompt", "completion", "cached"], cols = [TREND_COLORS.input, TREND_COLORS.output, TREND_COLORS.cached];
+  buckets.forEach(function (d, idx) {
+    var x0 = ML + slot * idx + (slot - gw) / 2;
+    vals.forEach(function (k, j) {
+      var v = d[k] || 0;
+      if (v <= 0) return;
+      var bh = Math.max(1.5, ph * v / top);
+      out += "<rect class='t-bar' style='--i:" + j + "' x='" + (x0 + j * (bw + 1.5)).toFixed(1) + "' y='" + (MT + ph - bh).toFixed(1) +
+             "' width='" + bw.toFixed(1) + "' height='" + bh.toFixed(1) + "' fill='" + cols[j] + "' rx='1.5'/>";
+    });
+  });
+  out += "<line class='trend-cross' x1='0' y1='" + MT + "' x2='0' y2='" + (MT + ph) + "' stroke='var(--outline-strong)' stroke-width='1' stroke-dasharray='3 3' opacity='0'/>";
+  svg.innerHTML = out;
+  trendHover.lines.push(svg.querySelector(".trend-cross"));
+  applyAnimate(svg, animate);
+}
+
+/* 费用条：独立量程，只标最大值。未计价窗口给一句说明而不是空图。 */
+function drawCostBars(svg, buckets, W, ML, MR, animate) {
+  var H = 64, MT = 8, MB = 6;
+  var pw = W - ML - MR, ph = H - MT - MB;
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  var maxCost = 0, anyPriced = false;
+  buckets.forEach(function (d) {
+    if (d.costUsd != null) { maxCost = Math.max(maxCost, d.costUsd); anyPriced = true; }
+  });
+  if (!anyPriced) {
+    svg.innerHTML = "<text x='" + W / 2 + "' y='" + (H / 2 + 4) + "' fill='var(--muted)' font-size='11' text-anchor='middle'>窗口内无计价数据（未定价模型或未启用计费）</text>";
+    svg.classList.remove("trend-animate");
+    return;
+  }
+  var top = maxCost * 1.1;
+  var out = "<line x1='" + ML + "' y1='" + (MT + ph) + "' x2='" + (W - MR) + "' y2='" + (MT + ph) + "' stroke='var(--outline-variant)' stroke-width='1'/>";
+  out += "<text x='" + (ML - 8) + "' y='" + (MT + 3.5) + "' fill='var(--muted)' font-size='10' text-anchor='end'>" + fmtUsd(top) + "</text>";
+  var n = buckets.length, slot = pw / n;
+  var bw = Math.min(slot * 0.6, 26);
+  buckets.forEach(function (d, idx) {
+    if (!(d.costUsd > 0)) return;
+    var bh = Math.max(1.5, ph * d.costUsd / top);
+    out += "<rect class='t-bar' style='--i:3' x='" + (ML + slot * idx + (slot - bw) / 2).toFixed(1) + "' y='" + (MT + ph - bh).toFixed(1) +
+           "' width='" + bw.toFixed(1) + "' height='" + bh.toFixed(1) + "' fill='" + TREND_COLORS.cost + "' opacity='.85' rx='1.5'/>";
+  });
+  out += "<line class='trend-cross' x1='0' y1='" + MT + "' x2='0' y2='" + (MT + ph) + "' stroke='var(--outline-strong)' stroke-width='1' stroke-dasharray='3 3' opacity='0'/>";
+  svg.innerHTML = out;
+  trendHover.lines.push(svg.querySelector(".trend-cross"));
+  applyAnimate(svg, animate);
+}
+
+/* 命中率：固定 0–100% 折线，null 断线分段；背景淡柱是请求数（独立右轴）。
+ * 只有孤点（前后都断）才画点，线本身不撒点。x 轴刻度只画这张图。 */
+function drawRateChart(svg, buckets, W, ML, MR, narrow, animate) {
+  var H = 172, MT = 10, MB = 26;
+  var pw = W - ML - MR, ph = H - MT - MB;
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  var maxReqs = 0;
+  buckets.forEach(function (d) { maxReqs = Math.max(maxReqs, d.attempts); });
   var out = "";
   for (var g = 0; g <= 4; g++) {
-    var gy = MT + ph * g / 4;
-    var val = maxTok * (1 - g / 4);
-    out += '<line x1="' + ML + '" y1="' + gy + '" x2="' + (W - MR) + '" y2="' + gy + '" stroke="var(--outline-variant)" stroke-width="1"/>';
-    out += '<text x="' + (ML - 8) + '" y="' + (gy + 4) + '" fill="var(--muted)" font-size="10" text-anchor="end">' + fmtTokens(Math.round(val)) + '</text>';
-  }
-  /* right axis: cost, 0 → maxCost across the window */
-  for (var p = 0; p <= 4; p++) {
-    var py = MT + ph * p / 4;
-    var cv = maxCost * (1 - p / 4);
-    out += '<text x="' + (W - MR + 8) + '" y="' + (py + 4) + '" fill="var(--muted)" font-size="10">' + fmtTickUsd(cv) + '</text>';
-  }
-  var step = Math.max(1, Math.ceil(trend.length / 8));
-  trend.forEach(function (d, i) {
-    if (i % step !== 0 && i !== trend.length - 1) return;
-    out += '<text x="' + x(i) + '" y="' + (H - 14) + '" fill="var(--muted)" font-size="10" text-anchor="middle">' + fmtTickDate(d.date) + '</text>';
-  });
-  function pts(key, yfn) {
-    var arr = [];
-    trend.forEach(function (d, i) {
-      var v = d[key];
-      if (v == null) return;
-      arr.push([x(i), yfn(v)]);
-    });
-    return arr;
-  }
-  /* Shape-preserving cubic (Fritsch-Carlson PCHIP) with rounded extrema.
-     Plain PCHIP forces the tangent to zero at every local extremum, which
-     guarantees the curve cannot overshoot but turns each peak into a flat top
-     and each trough into a sharp corner — the visible "kinks" reported.
-
-     The fix keeps the no-overshoot guarantee and relaxes only the flatness:
-     at an extremum the tangent is set to a small fraction of the monotonicity
-     bound `3*min(|adjacent secants|)` instead of 0. The curve leaves the peak
-     with a gentle slope, so the vertex is round, and because the slope stays
-     under the bound the segment still cannot exceed the data's envelope. */
-  var EXTREMUM_TANGENT = 0.35; // fraction of the monotonicity bound
-
-  function pchipSlopes(xs, ys) {
-    var n = xs.length, m = new Array(n);
-    if (n === 1) { m[0] = 0; return m; }
-    var d = new Array(n - 1);
-    for (var i = 0; i < n - 1; i++) d[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
-    if (n === 2) { m[0] = d[0]; m[1] = d[0]; return m; }
-    for (var i = 1; i < n - 1; i++) {
-      var left = d[i - 1], right = d[i];
-      if (left === 0 || right === 0) { m[i] = 0; continue; }
-      if (left * right < 0) {
-        // Local extremum: a bounded non-zero tangent rounds the vertex while
-        // staying inside the envelope (the bound is 3*min(|d|) for a
-        // monotone-preserving cubic).
-        var bound = 3 * Math.min(Math.abs(left), Math.abs(right));
-        m[i] = Math.sign(right) * bound * EXTREMUM_TANGENT;
-        continue;
-      }
-      var h0 = xs[i] - xs[i - 1], h1 = xs[i + 1] - xs[i];
-      var w1 = 2 * h1 + h0, w2 = h1 + 2 * h0;
-      m[i] = (w1 + w2) / (w1 / left + w2 / right);
+    var y = MT + ph * g / 4;
+    out += "<line x1='" + ML + "' y1='" + y + "' x2='" + (W - MR) + "' y2='" + y + "' stroke='var(--outline-variant)' stroke-width='1'/>";
+    out += "<text x='" + (ML - 8) + "' y='" + (y + 3.5) + "' fill='var(--muted)' font-size='10' text-anchor='end'>" + (100 - g * 25) + "%</text>";
+    if (maxReqs > 0) {
+      out += "<text x='" + (W - MR + 8) + "' y='" + (y + 3.5) + "' fill='var(--muted)' font-size='10'>" + Math.round(maxReqs * (1 - g / 4)) + "</text>";
     }
-    m[0] = endSlope(xs[0], xs[1], xs[2], ys[0], ys[1], ys[2], d[0], d[1]);
-    m[n - 1] = endSlope(
-      xs[n - 1], xs[n - 2], xs[n - 3],
-      ys[n - 1], ys[n - 2], ys[n - 3],
-      d[n - 2], d[n - 3]
-    );
-    return m;
   }
-  /* One-sided three-point endpoint slope, clamped so it cannot overshoot.
-     `h1`/`d1` belong to the segment next to the endpoint, `h2`/`d2` the one
-     after it. */
-  function endSlope(x0, x1, x2, y0, y1, y2, d1, d2) {
-    var h1 = x1 - x0, h2 = x2 - x1;
-    var s = ((2 * h1 + h2) * d1 - h1 * d2) / (h1 + h2);
-    if (s * d1 <= 0) return 0;                       // sign change: flat
-    if (d1 * d2 <= 0 && Math.abs(s) > Math.abs(3 * d1)) return 3 * d1;
-    return s;
-  }
-  function pchipPath(ps) {
-    var n = ps.length;
-    if (!n) return "";
-    if (n === 1) return "M" + ps[0][0].toFixed(1) + " " + ps[0][1].toFixed(1);
-    if (n === 2) return "M" + ps[0][0].toFixed(1) + " " + ps[0][1].toFixed(1) + " L" + ps[1][0].toFixed(1) + " " + ps[1][1].toFixed(1);
-    var xs = [], ys = [];
-    ps.forEach(function (pt) { xs.push(pt[0]); ys.push(pt[1]); });
-    var m = pchipSlopes(xs, ys);
-    var d = "M" + xs[0].toFixed(1) + " " + ys[0].toFixed(1);
-    for (var i = 0; i < n - 1; i++) {
-      var h = xs[i + 1] - xs[i];
-      var c1x = xs[i] + h / 3, c1y = ys[i] + m[i] * h / 3;
-      var c2x = xs[i + 1] - h / 3, c2y = ys[i + 1] - m[i + 1] * h / 3;
-      d += " C" + c1x.toFixed(1) + " " + c1y.toFixed(1) + "," + c2x.toFixed(1) + " " + c2y.toFixed(1) + "," + xs[i + 1].toFixed(1) + " " + ys[i + 1].toFixed(1);
+  var n = buckets.length, slot = pw / n;
+  var bw = Math.min(slot * 0.6, 26);
+  buckets.forEach(function (d, idx) {
+    if (d.attempts <= 0) return;
+    var bh = ph * d.attempts / maxReqs;
+    out += "<rect class='t-bar' style='--i:4' x='" + (ML + slot * idx + (slot - bw) / 2).toFixed(1) + "' y='" + (MT + ph - bh).toFixed(1) +
+           "' width='" + bw.toFixed(1) + "' height='" + bh.toFixed(1) + "' fill='" + TREND_COLORS.reqBg + "' rx='1.5'/>";
+  });
+  /* 命中率线：null 断开，分段绘制（不插值） */
+  var seg = [], segs = [];
+  buckets.forEach(function (d, idx) {
+    var cx = ML + slot * (idx + 0.5);
+    if (d.hitRate == null) { if (seg.length) segs.push(seg); seg = []; return; }
+    seg.push([cx, MT + ph * (1 - d.hitRate)]);
+  });
+  if (seg.length) segs.push(seg);
+  var lineIdx = 0;
+  segs.forEach(function (s) {
+    if (s.length >= 2) {
+      out += "<polyline class='trend-line' style='--i:" + lineIdx + "' points='" +
+             s.map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ") +
+             "' fill='none' stroke='" + TREND_COLORS.hit + "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/>";
+      lineIdx++;
+    } else if (s.length === 1) {
+      out += "<circle class='trend-dot' style='--i:" + lineIdx + "' cx='" + s[0][0].toFixed(1) + "' cy='" + s[0][1].toFixed(1) +
+             "' r='2.4' fill='" + TREND_COLORS.hit + "' stroke='var(--bg)' stroke-width='1'/>";
+      lineIdx++;
     }
-    return d;
-  }
-  var sIn = pts("prompt", yTok), sOut = pts("completion", yTok), sCa = pts("cached", yTok);
-  var sCost = pts("costUsd", yCost);
-  /* Lines are drawn in a fixed order and each carries its series name in a
-     data attribute, so a CSS stagger can animate them one after another and
-     the legend could highlight them later. */
-  var SERIES = [
-    { pts: sCost, color: "var(--cost)", width: 1.8, name: "costUsd" },
-    { pts: sOut, color: "var(--ok)", width: 2, name: "completion", fill: 0.09 },
-    { pts: sCa, color: "var(--aborted)", width: 2, name: "cached", fill: 0.1 },
-    { pts: sIn, color: "var(--primary)", width: 2, name: "prompt", fill: 0.12 }
-  ];
-  /* Area fills under the three token series, drawn before the lines. Cost
-     stays a bare line: it lives on the right axis, and a filled amber area
-     would read as token volume. The fills exist for the tails — after the
-     last request the curves descend to the baseline as visible sloped areas
-     instead of vanishing, which is what made the right side of the chart
-     look broken. */
-  var baseY = MT + ph;
-  SERIES.forEach(function (se) {
-    if (!se.fill || se.pts.length < 2) return;
-    var d = pchipPath(se.pts);
-    if (!d) return;
-    out += '<path class="trend-area" d="' + d +
-           ' L' + se.pts[se.pts.length - 1][0].toFixed(1) + ' ' + baseY.toFixed(1) +
-           ' L' + se.pts[0][0].toFixed(1) + ' ' + baseY.toFixed(1) + ' Z" ' +
-           'fill="' + se.color + '" fill-opacity="' + se.fill + '" stroke="none"/>';
   });
-  SERIES.forEach(function (se, idx) {
-    var d = pchipPath(se.pts);
-    out += '<path class="trend-line" data-series="' + se.name + '" style="--i:' + idx + '" ' +
-           'd="' + d + '" fill="none" stroke="' + se.color + '" stroke-width="' + se.width + '" ' +
-           'stroke-linejoin="round" stroke-linecap="round"/>';
+  /* x 轴刻度（全面板唯一一处） */
+  var step = Math.max(1, Math.ceil(n / (narrow ? 4 : 8)));
+  buckets.forEach(function (d, idx) {
+    if (idx % step !== 0 && idx !== n - 1) return;
+    out += "<text x='" + (ML + slot * (idx + 0.5)).toFixed(1) + "' y='" + (H - 8) + "' fill='var(--muted)' font-size='10' text-anchor='middle'>" + fmtTickDate(d.date) + "</text>";
   });
-  /* data points, denser for short windows and sampled for long ones */
-  var dotStep = Math.max(1, Math.ceil(trend.length / 14));
-  SERIES.forEach(function (se, si) {
-    var r = se.name === "costUsd" ? 2 : 2.6;
-    se.pts.forEach(function (pt, idx) {
-      if (idx % dotStep !== 0 && idx !== se.pts.length - 1) return;
-      out += '<circle class="trend-dot" style="--i:' + si + '" cx="' + pt[0].toFixed(1) + '" cy="' + pt[1].toFixed(1) + '" r="' + r + '" fill="' + se.color + '" stroke="var(--bg)" stroke-width="1"/>';
-    });
-  });
+  out += "<line class='trend-cross' x1='0' y1='" + MT + "' x2='0' y2='" + (MT + ph) + "' stroke='var(--outline-strong)' stroke-width='1' stroke-dasharray='3 3' opacity='0'/>";
   svg.innerHTML = out;
-  /* Only animate when asked, and always say so explicitly on the class: the
-     poll re-renders every second, and a rebuild under a stale `trend-animate`
-     class replays the draw-in on fresh paths every single time (the chart
-     twitched nonstop until this became an if/else). Removing the class on the
-     quiet path renders the final state immediately; the forced reflow on the
-     animated path restarts it from scratch. */
+  trendHover.lines.push(svg.querySelector(".trend-cross"));
+  applyAnimate(svg, animate);
+}
+
+/* 入场动画只在刻意刷新时加 class；轮询的 quiet 路径移除它，
+ * 否则每秒重画都会重播一次（旧图 twitch 的教训，见 git blame）。 */
+function applyAnimate(svg, animate) {
   if (animate) {
     svg.classList.add("trend-animate");
     void svg.getBoundingClientRect(); // restart the animation
