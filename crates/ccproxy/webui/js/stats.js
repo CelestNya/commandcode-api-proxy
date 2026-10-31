@@ -146,7 +146,11 @@ function renderTrend(raw, animate) {
       "<div class='tt-row'><b>Cache Read</b><span>" + fmtNum(d.cached) + "</span></div>" +
       "<div class='tt-row'><b>费用</b><span class='tt-cost'>" + (d.costUsd != null ? fmtUsd(d.costUsd) : "—") + "</span></div>" +
       "<div class='tt-row'><b>命中率</b><span>" + fmtPct(d.hitRate) + "</span></div>" +
-      (totalIn > 0 && d.attempts > 0 ? "<div class='tt-row'><b>单请求均费</b><span class='tt-cost'>" + fmtUsd(d.costUsd / d.attempts) + "</span></div>" : "");
+      /* 均费只在费用已知时给：costUsd 为 null 表示「没计价」，不是「零成本」
+         ——null / attempts 在 JS 里等于 0,会把未知误报成 $0.0000。 */
+      (totalIn > 0 && d.attempts > 0 && d.costUsd != null
+        ? "<div class='tt-row'><b>单请求均费</b><span class='tt-cost'>" + fmtUsd(d.costUsd / d.attempts) + "</span></div>"
+        : "");
     tip.hidden = false;
     var tw = tip.offsetWidth, th = tip.offsetHeight;
     var left = ev.clientX + 14, top = ev.clientY - th - 10;

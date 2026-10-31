@@ -26,7 +26,7 @@ async function main() {
   }
 
   // ---- 1440 宽，先切到 30 天窗口（探针库数据在 10 月中下旬，24h 窗口为空） ----
-  await send("Page.navigate", { url: "http://127.0.0.1:8797/webui/#/stats" });
+  await send("Page.navigate", { url: "http://127.0.0.1:8796/webui/#/stats" });
   await new Promise((r) => setTimeout(r, 2500));
   await evalJs(`(async () => {
     document.querySelector('.window-picker a[data-h="720"]').click();
@@ -64,15 +64,17 @@ async function main() {
   console.log("== 1440 24h ==", JSON.stringify(r, null, 1));
   await shot("trend-1440");
 
-  // ---- 悬停 tooltip ----
+  // ---- 悬停 tooltip：悬到一根真实的柱子上（空桶的均费无意义）----
   r = await evalJs(`(async () => {
     const svg = document.getElementById("trend-tokens");
-    const rect = svg.getBoundingClientRect();
-    const cx = rect.left + rect.width * 0.6, cy = rect.top + rect.height * 0.5;
+    const bars = [...svg.querySelectorAll(".t-bar")];
+    const bar = bars[Math.floor(bars.length / 2)] || bars[0];
+    const rect = bar.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
     svg.dispatchEvent(new MouseEvent("mousemove", { clientX: cx, clientY: cy, bubbles: true }));
-    await new Promise(r => setTimeout(r, 120));
+    await new Promise(r => setTimeout(r, 150));
     const tip = document.getElementById("trend-tip");
-    const out = { tipHidden: tip.hidden, tipText: tip.innerText, crossVisible: [...document.querySelectorAll(".trend-cross")].map(l => l.getAttribute("opacity")) };
+    const out = { tipHidden: tip.hidden, tipText: tip.innerText, barColor: getComputedStyle(bar).fill };
     return out;
   })()`);
   console.log("== hover ==", JSON.stringify(r, null, 1));
