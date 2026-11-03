@@ -40,3 +40,6 @@ __pycache__/
 .probe/e2e-*/
 .probe/cli-test/
 .probe/upd/
+# A copy of data-light/ the panel smoke test runs against, so a probe run cannot
+# append rows to the fixture the other probes read.
+.probe/smoke-data/
