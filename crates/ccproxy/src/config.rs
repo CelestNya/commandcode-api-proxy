@@ -68,7 +68,7 @@ pub struct Config {
     /// How many times a silent attempt is re-sent before the client is told.
     pub no_output_retries: u64,
     /// Maximum request body size in bytes (Content-Length pre-check + streaming
-    /// guard). Always [`MAX_BODY_BYTES`]; kept as a field so tests can construct
+    /// guard). Always `MAX_BODY_BYTES`; kept as a field so tests can construct
     /// a config with a smaller gate.
     pub max_body_bytes: u64,
     /// Inline-screenshot quality compression. Deterministic and cache-safe by

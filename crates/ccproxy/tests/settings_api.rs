@@ -284,9 +284,22 @@ fn installing_nothing_is_refused_rather_than_starting_a_pointless_job() {
         Some(&json!({"action": "install"})),
     );
     assert_eq!(status, 400, "{body}");
-    assert!(json_of(&body)["error"]
+    // Which refusal comes first depends on the platform: a build without an
+    // in-app updater (Linux) rejects the action before it looks at the state,
+    // because "use your package manager" is the useful answer there. Both are
+    // 400 before any job starts, which is what this test is about.
+    let error = json_of(&body)["error"]
         .as_str()
         .unwrap_or_default()
-        .contains("没有可安装"));
+        .to_string();
+    assert!(
+        error.contains("没有可安装") || error.contains("本平台不支持"),
+        "{error}"
+    );
+    assert_eq!(
+        json_of(&body)["started"],
+        json!(null),
+        "a refusal must not report a started job"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

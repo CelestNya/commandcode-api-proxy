@@ -167,12 +167,12 @@ fn cache_path() -> PathBuf {
     crate::billing::billing_dir().join(CACHE_FILE)
 }
 
-/// The persisted version, if it is still within [`CACHE_TTL_SECS`].
+/// The persisted version, if it is still within `CACHE_TTL_SECS`.
 fn fresh_cached_version(now: u64) -> Option<String> {
     fresh_cached_version_at(&cache_path(), now)
 }
 
-/// [`fresh_cached_version`] against an explicit path, so the TTL and the
+/// `fresh_cached_version` against an explicit path, so the TTL and the
 /// parsing can be tested without touching the real data directory.
 fn fresh_cached_version_at(path: &std::path::Path, now: u64) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;

@@ -17,7 +17,7 @@
 //!   must not be able to write outside the staging directory it was given.
 //!   Backslash separators are normalised to `/` first — Windows' own archiver
 //!   writes them, so refusing the whole package over a separator is not an
-//!   option (see [`safe_relative`]).
+//!   option (see `safe_relative`).
 //! * **No size bombs.** Declared uncompressed sizes are checked against a cap
 //!   before anything is allocated, and the inflated output is capped again
 //!   while reading (a header can lie).
