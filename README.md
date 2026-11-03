@@ -330,10 +330,11 @@ CC_IMAGE_COMPRESS_QUALITY=80   # 1-100，默认 80
 `errorTag` 列，两处写法一致。完整词表与设计缘由见
 [`docs/adr/0001`](docs/adr/0001-transport-failure-classification.md)。
 
-**遇到 413 怎么办？** 请求体超限。上限有两层：代理本地（默认 10 MiB）和上游
-硬顶（32 MB）。历史里反复重发的截图是大头 —— 开启[截图压缩](#截图压缩v070)、
-或在客户端用 `/compact` 压缩对话历史；也可以用 `CC_MAX_BODY_BYTES` /
-`"maxBodyBytes"` 调本地上限（最高 32 MiB，对齐上游）。
+**遇到 413 怎么办？** 请求体超过 32 MiB —— 这个上限就是上游硬顶，代理不提供
+调节旋钮（调低只会把同一个 413 提前，调高不可能）。历史里反复重发的截图是大头：
+开启[截图压缩](#截图压缩v070)，或在客户端用 `/compact` 压缩对话历史。开启压缩
+时代理的入口闸门会放宽到 128 MiB 以容纳 base64 膨胀后的原始体积，转发出去的
+仍然是压缩后的那一份。
 
 **出站代理（Clash 等）怎么配？** 默认 `"default"`：启动时探测 Windows 系统代理，
 真正能通才用，不通自动回退直连。写在代理同目录的 `service/ccproxy.json`：
@@ -395,7 +396,6 @@ CONNECT 又把隧道掐断，常见于 Clash 出口节点失效），代理就�
 | `CC_IDLE_TIMEOUT_MS` | 流已开始出字后，两个数据块之间允许的最大间隔（默认 `120000` / 2 分钟）。`0` 关闭 |
 | `CC_NO_OUTPUT_TIMEOUT_MS` | 一个尝试**完全无字节**超过多久就丢弃重发（默认 `30000` / 30 秒）。只在首字节前生效；`0` 关闭 |
 | `CC_NO_OUTPUT_RETRIES` | 无输出尝试最多重发几次（默认 `3`，上限 `10`）。`0` 关闭 |
-| `CC_MAX_BODY_BYTES` | 请求体上限（默认 `10 MiB`，**上限 `32 MiB`** —— 对齐上游硬顶）。大图/PDF 场景调大 |
 | `CC_IMAGE_COMPRESS` | 截图压缩开关（`1`/`true`/`on` 开启，默认关）。见[截图压缩](#截图压缩v070) |
 | `CC_IMAGE_COMPRESS_QUALITY` | 压缩质量 `1`–`100`（默认 `80`） |
 | `CC_NO_TOOLS_GUARD` | 设为 `off` 可关闭给无工具会话注入的"工具已禁用"提示 |
@@ -404,8 +404,13 @@ CONNECT 又把隧道掐断，常见于 Clash 出口节点失效），代理就�
 | `LOG_LEVEL` | 日志级别（`debug` / `info` / `warn` / `error`） |
 | `CORS_ORIGIN` | `Access-Control-Allow-Origin` 的值，默认 `*`；空字符串关闭 CORS |
 
-配置文件（`service/ccproxy.json`）用小驼峰对应同名项：`maxBodyBytes`、
-`imageCompress`、`imageCompressQuality`、`imageCompressMinBytes` 等。
+配置文件（`service/ccproxy.json`）用小驼峰对应同名项：`imageCompress`、
+`imageCompressQuality`、`imageCompressMinBytes` 等。
+
+请求体上限没有对应的环境变量或配置项：它固定等于上游硬顶 32 MiB（理由见上面的
+[413 说明](#排错)）。`noProxy` 与 `ccApiBase` 也从 WebUI 设置页撤掉了 —— 它们仍可
+写在配置文件里，或用 `NO_PROXY` / `CC_API_BASE` 覆盖，只是不再当作日常设置项示人。
+早先文件里的 `maxBodyBytes` 现在被忽略。
 
 > **关于两个静默超时**：`CC_IDLE_TIMEOUT_MS` 与 `CC_NO_OUTPUT_TIMEOUT_MS` 共用
 > 同一个 socket 读超时，所以"等上游响应头"的实际上限是两者中**较小的那个**

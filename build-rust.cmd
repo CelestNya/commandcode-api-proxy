@@ -67,8 +67,13 @@ if errorlevel 1 (
 )
 popd
 
-set PROXY=%ROOT%\target\release\ccproxy.exe
-set TRAY=%ROOT%\target\release\CCProxyTray.exe
+rem CARGO_TARGET_DIR may point outside the tree (this machine keeps build
+rem output off the small system drive). Cargo honours it, so the packaging
+rem step has to look there too instead of assuming %ROOT%\target.
+set TARGET_DIR=%CARGO_TARGET_DIR%
+if "%TARGET_DIR%"=="" set TARGET_DIR=%ROOT%\target
+set PROXY=%TARGET_DIR%\release\ccproxy.exe
+set TRAY=%TARGET_DIR%\release\CCProxyTray.exe
 if not exist "%PROXY%" (
   echo ERROR: %PROXY% missing after the build.
   exit /b 1

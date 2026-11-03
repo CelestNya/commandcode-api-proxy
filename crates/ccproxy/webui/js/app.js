@@ -142,6 +142,8 @@ function wireAttemptsWindow() {
 
 document.addEventListener("DOMContentLoaded", function () {
   route();
+  /* 静态的那几个下拉一次到位；之后重建出来的（分页条、设置页）各自调一次。 */
+  Dropdown.enhanceAll();
   wireWindowPicker();
   wireAttemptsWindow();
   /* Default: live 24h preset (matches the backend's DEFAULT_WINDOW_HOURS);
@@ -151,7 +153,7 @@ document.addEventListener("DOMContentLoaded", function () {
   state.windowHours = 24;
   syncWindowPickerUI();
   syncAttemptsWindowUI(); /* 明细时段框首屏即有值（跟随概览窗口） */
-  initSettings(); /* 设置页（主线新增）：更新检测 + 配置读写 */
+  initSettings(); /* 设置页：更新检测 + 配置读写 */
   ["f-model", "f-stream", "f-status"].forEach(function (id) {
     el(id).addEventListener("change", function () {
       state.filters[id.replace("f-", "")] = el(id).value;

@@ -4,8 +4,8 @@
 //! request, screenshots included, and full-resolution PNGs dominate a large
 //! request (a 2560x1440 IDE screenshot is 2-3 MB of PNG). Re-encoding the same
 //! pixels as JPEG (fixed quality, dimensions untouched) shrinks them 5-8x,
-//! which is what keeps a long session under the request-size ceilings (the
-//! proxy's own `maxBodyBytes` and the upstream's 32 MB).
+//! which is what keeps a long session under the request-size ceiling (32 MiB,
+//! the same number the upstream enforces).
 //!
 //! The contract this module must never break — prompt-cache prefix stability:
 //!

@@ -98,6 +98,10 @@ pub enum Kind {
     Int {
         min: u64,
         max: u64,
+        /// How far one tap of the stepper moves the value. Not 1 for every
+        /// field: nudging a millisecond budget by 1 ms is unusable, and the
+        /// page has no room for "type the number, then press up 60000 times".
+        step: u64,
         /// Shown after the input, e.g. `ms`.
         unit: &'static str,
     },
@@ -113,8 +117,13 @@ impl Kind {
     fn describe(&self) -> Value {
         match self {
             Self::Bool => serde_json::json!({"kind": "bool"}),
-            Self::Int { min, max, unit } => {
-                serde_json::json!({"kind": "int", "min": min, "max": max, "unit": unit})
+            Self::Int {
+                min,
+                max,
+                step,
+                unit,
+            } => {
+                serde_json::json!({"kind": "int", "min": min, "max": max, "step": step, "unit": unit})
             }
             Self::Text { max_len } => serde_json::json!({"kind": "text", "maxLen": max_len}),
             Self::Choice(options) => serde_json::json!({"kind": "choice", "options": options}),
@@ -141,24 +150,6 @@ pub const FIELDS: &[Field] = &[
             "default = 探测系统代理，不可用就直连；direct = 从不使用代理；也可填 http://host:port",
     },
     Field {
-        key: "noProxy",
-        label: "直连地址",
-        group: "网络",
-        kind: Kind::Text { max_len: 500 },
-        env: Some("NO_PROXY"),
-        default: "\"\"",
-        note: "逗号分隔；本机地址始终直连",
-    },
-    Field {
-        key: "ccApiBase",
-        label: "上游地址",
-        group: "网络",
-        kind: Kind::Text { max_len: 200 },
-        env: Some("CC_API_BASE"),
-        default: "\"https://api.commandcode.ai\"",
-        note: "仅在自建上游时修改；改错会让所有请求失败",
-    },
-    Field {
         key: "imageCompress",
         label: "图片压缩",
         group: "图片压缩",
@@ -174,6 +165,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 1,
             max: 100,
+            step: 1,
             unit: "",
         },
         env: Some("CC_IMAGE_COMPRESS_QUALITY"),
@@ -187,6 +179,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 33_554_432,
+            step: 65_536,
             unit: "字节",
         },
         env: None,
@@ -203,25 +196,13 @@ pub const FIELDS: &[Field] = &[
         note: "debug 会把每个转发体的体积写进日志，仅排障时使用",
     },
     Field {
-        key: "maxBodyBytes",
-        label: "请求体上限",
-        group: "运行",
-        kind: Kind::Int {
-            min: 1_048_576,
-            max: 33_554_432,
-            unit: "字节",
-        },
-        env: Some("CC_MAX_BODY_BYTES"),
-        default: "10485760",
-        note: "上游硬限制是 32 MiB；开启图片压缩时代理会自动放宽入口闸门",
-    },
-    Field {
         key: "upstreamTimeoutMs",
         label: "上游超时",
         group: "超时",
         kind: Kind::Int {
             min: 1_000,
             max: 1_800_000,
+            step: 60_000,
             unit: "ms",
         },
         env: Some("CC_UPSTREAM_TIMEOUT_MS"),
@@ -235,6 +216,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 1_800_000,
+            step: 30_000,
             unit: "ms",
         },
         env: Some("CC_IDLE_TIMEOUT_MS"),
@@ -248,6 +230,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 1_800_000,
+            step: 5_000,
             unit: "ms",
         },
         env: Some("CC_NO_OUTPUT_TIMEOUT_MS"),
@@ -261,6 +244,7 @@ pub const FIELDS: &[Field] = &[
         kind: Kind::Int {
             min: 0,
             max: 10,
+            step: 1,
             unit: "次",
         },
         env: Some("CC_NO_OUTPUT_RETRIES"),
@@ -295,7 +279,7 @@ pub fn validate(key: &str, value: &Value) -> Result<Value, String> {
             Value::Bool(b) => Ok(Value::Bool(*b)),
             _ => Err(format!("{} 需要一个布尔值", field.label)),
         },
-        Kind::Int { min, max, unit } => {
+        Kind::Int { min, max, unit, .. } => {
             let n = value
                 .as_u64()
                 .or_else(|| value.as_i64().and_then(|v| u64::try_from(v).ok()))
