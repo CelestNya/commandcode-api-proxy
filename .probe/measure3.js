@@ -1,6 +1,6 @@
 /* probe 3: model panel internal geometry */
 const { spawn } = require("child_process");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const debugPort = 9334;
 async function main() {
   const chrome = spawn(CHROME, ["--headless", "--disable-gpu", "--no-sandbox", `--remote-debugging-port=${debugPort}`, "--window-size=1440,900", "--user-data-dir=/tmp/cdp-profile-4", "about:blank"], { stdio: "ignore" });

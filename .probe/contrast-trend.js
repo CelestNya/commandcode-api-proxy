@@ -6,7 +6,7 @@
    然后算 WCAG 对比度。 */
 const { spawn } = require("child_process");
 const zlib = require("zlib");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const debugPort = 9349;
 
 function lum(rgb) {
@@ -69,7 +69,7 @@ async function main() {
   const evalJs = async (expr) => (await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true })).result.value;
 
   async function runTheme(theme) {
-    await send("Page.navigate", { url: "http://127.0.0.1:8797/webui/#/stats" });
+    await send("Page.navigate", { url: "http://127.0.0.1:8795/webui/#/stats" });
     await new Promise((r) => setTimeout(r, 2400));
     await evalJs(`(async () => {
       document.documentElement.setAttribute("data-theme", "${theme}");

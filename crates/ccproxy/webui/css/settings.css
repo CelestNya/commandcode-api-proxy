@@ -119,10 +119,12 @@
 .sw-light i:nth-child(1) { background: #FFFFFF; }
 .sw-light i:nth-child(2) { background: #5A4BD6; }
 .sw-light i:nth-child(3) { background: linear-gradient(90deg, #0F8A80 0 38%, #E4E9F0 38% 100%); }
-.sw-jelly { background: linear-gradient(150deg, #FFD9E8 0%, #F6F0FF 55%, #E4F0FB 100%); }
-.sw-jelly i:nth-child(1) { background: rgba(255, 255, 255, .55); }
-.sw-jelly i:nth-child(2) { background: #D6468E; }
-.sw-jelly i:nth-child(3) { background: linear-gradient(90deg, #B96FE0 0 38%, rgba(255, 255, 255, .55) 38% 100%); }
+/* 预览色板用的是果冻主题的真实渐层（参考 body 的 135° 线性渐层），
+   不是另配的一套近似色——预览与实际必须一致。 */
+.sw-jelly { background: linear-gradient(135deg, #FFF0F5 0%, #FFE4E1 40%, #E6E6FA 100%); }
+.sw-jelly i:nth-child(1) { background: rgba(255, 255, 255, .25); }
+.sw-jelly i:nth-child(2) { background: #C41E62; }
+.sw-jelly i:nth-child(3) { background: linear-gradient(90deg, #C41E62 0 38%, rgba(255, 255, 255, .25) 38% 100%); }
 
 /* ── 底部操作条 ── */
 .set-foot {

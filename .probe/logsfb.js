@@ -1,6 +1,6 @@
 /* logs filterbar: fresh load per width */
 const { spawn } = require("child_process");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const port = 9341;
 const BASE = "http://127.0.0.1:8799/webui/";
 const EXPR = `(() => {

@@ -1,6 +1,6 @@
 // 验证设置页「外观」面板：卡片渲染、点击切换、data-theme 与 localStorage 同步
 const { spawn } = require("child_process");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const port = 9421;
 const BASE = "http://127.0.0.1:18924/webui/#/settings";
 

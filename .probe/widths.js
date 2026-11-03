@@ -1,6 +1,6 @@
 /* width sweep: verify fixed-count card grids + shell + overflow across breakpoints */
 const { spawn } = require("child_process");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const port = 9336;
 const BASE = "http://127.0.0.1:8799/webui/";
 const WIDTHS = [375, 680, 901, 1000, 1100, 1240, 1280, 1366, 1440, 1920];

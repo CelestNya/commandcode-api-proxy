@@ -1,7 +1,7 @@
 /* one-off: capture the three themes of theme-switch.html at 1280 and 760 */
 const { spawn } = require("child_process");
 const fs = require("fs");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const port = 9361;
 const URL = "file:///D:/Projects/cc-proxy/webui-concepts/theme-switch.html";
 const OUT = "D:/Projects/cc-proxy/_shots/";

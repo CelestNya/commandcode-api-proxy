@@ -1,7 +1,7 @@
 /* verify shell fix: sidebar left full-height, topbar beside it (not below) */
 const { spawn } = require("child_process");
 const fs = require("fs");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const debugPort = 9336;
 const W = Number(process.argv[2] || 1440), H = Number(process.argv[3] || 900);
 

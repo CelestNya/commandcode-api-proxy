@@ -1,7 +1,7 @@
 /* trendsplit probe: 拆分后的三张趋势图（Token 柱 / 费用条 / 命中率线）
  * 验证：渲染结构、x 对齐、悬停 tooltip、窗口切换、窄屏、主题切换。 */
 const { spawn } = require("child_process");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const debugPort = 9341;
 
 async function main() {

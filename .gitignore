@@ -33,3 +33,5 @@ __pycache__/
 # Runtime state of the probe instance (pid file, refreshed price cache).
 .probe/data-light/ccproxy.pid
 .probe/data-light/pricing.json
+# Third-party checkouts the probes clone for reference (not project content).
+.probe/ref/

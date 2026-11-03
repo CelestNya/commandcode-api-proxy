@@ -1,7 +1,7 @@
 /* one-off: screenshot the trend-split sketch at two widths */
 const { spawn } = require("child_process");
 const fs = require("fs");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const port = 9344;
 const URL = "file:///D:/Projects/cc-proxy/webui-concepts/trend-split.html";
 const OUT = "D:/Projects/cc-proxy/_shots/";

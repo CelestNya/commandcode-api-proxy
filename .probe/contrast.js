@@ -1,7 +1,7 @@
 /* 两主题对比度实测：取关键文字元素，沿祖先链合成背景，算 WCAG 对比度。
  * 用法：node contrast.js（需实例跑在 18924） */
 const { spawn } = require("child_process");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const port = 9377;
 const BASE = "http://127.0.0.1:18924/webui/";
 

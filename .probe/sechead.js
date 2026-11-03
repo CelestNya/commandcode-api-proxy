@@ -1,6 +1,6 @@
 /* measure: gap between section title and caption (render-verified, not eyeballed) */
 const { spawn } = require("child_process");
-const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-win64/chrome-headless-shell.exe";
+const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const port = 9345;
 const URL = "file:///D:/Projects/cc-proxy/webui-concepts/trend-split.html";
 
