@@ -23,17 +23,20 @@
   /* 页面底：深梅紫渐层首色，作兜底；实际颜色由 body 渐层给出。 */
   --bg: #160F24;
 
-  /* 卡片表面：白透降低一档（暗底上白 6% 即相当于浅底白 15% 的观感）。
-     仍是 liquid-glass 的同一种白透玻璃，只是浓度不同。 */
-  --surface: rgba(255, 255, 255, 0.06);
+  /* 卡片表面：暗档改用「深梅紫半透明」而非低 alpha 白。
+     白 6% 遮不住背景三团亮色光斑——光斑会从卡片里透出来形成亮斑，
+     看起来像卡后面还压着一层（实测反馈的"层级错误"）。
+     改成 72% 不透明的深梅紫：既能遮住光斑、又保留玻璃材质
+     （blur 与内高光配方不变）。色相仍是紫，与浅档同族。 */
+  --surface: rgba(36, 27, 60, 0.72);
 
-  /* 内嵌块（输入框、表头、chip、分页按钮）：白透再提一档。 */
-  --surface-2: rgba(255, 255, 255, 0.10);
+  /* 内嵌块（输入框、表头、chip、分页按钮）：在深卡上提亮一档。 */
+  --surface-2: rgba(255, 255, 255, 0.12);
   --surface-3: rgba(255, 255, 255, 0.08);
 
-  /* 描边：暗底上白边更收，用低 alpha 白；图表网格线再淡一档。 */
-  --outline: rgba(255, 255, 255, 0.10);
-  --outline-strong: rgba(255, 255, 255, 0.22);
+  /* 描边：卡片边缘要清晰（否则像浮着的线框），白边提到 .14。 */
+  --outline: rgba(255, 255, 255, 0.14);
+  --outline-strong: rgba(255, 255, 255, 0.30);
   --outline-variant: rgba(255, 255, 255, 0.12);
 
   /* 文字：靛蓝染白——H 与浅档 #312E81 同一族，只是翻到亮端。
@@ -97,39 +100,39 @@
 :root[data-theme="jelly-dark"] .sidebar,
 :root[data-theme="jelly-dark"] .topbar {
   background: var(--surface);
-  border-color: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.14);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   backdrop-filter: blur(24px) saturate(1.5);
   box-shadow:
-    0 8px 32px rgba(31, 38, 135, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    0 8px 28px rgba(14, 9, 34, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 /* 侧栏 / 顶栏贴边：只保留内侧高光（与浅档一致）。 */
 :root[data-theme="jelly-dark"] .sidebar,
 :root[data-theme="jelly-dark"] .topbar {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 /* ── 密集数据：glass 档（比卡片更实一档） ──
    与浅档同一逻辑：白透浓度高于卡片（.10 vs .06），让 12.5px 等宽数字稳。 */
 :root[data-theme="jelly-dark"] .table-wrap,
 :root[data-theme="jelly-dark"] .drawer {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   backdrop-filter: blur(24px) saturate(1.5);
   box-shadow:
-    0 8px 32px rgba(31, 38, 135, 0.30),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    0 8px 28px rgba(14, 9, 34, 0.40),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 /* 日志面板是纯暗纸：等宽代码需要一块稳定的底，不能透。 */
 :root[data-theme="jelly-dark"] .logpane {
   background: var(--log-bg);
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 8px 32px rgba(31, 38, 135, 0.30),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    0 8px 28px rgba(14, 9, 34, 0.40),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -137,16 +140,16 @@
 /* 表头：与浅档同结构（不透明淡底 + 一道底边），只是亮端反转。
    左右边框压掉——它们取 --muted（薰衣草白），在暗玻璃上会画两道竖线。 */
 :root[data-theme="jelly-dark"] th {
-  background: rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.07);
   color: var(--muted);
   border-left-color: transparent;
   border-right-color: transparent;
-  border-bottom-color: rgba(255, 255, 255, 0.16);
+  border-bottom-color: rgba(255, 255, 255, 0.14);
 }
 
 /* 行 hover：与浅档一致（更亮的白），不是粉。 */
 :root[data-theme="jelly-dark"] tr:hover td {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* ── 控件玻璃：glass-button / input-glass（配方与浅档逐字相同） ──
@@ -160,10 +163,10 @@
 :root[data-theme="jelly-dark"] .set-control select {
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
-  border-color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.24);
   box-shadow:
-    0 2px 8px rgba(31, 38, 135, 0.30),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    0 2px 8px rgba(14, 9, 34, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 /* 激活的导航项：与浅档同「粉→深粉」走向，暗底提亮到 #E0457F→#C41E62 仍白字达标。 */
@@ -176,8 +179,18 @@
 
 /* 悬停：与浅档一致（更亮的白），不是粉。 */
 :root[data-theme="jelly-dark"] .nav-item:hover {
-  background: rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text);
+}
+
+/* ── 悬停明细浮层（趋势图的 tooltip）─────────────────────────
+   基线里 .trend-tip 用 --surface-2 作底；暗档如果沿用 12% 白，
+   浮层几乎透明，盖在图表上时字被下方的柱/线干扰，看起来像"穿帮的层级"。
+   这里单独给它一层近实底的深梅紫，保证浮层与其下方内容明确分离。 */
+:root[data-theme="jelly-dark"] .trend-tip {
+  background: rgba(30, 22, 52, 0.97);
+  border-color: rgba(255, 255, 255, 0.20);
+  box-shadow: 0 8px 24px rgba(8, 5, 20, 0.55);
 }
 
 /* ── 暗底细节 ──
@@ -202,7 +215,7 @@
    与浅档同逻辑，只是退回深不透明（#1c1330 系）而非浅不透明。 */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root[data-theme="jelly-dark"] {
-    --surface: rgba(28, 19, 48, 0.94);
-    --surface-2: #1a1330;
+    --surface: rgba(36, 27, 60, 0.98);
+    --surface-2: #1f1732;
   }
 }
