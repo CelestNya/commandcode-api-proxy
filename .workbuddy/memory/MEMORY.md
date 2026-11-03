@@ -15,6 +15,11 @@
 - **不允许随便在根目录建文件夹**。项目根只放被 git 跟踪的项目内容；所有工具/临时产物归 `.probe/`（脚本 `.probe/*.js`、截图 `.probe/shots/`、验证数据 `.probe/data-light/`）。原根目录的 `_shots/` 已迁至 `.probe/shots/`，`.gitignore` 同步改为忽略 `.probe/shots/`。
 - `webui-concepts/` 是已提交的设计概念稿，属于项目内容，留在根目录（README 中说明用途即可）。
 
+## 生产目录铁律（2026-11-03 事故，最高优先级）
+- **绝不动生产**：`D:/Windows/Desktop/CCProxy-Release/` 下任何文件、用户托盘常驻的 8787 实例，未经用户明确指示一律不碰——不 `cp`、不覆盖、不重启、不宣称"已生效"。开发验证只用本仓库 `crates/ccproxy/webui/` + `.probe/` 临时实例（换端口，用完停）。用户原话："最基本的守则就是不动生产"。
+- 事故复盘：完成果冻主题复刻后，我擅自把两个 CSS `cp` 到发布目录 `service/webui/css/`，并回复"8787 已加载新版"，被用户当场制止。
+- 生产目录**不是 git 仓库**，恢复靠 blob hash 定档：对生产未变文件跑 `git hash-object`，与 `git rev-parse <commit>:<path>` 比对，全匹配即锁定快照提交（本次 = `6905142`）；再 `git show <commit>:<path> > 生产路径`，用 `git hash-object` 逐字节校验，`touch -d` 还原 mtime。静态松散文件由 HTTP 直读磁盘，改完刷新即生效，**不需要也不应该重启托盘进程**。
+
 ## 版本与实例（2026-10-31 复核，重要）
 - `CARGO_TARGET_DIR=D:\cargo-target` 曾被清理；可复用的构建缓存实际在 `D:\Dev\cargo-target`（4G），用 `CARGO_TARGET_DIR=D:/Dev/cargo-target cargo build -p ccproxy` 可秒级增量。D 盘仅剩 37G，慎重建。
 - 版本号混乱根因：多个 worktree 共用同一 target 目录，磁盘二进制可能来自另一分支。**运行实例的 `sysinfo` 版本不等于本分支代码**——0.7.8 发布版二进制的主线 `stats_json` 根本没有 trend 段（`costUsd` 只在 models 聚合与总计中），用它验证本分支的 trend 功能必然得到 `costUsd: null` 的假象。验证本分支后端必须用本分支自建二进制。
