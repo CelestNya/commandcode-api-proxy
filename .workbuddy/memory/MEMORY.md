@@ -11,6 +11,8 @@
 布局验证方法论（2026-10-18 用户截图反馈"完全坏"后的教训）：**不能靠读低分辨率截图判断布局**——用 `.probe/` 下的 CDP 探针（spawn headless chromium + --remote-debugging-port + Node 内置 WebSocket 发 Runtime.evaluate 量 getComputedStyle/offsetTop/getBoundingClientRect，再 Page.captureScreenshot）。实测过：metric-cards minmax 220px 在 1232px 内容宽只有 5 列（6 卡变 5+1），改 190px 才 6 卡一行；模型表格行在 900px 视口折叠线下需靠指标卡收行 + donut 缩 160 才进视口。
 外壳铁律（2026-10-18 塌陷事故）：`.shell` 必须 `display:flex` + 确定高度 `100dvh`（min-height 会被内容撑破）；`.main`/`.content` 必须 `min-height:0`（弹性子项默认 auto 阻止收缩）；侧栏通高用 `align-self:stretch`（height:100% 在 dvh 容器解析失败）。固定数量卡片网格（6 指标卡/5 迷你卡）不要用 auto-fit——内容宽 748–1137px 必出孤行，显式断点：≥901 且 <1240 三列、≥1240 六/五列。模型表 `table-layout:fixed` + 列宽 40/16/22/22%（auto+width:100% 会平均分列饿死名称列），窄屏回退 auto。筛选栏操作按钮包 `.f-actions` nowrap 容器 + margin-left:auto，整体换行整体右对齐，禁止单飞。
 
+浮层铁律（2026-11-03 浮层偏移事故）：**`backdrop-filter` / `filter` / `transform` / `will-change` / `contain:paint` 会给 `position:fixed` 的后代创建包含块**——浮层的 `left/top` 会被当成「容器内坐标」解释，渲染偏出正好一个容器原点。果冻主题给 `.panel` 加了 `backdrop-filter: blur(24px)`，里面的 `.trend-tip` 就跑到鼠标右下角很远（实测 Δ(265,206) = 面板 rect(264,205)；基线主题 panel 无 filter 时 Δ(0,0)）。规则：**任何 fixed 浮层（tooltip/drawer/下拉）都不要放进带玻璃材质的容器里**，挂 body 直属层；脱离面板后它不会被视图切换一起藏住，切视图时必须显式收起。另：趋势浮层约 146px 高、比绘图区还高，「整块悬在光标上方」会盖住面板标题，改用「贴光标右侧 + 垂直居中 + 三向视口内收边」。
+
 ## 目录纪律（2026-10-31 用户强制要求）
 - **不允许随便在根目录建文件夹**。项目根只放被 git 跟踪的项目内容；所有工具/临时产物归 `.probe/`（脚本 `.probe/*.js`、截图 `.probe/shots/`、验证数据 `.probe/data-light/`）。原根目录的 `_shots/` 已迁至 `.probe/shots/`，`.gitignore` 同步改为忽略 `.probe/shots/`。
 - `webui-concepts/` 是已提交的设计概念稿，属于项目内容，留在根目录（README 中说明用途即可）。
