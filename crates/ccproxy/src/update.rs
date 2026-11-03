@@ -357,7 +357,7 @@ fn inherit_with(from_root: &Path, to_root: &Path, from_config: Option<&Path>) ->
     // resolved for itself. Copied file by file so a locked or huge file cannot
     // fail the whole staging run.
     for (from, relative) in log_sources(from_root) {
-        let to = to_root.join(relative);
+        let to = to_root.join(&relative);
         if std::fs::create_dir_all(&to).is_err() {
             continue;
         }
@@ -387,22 +387,26 @@ fn inherit_with(from_root: &Path, to_root: &Path, from_config: Option<&Path>) ->
 /// The log directories to carry over, as `(source, path inside the install)`.
 ///
 /// The two fixed layouts come first; the process's own resolved directory is
-/// appended when it is a third one (a flat build, or `CC_PROXY_LOG_DIR`).
-fn log_sources(from_root: &Path) -> Vec<(PathBuf, &'static str)> {
-    let mut out: Vec<(PathBuf, &'static str)> = Vec::new();
-    for (relative, slot) in [("service/logs", "service/logs"), ("logs", "logs")] {
+/// appended when it is a third one (a flat build, or `CC_PROXY_LOG_DIR`). Its
+/// slot is taken from its **path relative to the install root**, so a
+/// namespaced instance keeps its `logs/<ns>/` subdirectory instead of having
+/// its log flattened into `logs/` — found 2026-11-03 by inspecting a staged
+/// install, whose `logs/proxy.log` turned out to be the outgoing instance's
+/// namespaced log.
+fn log_sources(from_root: &Path) -> Vec<(PathBuf, String)> {
+    let mut out: Vec<(PathBuf, String)> = Vec::new();
+    for relative in ["service/logs", "logs"] {
         let dir = from_root.join(relative);
         if dir.is_dir() {
-            out.push((dir, slot));
+            out.push((dir, relative.to_string()));
         }
     }
     if let Some(own) = crate::config::log_path().parent() {
         if !out.iter().any(|(p, _)| p == own) {
-            let slot = if own.ends_with("service/logs") || own.ends_with("service\\logs") {
-                "service/logs"
-            } else {
-                "logs"
-            };
+            let slot = own.strip_prefix(from_root).map_or_else(
+                |_| "logs".to_string(),
+                |rel| rel.to_string_lossy().replace('\\', "/"),
+            );
             out.push((own.to_path_buf(), slot));
         }
     }

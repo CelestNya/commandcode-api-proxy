@@ -67,7 +67,12 @@ jobs:
         shell: pwsh
         run: |
           $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches.Groups[1].Value
-          Compress-Archive -Path pkg/* -DestinationPath ("commandcode-proxy-v" + $ver + "-windows-x86_64.zip") -CompressionLevel Optimal
+          # Not Compress-Archive: its entry-name separator follows the
+          # PowerShell version (5.1 '\' vs 7.x '/'), and clients at 0.7.7/0.7.8
+          # refuse a backslash name outright — a package built by 5.1 would be
+          # uninstallable by them. zip-package.ps1 normalises to '/' explicitly,
+          # so the artifact has the same shape on any runner.
+          ./packaging/windows/zip-package.ps1 -Source pkg -Destination ("commandcode-proxy-v" + $ver + "-windows-x86_64.zip")
           Write-Output "packaged commandcode-proxy-v$ver-windows-x86_64.zip"
       - name: Upload artifact
         uses: actions/upload-artifact@v4

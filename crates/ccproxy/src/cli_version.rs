@@ -5,12 +5,19 @@
 //! so the constant in `config.rs` is only a fallback: the published version is
 //! consulted once at startup, and any failure leaves the fallback in place.
 //!
-//! Deliberately *not* a background refresher. The Node build caches for 24 h
-//! but only ever calls this from the startup path, so within one process the
-//! cache never expires — matching that means one fetch per process, before the
-//! listener comes up.
+//! Deliberately *not* a refreshed-on-a-timer value. The Node build caches for
+//! 24 h but only ever calls this from the startup path, so within one process
+//! the cache never expires — matching that means one lookup per process.
+//!
+//! The result is *persisted* (2026-11-03) because the lookup sits on the
+//! startup path and therefore on the update handover's critical path: with the
+//! budget below, a successor could sit on a bound-but-not-serving port for four
+//! seconds while npm timed out. The value only changes when the CLI is
+//! published, so a value written by the outgoing process is still correct for
+//! the incoming one — reading it back turns that four-second stall into none.
 
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::time::Duration;
 
 const NPM_LATEST_URL: &str = "https://registry.npmjs.org/command-code/latest";
@@ -134,6 +141,109 @@ pub fn resolve_within_budget(
             }
         }
     }
+}
+
+/// How long a persisted lookup is trusted without asking again.
+///
+/// This decides only whether a start may *wait* for the network, never whether
+/// it looks: the refresh runs in the background on every start. Six hours keeps
+/// a published CLI release arriving the same day while a reboot, an update, or
+/// a crash-restart never pays the lookup.
+const CACHE_TTL_SECS: u64 = 6 * 60 * 60;
+
+/// File name under the per-user data directory. Deliberately *not* beside the
+/// config: that directory is replaced by a hot update, which is exactly the
+/// moment the cached value has to survive.
+const CACHE_FILE: &str = "cli-version.json";
+
+#[derive(Deserialize)]
+struct CacheEntry {
+    version: String,
+    #[serde(default)]
+    at: u64,
+}
+
+fn cache_path() -> PathBuf {
+    crate::billing::billing_dir().join(CACHE_FILE)
+}
+
+/// The persisted version, if it is still within [`CACHE_TTL_SECS`].
+fn fresh_cached_version(now: u64) -> Option<String> {
+    fresh_cached_version_at(&cache_path(), now)
+}
+
+/// [`fresh_cached_version`] against an explicit path, so the TTL and the
+/// parsing can be tested without touching the real data directory.
+fn fresh_cached_version_at(path: &std::path::Path, now: u64) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let entry: CacheEntry = serde_json::from_str(&text).ok()?;
+    if entry.version.trim().is_empty() {
+        return None;
+    }
+    // A clock that moved backwards must not make a cached value immortal, and
+    // must not underflow the age either: "in the future" counts as fresh.
+    let age = now.saturating_sub(entry.at);
+    if entry.at > now || age <= CACHE_TTL_SECS {
+        Some(entry.version)
+    } else {
+        None
+    }
+}
+
+/// Record `version` for the next start. Best-effort: a read-only data
+/// directory must not fail a startup.
+fn store_cached_version(version: &str) {
+    store_cached_version_at(&cache_path(), version);
+}
+
+fn store_cached_version_at(path: &std::path::Path, version: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let body = serde_json::json!({ "version": version, "at": crate::now_epoch_secs() });
+    if let Ok(text) = serde_json::to_string(&body) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// Refresh the cache without making anyone wait for it.
+fn refresh_in_background() {
+    let _ = std::thread::Builder::new()
+        .name("ccproxy-cli-version-refresh".into())
+        .spawn(|| {
+            if let Some(version) = fetch_latest_cli_version() {
+                store_cached_version(&version);
+            }
+        });
+}
+
+/// The version to advertise at startup.
+///
+/// Order of preference: an explicit pin, a fresh persisted value, then a
+/// budgeted lookup. The persisted value wins over the lookup because the only
+/// cost of using it is that a CLI published in the last few hours is missed
+/// until the background refresh lands — while the cost of waiting is that every
+/// restart, and in particular the update handover, holds a bound-but-not-
+/// serving port for up to [`STARTUP_LOOKUP_BUDGET`].
+#[must_use]
+pub fn resolve_for_startup(pinned: Option<&str>, fallback: &str) -> String {
+    if let Some(pin) = pinned.filter(|v| !v.is_empty()) {
+        return pin.to_owned();
+    }
+    if let Some(cached) = fresh_cached_version(crate::now_epoch_secs()) {
+        refresh_in_background();
+        return cached;
+    }
+    let resolved = resolve_within_budget(
+        None,
+        fallback,
+        fetch_latest_cli_version,
+        STARTUP_LOOKUP_BUDGET,
+    );
+    if resolved != fallback {
+        store_cached_version(&resolved);
+    }
+    resolved
 }
 
 #[cfg(test)]
@@ -277,5 +387,61 @@ mod tests {
             std::time::Duration::from_millis(2000),
         );
         assert_eq!(v, "1.54.1");
+    }
+
+    fn temp_cache(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ccproxy-cli-version-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join(CACHE_FILE)
+    }
+
+    #[test]
+    fn a_persisted_version_is_reused_without_the_network() {
+        let path = temp_cache("fresh");
+        store_cached_version_at(&path, "1.88.2");
+        assert_eq!(
+            fresh_cached_version_at(&path, crate::now_epoch_secs()),
+            Some("1.88.2".to_string())
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_stale_persisted_version_is_not_used() {
+        let path = temp_cache("stale");
+        store_cached_version_at(&path, "1.88.2");
+        let now = crate::now_epoch_secs() + CACHE_TTL_SECS + 1;
+        assert_eq!(fresh_cached_version_at(&path, now), None);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_clock_that_jumped_backwards_still_serves_the_cached_value() {
+        // Persisted "in the future" must not read as a negative age (which
+        // would underflow into "ancient") — the value is simply still good.
+        let path = temp_cache("backwards");
+        store_cached_version_at(&path, "1.88.2");
+        let now = crate::now_epoch_secs().saturating_sub(86_400);
+        assert_eq!(
+            fresh_cached_version_at(&path, now),
+            Some("1.88.2".to_string())
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn an_unreadable_or_empty_cache_is_absent_not_fatal() {
+        let path = temp_cache("broken");
+        assert_eq!(fresh_cached_version_at(&path, 1_000), None);
+        std::fs::write(&path, b"not json").expect("write");
+        assert_eq!(fresh_cached_version_at(&path, 1_000), None);
+        std::fs::write(&path, br#"{"version":"  ","at":0}"#).expect("write");
+        assert_eq!(fresh_cached_version_at(&path, 1_000), None);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

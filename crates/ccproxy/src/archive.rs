@@ -12,10 +12,12 @@
 //! gains is the thing an updater actually needs — a byte budget and a path
 //! policy it fully controls:
 //!
-//! * **No path escapes.** `..`, absolute names, drive letters and backslash
-//!   separators are rejected outright. A release archive decides where files
-//!   land, and a crafted one must not be able to write outside the staging
-//!   directory it was given.
+//! * **No path escapes.** `..`, absolute names and drive letters are rejected
+//!   outright. A release archive decides where files land, and a crafted one
+//!   must not be able to write outside the staging directory it was given.
+//!   Backslash separators are normalised to `/` first — Windows' own archiver
+//!   writes them, so refusing the whole package over a separator is not an
+//!   option (see [`safe_relative`]).
 //! * **No size bombs.** Declared uncompressed sizes are checked against a cap
 //!   before anything is allocated, and the inflated output is capped again
 //!   while reading (a header can lie).
@@ -83,15 +85,23 @@ fn eocd_offset(bytes: &[u8]) -> Option<usize> {
 /// Reject anything that could land outside the destination.
 ///
 /// `Component::Normal` only for every segment: no `..`, no `RootDir`, no
-/// prefix (a Windows drive). Backslashes are rejected separately because
-/// `Path` on Windows treats them as separators while the ZIP spec does not —
-/// `a\..\..\b` would otherwise pass a `Component` walk and then be split by
-/// the filesystem.
+/// prefix (a Windows drive).
+///
+/// Backslashes are read as separators rather than refused. The ZIP spec says
+/// `/`, but Windows' own archiver does not: PowerShell's `Compress-Archive` —
+/// which the release pipeline builds every Windows package with — stores
+/// `service\ccproxy.exe`. Refusing those names made every release zip
+/// uninstallable by the in-app updater, reported as "压缩包内有可疑路径"
+/// (found 2026-11-03 by staging a real `Compress-Archive` package). Normalising
+/// first is safe because it leaves exactly one reading of the name, and the
+/// traversal check then runs on that reading: `a\..\..\evil.exe` becomes
+/// `a/../../evil.exe` and is still refused.
 fn safe_relative(name: &str) -> Option<PathBuf> {
+    let name = name.replace('\\', "/");
     // A leading slash is an absolute name. Joining it onto the destination
     // would happen to stay inside, but an archive that says "absolute" is not
     // one whose paths should be trusted at all.
-    if name.is_empty() || name.starts_with('/') || name.contains('\\') || name.contains(':') {
+    if name.is_empty() || name.starts_with('/') || name.contains(':') {
         return None;
     }
     let mut out = PathBuf::new();
@@ -402,6 +412,42 @@ mod tests {
         let err = write_to(&entries, &dir).expect_err("must refuse");
         assert!(err.contains("可疑路径"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_backslash_separated_name_is_a_path_not_a_rejection() {
+        // Exactly what PowerShell's Compress-Archive (the release pipeline)
+        // writes. Before this was handled, every real release package was
+        // refused with "压缩包内有可疑路径，已拒绝解压：service\ccproxy.exe".
+        assert_eq!(
+            safe_relative("service\\ccproxy.exe"),
+            Some(PathBuf::from("service").join("ccproxy.exe"))
+        );
+        let bytes = archive(&[
+            ("CCProxyTray.exe", b"tray"),
+            ("service\\ccproxy.exe", b"binary"),
+            ("service\\webui\\index.html", b"<html>"),
+        ]);
+        let dir = std::env::temp_dir().join(format!("ccproxy-archive-win-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let written = extract(&bytes, &dir).expect("extract");
+        assert_eq!(written.len(), 3);
+        assert_eq!(
+            std::fs::read(dir.join("service").join("webui").join("index.html")).expect("nested"),
+            b"<html>"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        // Normalising must not turn a traversal into a valid name.
+        for hostile in [
+            "..\\..\\evil.exe",
+            "service\\..\\..\\evil.exe",
+            "\\abs\\evil.exe",
+        ] {
+            assert!(
+                safe_relative(hostile).is_none(),
+                "{hostile} must not be accepted"
+            );
+        }
     }
 
     #[test]

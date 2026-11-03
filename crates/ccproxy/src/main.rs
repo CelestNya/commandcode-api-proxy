@@ -109,18 +109,20 @@ fn main() {
     // the load-bearing wall: past it the fallback wins and the next startup
     // retries. An explicit CC_CLI_VERSION pins it and skips the lookup, so
     // offline runs never wait on DNS.
+    //
+    // The resolved value is cached in the per-user data directory, which is
+    // what keeps a handover from stalling: the outgoing instance has just
+    // refreshed it, so the incoming one serves immediately and refreshes in
+    // the background (measured before this: 4.01s between "socket bound" and
+    // "listening", every one of them a client waiting on an npm timeout).
     let pinned = env("CC_CLI_VERSION");
     let before = config.cc_version.clone();
-    config.cc_version = ccproxy::cli_version::resolve_within_budget(
-        pinned.as_deref(),
-        &config.cc_version,
-        ccproxy::cli_version::fetch_latest_cli_version,
-        ccproxy::cli_version::STARTUP_LOOKUP_BUDGET,
-    );
+    config.cc_version =
+        ccproxy::cli_version::resolve_for_startup(pinned.as_deref(), &config.cc_version);
     if config.cc_version != before {
         ccproxy::log::debug(&format!(
-            "CLI version refreshed from npm: {}",
-            config.cc_version
+            "CLI version resolved to {} (was {})",
+            config.cc_version, before
         ));
     }
 
