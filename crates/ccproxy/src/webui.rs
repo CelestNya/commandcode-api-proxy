@@ -15,7 +15,7 @@
 //! intermediate proxies keep the connection open.
 
 use crate::billing;
-use crate::pricing::{PRICING_SOURCE, pricing_table};
+use crate::pricing::{pricing_table, PRICING_SOURCE};
 use crate::server::{RequestId, SharedState};
 use rusqlite::Connection;
 use serde_json::{json, Value};
