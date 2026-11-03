@@ -111,9 +111,11 @@ function niceScale(max, divs) {
   return { step: nice * exp, top: nice * exp * divs };
 }
 
-/* 三张图共用的取色（CSS 变量，改 token 即换色，见 tokens.css 的 JS 契约） */
+/* 三张图共用的取色（CSS 变量，改 token 即换色，见 tokens.css 的 JS 契约）
+   output 走 --chart-out 并回退 --ok：果冻主题把图表用的紫和「成功」语义的
+   绿分开，其余主题没定义 --chart-out，仍取 --ok，行为不变。 */
 var TREND_COLORS = {
-  input: "var(--primary)", output: "var(--ok)", cached: "var(--chart-7)",
+  input: "var(--primary)", output: "var(--chart-out, var(--ok))", cached: "var(--chart-7)",
   cost: "var(--cost)", hit: "var(--chart-hit)", reqBg: "var(--surface-3)"
 };
 

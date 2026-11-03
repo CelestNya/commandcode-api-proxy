@@ -8,6 +8,7 @@ const { spawn } = require("child_process");
 const zlib = require("zlib");
 const CHROME = "C:/Users/CelestNya/AppData/Local/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe";
 const debugPort = 9349;
+const BASE = process.env.PROBE_BASE || "http://127.0.0.1:8795/webui";
 
 function lum(rgb) {
   const c = rgb.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
@@ -69,7 +70,7 @@ async function main() {
   const evalJs = async (expr) => (await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true })).result.value;
 
   async function runTheme(theme) {
-    await send("Page.navigate", { url: "http://127.0.0.1:8795/webui/#/stats" });
+    await send("Page.navigate", { url: `${BASE}/#/stats` });
     await new Promise((r) => setTimeout(r, 2400));
     await evalJs(`(async () => {
       document.documentElement.setAttribute("data-theme", "${theme}");
@@ -146,6 +147,29 @@ async function main() {
       const o = opKey && colors[opKey] != null ? parseFloat(colors[opKey]) : 1;
       const eff = mix(col, o);
       console.log(`${name}: ${col.join(",")} @${o} -> rgb(${eff.map(Math.round).join(",")}) vs 底色 ${ratio(eff, bgSpot).toFixed(2)}:1`);
+    }
+
+    /* 三个系列色逐一核对（Token 图里第一根柱是 Input，Output/Cache Read
+       取不到独立元素，直接读 token 声明值与面板底色比）。 */
+    if (bgSpot) {
+      const vars = await evalJs(`(() => {
+        const s = getComputedStyle(document.documentElement);
+        const g = (n) => s.getPropertyValue(n).trim();
+        return { primary: g('--primary'), chartOut: g('--chart-out'),
+                 chart7: g('--chart-7'), cost: g('--cost'), hit: g('--chart-hit') };
+      })()`);
+      const hex2rgb = (h) => {
+        h = h.replace("#", "");
+        if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+        return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+      };
+      console.log("--- 系列色 vs 面板底色 ---");
+      for (const [k, v] of Object.entries(vars || {})) {
+        if (!v || v[0] !== "#" || v.length !== 7) { console.log(`  ${k}: ${v || "(空)"}`); continue; }
+        const rgb = hex2rgb(v);
+        const r = ratio(rgb, bgSpot);
+        console.log(`  ${k.padEnd(10)} ${v} -> ${r.toFixed(2)}:1 ${r >= 4.5 ? "OK" : "!! 不达标"}`);
+      }
     }
   }
 
