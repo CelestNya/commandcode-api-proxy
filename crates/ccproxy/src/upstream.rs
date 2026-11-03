@@ -470,6 +470,18 @@ pub struct UpstreamStream {
     /// Complete lines from the last chunk that have not been returned yet.
     pending: std::collections::VecDeque<Vec<u8>>,
     done: bool,
+    /// Whether at least one line has parsed into an event since the stream was
+    /// opened. A clean end without one is [`StreamFailure::NoContent`]: the
+    /// bytes were not this protocol, whatever the status line said.
+    events_seen: bool,
+    /// Whether the upstream sent the `[DONE]` terminator. An explicit "that is
+    /// all" is a valid end even with no events, so it suppresses the
+    /// [`StreamFailure::NoContent`] verdict above.
+    saw_done: bool,
+    /// The response announced `text/html`. Set from the headers at
+    /// construction, because a stream that is actually a web page never gets
+    /// further than this flag.
+    html: bool,
 }
 
 impl UpstreamStream {
@@ -513,19 +525,47 @@ impl UpstreamStream {
             partial: Vec::new(),
             pending: std::collections::VecDeque::new(),
             done: false,
+            events_seen: false,
+            saw_done: false,
+            html: false,
         }
+    }
+
+    /// Mark this body as one whose response announced `text/html`.
+    ///
+    /// Called from the transport, which is the only place that can see the
+    /// headers. Kept as a builder rather than a constructor argument so the
+    /// dozens of test doubles that build a stream from a reader do not have to
+    /// name a content type they do not have.
+    #[must_use]
+    pub fn with_html_body(mut self, html: bool) -> Self {
+        self.html = html;
+        self
     }
 
     /// The next upstream event, or `None` at a clean end of stream.
     ///
     /// Lines that are not events (keepalives, blank lines, unparseable garbage)
     /// are skipped, so a `None` only ever means a real end.
+    ///
+    /// Two endings that *look* clean are reported as failures instead, because
+    /// both would otherwise reach the client as a successful empty answer:
+    /// a body the headers called HTML, and a body that ended without a single
+    /// parseable event. Silence is caught by the deadlines; this catches
+    /// "the bytes were never this protocol".
     pub fn next_event(&mut self) -> Result<Option<CCEvent>, StreamFailure> {
+        if self.html {
+            return Err(StreamFailure::UpstreamHtml);
+        }
         loop {
             while let Some(line) = self.pending.pop_front() {
                 match parse_cc_line(&String::from_utf8_lossy(&line)) {
-                    ParsedChunk::Event(e) => return Ok(Some(e)),
+                    ParsedChunk::Event(e) => {
+                        self.events_seen = true;
+                        return Ok(Some(e));
+                    }
                     ParsedChunk::Done => {
+                        self.saw_done = true;
                         self.done = true;
                         return Ok(None);
                     }
@@ -533,6 +573,7 @@ impl UpstreamStream {
                 }
             }
             if self.done {
+                self.ensure_anything_parsed()?;
                 return Ok(None);
             }
 
@@ -547,9 +588,11 @@ impl UpstreamStream {
                         if let ParsedChunk::Event(e) =
                             parse_cc_line(&String::from_utf8_lossy(&line))
                         {
+                            self.events_seen = true;
                             return Ok(Some(e));
                         }
                     }
+                    self.ensure_anything_parsed()?;
                     return Ok(None);
                 }
                 Ok(n) => {
@@ -592,6 +635,20 @@ impl UpstreamStream {
                 }
             }
         }
+    }
+
+    /// Refuse to call a finished stream successful when nothing in it parsed.
+    ///
+    /// The `[DONE]` sentinel is an explicit end-of-answer from the upstream, so
+    /// it counts as content even on its own; anything else has to have produced
+    /// at least one event. Without this, an HTML error page (whose header may
+    /// not say `text/html`, so [`Self::html`] cannot catch it) would reach the
+    /// client as `end_turn` with empty text and be billed as a success.
+    fn ensure_anything_parsed(&self) -> Result<(), StreamFailure> {
+        if self.events_seen || self.saw_done {
+            return Ok(());
+        }
+        Err(StreamFailure::NoContent)
     }
 
     /// Which deadline, if any, the accumulated silence has crossed.
@@ -915,12 +972,27 @@ fn attempt_send(
         }
     };
 
-    Ok(Attempt::Streaming(UpstreamStream::with_tick(
-        Box::new(response.into_reader()),
-        idle_timeout_ms,
-        no_output_timeout_ms,
-        tick_ms,
-    )))
+    // A 200 whose body is a web page is not a slow upstream, it is the wrong
+    // upstream: a captive portal, a TLS-inspecting proxy or a CDN error page
+    // answered instead of CC. The status line cannot say so, so the content
+    // type is the only place this is visible — read it before the body is
+    // handed to the stream, where the knowledge would be lost.
+    //
+    // Only an explicit `text/html` counts. Asserting the *presence* of
+    // `text/event-stream` would turn a missing header into an outage.
+    let html_body = response
+        .header("content-type")
+        .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"));
+
+    Ok(Attempt::Streaming(
+        UpstreamStream::with_tick(
+            Box::new(response.into_reader()),
+            idle_timeout_ms,
+            no_output_timeout_ms,
+            tick_ms,
+        )
+        .with_html_body(html_body),
+    ))
 }
 
 /// Read an error body with the 16 KiB cap.

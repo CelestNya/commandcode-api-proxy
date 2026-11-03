@@ -343,10 +343,11 @@ impl SseBody {
     /// Two distinct recoveries share this path, and the failure class decides
     /// which applies:
     ///
-    /// * [`StreamFailure::NoOutput`] — the attempt produced nothing at all, so
-    ///   it is discarded and re-sent **from scratch**, up to `no_output_retries`
-    ///   times. Nothing has been handed to the client, so the replacement must
-    ///   not skip its opening (no `begin_continuation`).
+    /// * [`StreamFailure::NoOutput`], [`StreamFailure::NoContent`] and
+    ///   [`StreamFailure::UpstreamHtml`] — the attempt produced nothing usable,
+    ///   so it is discarded and re-sent **from scratch**, up to
+    ///   `no_output_retries` times. Nothing has been handed to the client, so
+    ///   the replacement must not skip its opening (no `begin_continuation`).
     /// * anything else — the attempt had begun to deliver, so bytes already
     ///   handed to the writer cannot be taken back: the replacement must
     ///   *continue* the stream, which is why the replayed opening and reasoning
@@ -356,7 +357,14 @@ impl SseBody {
     /// duplicating answer text the client already read, which a from-scratch
     /// resend with nothing delivered cannot do.
     fn try_replacement(&mut self, failure: &StreamFailure) -> Result<bool, StreamFailure> {
-        let from_scratch = matches!(failure, StreamFailure::NoOutput { .. });
+        // "Nothing usable arrived" covers silence, an HTML page where the
+        // stream should be, and a body that ended without a single parseable
+        // event: in all three nothing reached the client, so re-sending from
+        // scratch is invisible and is the only recovery that makes sense.
+        let from_scratch = matches!(
+            failure,
+            StreamFailure::NoOutput { .. } | StreamFailure::NoContent | StreamFailure::UpstreamHtml
+        );
         if from_scratch {
             if self.no_output_retries_left == 0 {
                 return Ok(false);
@@ -371,7 +379,8 @@ impl SseBody {
         if from_scratch {
             self.no_output_retries_left = self.no_output_retries_left.saturating_sub(1);
             crate::log::warn(&format!(
-                "[stream] no output from upstream; re-sending from scratch ({} re-sends left)",
+                "[stream] {}: re-sending from scratch ({} re-sends left)",
+                failure.tag(),
                 self.no_output_retries_left
             ));
         } else {

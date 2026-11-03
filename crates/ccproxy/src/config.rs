@@ -565,7 +565,8 @@ fn tray_log_path_with(
 }
 
 /// The loose WebUI sources: `CC_WEBUI_DIR` when set (the packaged layout
-/// injects it), else `webui/` beside the executable when that directory exists.
+/// injects it), else `webui/` beside the executable when that directory exists,
+/// else the FHS location the deb installs into.
 ///
 /// The proxy serves the panel from disk (front-end split: nothing is compiled
 /// into the binary), so a stylesheet can be edited and just reloaded. `None`
@@ -579,6 +580,18 @@ pub fn webui_site_dir() -> Option<std::path::PathBuf> {
     webui_site_dir_from(exe_dir.as_deref(), env_dir.as_deref())
 }
 
+/// Where the FHS layouts put the panel.
+///
+/// The deb installs the binary into `/usr/bin` and the assets into
+/// `/usr/share`, and the systemd unit is what tells the proxy about it via
+/// `CC_WEBUI_DIR`. A hand-run `commandcode-proxy start` gets no such env, so
+/// without this fallback the whole panel 404s on a deb install — which is
+/// exactly what an operator testing the package from a shell sees.
+const FHS_WEBUI_DIRS: [&str; 2] = [
+    "/usr/share/commandcode-proxy/webui",
+    "/usr/local/share/commandcode-proxy/webui",
+];
+
 /// The decision with inputs passed in, so it is testable without the process
 /// environment or the filesystem. The env override wins over the exe-adjacent
 /// fallback; either way the directory must actually contain `index.html`.
@@ -587,13 +600,32 @@ pub fn webui_site_dir_from(
     exe_dir: Option<&Path>,
     env_dir: Option<&Path>,
 ) -> Option<std::path::PathBuf> {
+    let exe_local = exe_dir.map(|dir| dir.join("webui"));
+    let fhs = fhs_webui_dirs();
+    let mut candidates: Vec<&Path> = Vec::new();
     if let Some(dir) = env_dir {
-        if dir.join("index.html").is_file() {
-            return Some(dir.to_path_buf());
-        }
+        candidates.push(dir);
     }
-    let dir = exe_dir?.join("webui");
-    dir.join("index.html").is_file().then_some(dir)
+    candidates.extend(exe_local.as_deref());
+    candidates.extend(fhs.iter().map(std::path::PathBuf::as_path));
+    candidates
+        .into_iter()
+        .find(|dir| dir.join("index.html").is_file())
+        .map(Path::to_path_buf)
+}
+
+/// The FHS candidates, filtered to the platforms that have them. On Windows a
+/// `/usr/share` path would resolve against the current drive, so the list is
+/// empty there rather than merely unlikely.
+fn fhs_webui_dirs() -> Vec<std::path::PathBuf> {
+    if cfg!(unix) {
+        FHS_WEBUI_DIRS
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Read a directory env var, treating empty/whitespace as absent.

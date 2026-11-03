@@ -4,6 +4,41 @@
 与 `chore(release)` 的版本边界对应。0.6.0 之前的历史（Node 时代与
 过渡期）见 `git log` 与发布目录的旧版本文件夹。
 
+## [0.7.9] - 2026-11-03
+
+### 修复
+
+- **上游 200 + HTML 错误页曾被当成「成功的空回答」。** 中间代理、门户或 CDN
+  拦下请求后返回一个 200 的错误页面时，客户端收到的是 `end_turn` + 空文本，
+  账本记 `ok` —— 一次真正的失败在所有日志里都读作成功。现在两道校验：响应头
+  是 `text/html` 直接判 `[upstream-html]`；流干净结束但一个可解析事件都没收到
+  判 `[no-content]`。二者都按「什么都没送达」处理，可从头重发，重发仍失败则
+  如实报错。`[DONE]` 单独出现仍算合法空回答，不会被误判
+- **`ccproxy --help` 不再启动服务。** 此前 `--help` / `--version` 不被识别，
+  落到默认的 `start` 去绑端口 —— 在 Linux 上敲 `--help` 会得到一个后台守护
+  进程。现在打印帮助/版本后退出
+- **`ccproxy --port 9000` 不再报 `unknown command "9000"`。** 取值的 flag 后面
+  那个参数曾被当成子命令名，而这个写法是文档里一直存在、托盘也用不到的形态
+- **`stop` 不再吞掉失败，也不再喷乱码。** `taskkill` 的输出在 zh-CN Windows 上
+  是 OEM 代码页，直接继承 stdio 会在 UTF-8 控制台里变成 `�ɹ�: ����ֹ`；现在
+  捕获丢弃，只看退出码，并用 `/health` 探测确认结果 —— 进程已不在时报成功
+  而不是报错
+- **deb 包此前漏装全部主题样式表**（`theme-light.css` / `theme-jelly.css` /
+  `theme-jelly-dark.css`）。deb 的资产是逐个列出的，新增样式表不进清单就装不
+  进去，面板会以无主题的裸样式渲染。补上三个文件，并加了一条测试：`index.html`
+  引用到的每个文件都必须在 deb 资产清单里
+- deb 补 `prerm` / `postrm`：`apt purge` 现在会清掉 `/var/lib`、`/var/log`、
+  `/etc/commandcode-proxy` 和服务账号；`apt remove` 保留数据，重装能接上账本
+- deb 手工运行（不经 systemd 注入 `CC_WEBUI_DIR`）时面板不再 404：WebUI 目录
+  增加 `/usr/share/commandcode-proxy/webui` 与 `/usr/local/share/...` 两级回退
+
+### 新增
+
+- 冰态果冻主题（`jelly`）与它的暗夜档（`jelly-dark`），按 Auroraqua-UI 的
+  实况复刻：粉紫渐层底、白透玻璃、靛蓝紫阴影，色相守恒的深浅两档。设置页
+  「外观」可切换
+- 趋势图改为三张：Token 分组柱、费用条、命中率折线 + 请求数淡柱，空桶不插值
+
 ## [0.7.7] - 2026-10-28
 
 ### 变更

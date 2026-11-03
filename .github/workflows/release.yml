@@ -103,7 +103,8 @@ jobs:
           mkdir -p crates/ccproxy/pkg/systemd crates/ccproxy/pkg/scripts
           cp packaging/systemd/commandcode-proxy.service crates/ccproxy/pkg/systemd/
           cp packaging/deb/env.example crates/ccproxy/pkg/
-          cp packaging/deb/scripts/preinst packaging/deb/scripts/postinst crates/ccproxy/pkg/scripts/
+          cp packaging/deb/scripts/preinst packaging/deb/scripts/postinst \
+             packaging/deb/scripts/prerm packaging/deb/scripts/postrm crates/ccproxy/pkg/scripts/
           mkdir -p crates/ccproxy-tray/pkg
           cp packaging/desktop/commandcode-proxy-tray.desktop crates/ccproxy-tray/pkg/
           cp packaging/icons/commandcode-proxy.svg crates/ccproxy-tray/pkg/

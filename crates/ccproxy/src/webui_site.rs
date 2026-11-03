@@ -189,6 +189,40 @@ mod tests {
     }
 
     #[test]
+    fn the_deb_asset_list_carries_every_file_the_panel_references() {
+        // The deb lists assets one by one (cargo-deb resolves them relative to
+        // the crate dir), so a stylesheet added to index.html and forgotten
+        // here ships a package whose panel silently loses it — the deb install
+        // rendered with no theme at all for exactly this reason. The tarball and
+        // AppImage copy the directory, so only the deb needs the guard.
+        let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/webui"));
+        let crate_dir = root.parent().expect("webui lives in the crate dir");
+        let manifest =
+            std::fs::read_to_string(crate_dir.join("Cargo.toml")).expect("crate manifest");
+
+        let mut missing = Vec::new();
+        for file in referenced_files(root) {
+            // The favicon is an inline `data:` URI, not a file on disk; only
+            // real files can be packaged.
+            if !file.is_file() {
+                continue;
+            }
+            let Ok(rel) = file.strip_prefix(crate_dir) else {
+                continue;
+            };
+            // cargo-deb wants forward slashes even on Windows.
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            if !manifest.contains(&rel) {
+                missing.push(rel);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "the deb asset list omits referenced files: {missing:?}"
+        );
+    }
+
+    #[test]
     fn corner_radii_come_only_from_the_token_scale() {
         // "Some buttons square, some round": the radii used to be ad-hoc
         // (16/14/8/13/2/999), so two controls on one row could disagree.

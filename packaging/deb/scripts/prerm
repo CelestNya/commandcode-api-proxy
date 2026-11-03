@@ -1,0 +1,20 @@
+#!/bin/sh
+# commandcode-proxy deb prerm: stop the unit before the binary goes away.
+#
+# Upgrades deliberately leave the service running: `dpkg` replaces the file
+# under a live process, and the unit is restarted by the operator (or by
+# unattended-upgrades) — stopping here would drop in-flight requests for a
+# version change that does not need one, and the proxy's handover path exists
+# precisely so a restart is cheap.
+
+set -e
+
+case "$1" in
+    remove|purge|deconfigure)
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl stop commandcode-proxy.service >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+exit 0

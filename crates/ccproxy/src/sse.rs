@@ -85,6 +85,23 @@ pub enum StreamFailure {
     /// The upstream's own events contradicted each other (e.g. a tool-call's
     /// canonical arguments disagreeing with the deltas already sent).
     BadUpstreamData(String),
+    /// The upstream answered `200` with an HTML document instead of a stream.
+    ///
+    /// This is what a captive portal, a corporate TLS-inspecting proxy or a
+    /// CDN error page looks like from here: a perfectly valid HTTP response
+    /// carrying a login page or a "502 Bad Gateway" page. Nothing in the status
+    /// line says so, so it is caught from the content type — and if that header
+    /// is missing, from the absence of any parseable event (see
+    /// [`Self::NoContent`]).
+    UpstreamHtml,
+    /// The upstream closed cleanly without a single event the parser could
+    /// recognise.
+    ///
+    /// The stream said "that's all" while never producing a `start`, a
+    /// `text-delta` or a `finish`. Reporting that as a clean end would hand the
+    /// client a fabricated successful empty answer, which is far harder to
+    /// diagnose than an error: the request would appear to have succeeded.
+    NoContent,
     /// The downstream client went away.
     ClientGone,
     /// Anything else; reported verbatim.
@@ -100,6 +117,8 @@ impl StreamFailure {
             Self::UpstreamEvent(_) => "[upstream-error]",
             Self::ConnectionReset => "[connection-reset]",
             Self::BadUpstreamData(_) => "[bad-upstream-data]",
+            Self::UpstreamHtml => "[upstream-html]",
+            Self::NoContent => "[no-content]",
             Self::ClientGone => "[client-gone]",
             Self::Other(_) => "[stream-error]",
         }
@@ -112,6 +131,10 @@ impl StreamFailure {
             Self::IdleTimeout { ms } => format!("CC upstream idle timeout: no data for {ms}ms"),
             Self::UpstreamEvent(m) | Self::BadUpstreamData(m) | Self::Other(m) => m.clone(),
             Self::ConnectionReset => "terminated".to_string(),
+            Self::UpstreamHtml => "CC upstream answered with an HTML page instead of a stream \
+                 (a proxy or portal in front of CC is replying, not CC)"
+                .to_string(),
+            Self::NoContent => "CC upstream closed without a single parseable event".to_string(),
             Self::ClientGone => "client disconnected".to_string(),
         }
     }

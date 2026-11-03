@@ -1458,6 +1458,22 @@ pub fn handle_update_post(state: &SharedState, mut req: Request, _ctx: &RequestI
             respond_json(req, &json!({ "started": true, "action": "check" }));
         }
         "install" => {
+            // The staging model is the Windows portable layout (a sibling A/B
+            // directory plus a tray handover). On Linux the package manager owns
+            // the install, so an in-place write is neither possible nor right —
+            // refuse with the answer the operator actually needs instead of a
+            // misleading "not a valid zip".
+            if !crate::update::SELF_UPDATE_SUPPORTED {
+                return respond_status(
+                    req,
+                    400,
+                    &json!({
+                        "error": "本平台不支持在应用内自动更新：请用包管理器升级\
+                                  （apt install --only-upgrade commandcode-proxy / \
+                                  pacman -Syu），或替换 AppImage"
+                    }),
+                );
+            }
             let status = crate::update::load();
             if !status.available(crate::server::PROXY_VERSION) {
                 return respond_status(req, 400, &json!({ "error": "当前没有可安装的新版本" }));

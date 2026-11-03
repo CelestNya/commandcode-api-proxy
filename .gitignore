@@ -35,3 +35,8 @@ __pycache__/
 .probe/data-light/pricing.json
 # Third-party checkouts the probes clone for reference (not project content).
 .probe/ref/
+# Scratch instance state from the end-to-end / update probes: ledgers, logs,
+# pid files and staged install roots. Never project content.
+.probe/e2e-*/
+.probe/cli-test/
+.probe/upd/

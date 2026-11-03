@@ -32,6 +32,17 @@ pub const CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
 /// Refuse a download larger than this. The Windows package is ~8 MB.
 const MAX_DOWNLOAD_BYTES: u64 = 128 * 1024 * 1024;
 
+/// Whether this platform can install an update in place.
+///
+/// The staging model is *A/B by sibling directory* — unpack beside the current
+/// install, let the tray stop→start — which exists because the Windows package
+/// is a portable zip whose location belongs to the user. On Linux the package
+/// manager owns `/usr` and the archive is a `.tar.gz` of an FHS tree, so
+/// neither half of the model holds. Detection still runs there (knowing a new
+/// version exists is useful); only the install step is refused, until the
+/// platform gets a model of its own.
+pub const SELF_UPDATE_SUPPORTED: bool = cfg!(windows);
+
 /// What the last check found, persisted so a restart does not re-ask.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct State {

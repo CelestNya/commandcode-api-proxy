@@ -1,0 +1,39 @@
+#!/bin/sh
+# commandcode-proxy deb postrm: undo what postinst created.
+#
+# Split by reason, per Debian policy: `remove` keeps the data (a reinstall must
+# find its ledger, and the operator's generated env carries the API key), while
+# `purge` is the explicit "forget everything" — state, logs, config and the
+# service account.
+#
+# Before this script existed, `apt purge` left all four behind: /var/lib,
+# /var/log, /etc and the system user, which then blocked a clean reinstall with
+# different ids.
+
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /var/lib/commandcode-proxy /var/log/commandcode-proxy
+        rm -rf /etc/commandcode-proxy
+        # The account is created by preinst and owns nothing once purge has
+        # taken the directories; delete it so a reinstall starts clean.
+        if getent passwd commandcode-proxy >/dev/null 2>&1; then
+            userdel commandcode-proxy >/dev/null 2>&1 || true
+        fi
+        if getent group commandcode-proxy >/dev/null 2>&1; then
+            groupdel commandcode-proxy >/dev/null 2>&1 || true
+        fi
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+    remove)
+        # Drop the unit from systemd's view, keep the data.
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+exit 0

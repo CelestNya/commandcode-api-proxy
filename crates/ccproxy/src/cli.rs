@@ -13,6 +13,68 @@ use std::path::PathBuf;
 
 use crate::config::Config;
 
+/// The usage text for `--help`.
+///
+/// Kept next to the command dispatch so a new subcommand is added in one file.
+pub const HELP: &str = "\
+cc-proxy — local proxy for the Command Code API
+
+USAGE:
+    ccproxy [COMMAND] [OPTIONS]
+
+COMMANDS:
+    start               Run the proxy (the default when no command is given)
+    stop                Signal the instance named by the PID file, then wait
+                        for the port to be released
+    status              Print the PID file and probe /health
+    logs                Print where the proxy and tray logs live
+    config              Print the effective configuration (credentials masked)
+
+OPTIONS:
+    --port <N>          Listen port (default 8787)
+    --host <H>          Bind address (default 127.0.0.1)
+    --import-legacy-usage [--dir <PATH>]...
+                        Import a pre-M7 usage.jsonl into the ledger, then exit
+    -h, --help          Print this help and exit
+    -V, --version       Print the version and exit
+
+ENVIRONMENT (see docs for the full list):
+    PORT, HOST, CC_API_BASE, CC_DATA_DIR, CC_LOG_DIR, CC_WEBUI_DIR,
+    CC_PROXY, NO_PROXY, CC_UPSTREAM_TIMEOUT_MS, CC_IDLE_TIMEOUT_MS,
+    CC_NO_OUTPUT_TIMEOUT_MS, CC_NO_OUTPUT_RETRIES, CC_PID_FILE
+";
+
+/// Flags whose next argument is their value.
+///
+/// Only the two the config loader actually reads. Everything else is accepted
+/// and ignored (matching the Node parser), so a positional argument after an
+/// unknown flag is still a command name.
+const VALUE_FLAGS: [&str; 2] = ["--port", "--host"];
+
+/// The subcommand name, or `None` for a flag-only invocation.
+///
+/// The first positional argument names the command — but a flag's *value* is
+/// positional too. Reading them the same way made `ccproxy --port 8803` fail
+/// with `unknown command "8803"`, even though that form is documented and is
+/// how the flag-only launch has always been spelled.
+#[must_use]
+pub fn subcommand(argv: &[String]) -> Option<&str> {
+    let mut iter = argv.iter();
+    while let Some(arg) = iter.next() {
+        if VALUE_FLAGS.contains(&arg.as_str()) {
+            // Consume the value unconditionally: a missing value is the config
+            // loader's problem, not a command name.
+            iter.next();
+            continue;
+        }
+        if arg.starts_with('-') {
+            continue;
+        }
+        return Some(arg);
+    }
+    None
+}
+
 /// Env override for the PID file location. The packaged layout points it at
 /// the runtime dir when `CC_DATA_DIR` is unusual.
 pub const PID_FILE_ENV: &str = "CC_PID_FILE";
@@ -52,25 +114,41 @@ pub fn remove_pid() {
 /// Ask one running instance to stop: `SIGTERM` on Unix (graceful — the server
 /// drains and exits), `taskkill /T` on Windows. The target comes from the PID
 /// file; without one there is nothing to stop.
-fn send_terminate(pid: u32) -> std::io::Result<()> {
+///
+/// The child's own output is captured and dropped rather than inherited. Two
+/// reasons, both observed: on a zh-CN Windows `taskkill` writes its message in
+/// the OEM code page, which lands in a UTF-8 console as mojibake; and the
+/// wording is localised, so matching on it (to tell "already gone" from "access
+/// denied") cannot work. The exit status is the only portable signal, and the
+/// caller confirms the outcome with the `/health` probe anyway.
+fn send_terminate(pid: u32) -> Result<(), String> {
     #[cfg(unix)]
-    {
-        std::process::Command::new("kill")
-            .arg("-TERM")
-            .arg(pid.to_string())
-            .status()?;
-    }
+    let mut command = {
+        let mut c = std::process::Command::new("kill");
+        c.arg("-TERM").arg(pid.to_string());
+        c
+    };
     #[cfg(windows)]
-    {
+    let mut command = {
         // Windows has no SIGTERM; taskkill's graceful mode is refused by
         // console processes, so this is the forceful `/T /F` variant. The
         // tree flag matters: the service may have spawned a child (the CLI
         // version lookup) that would otherwise keep the port alive.
-        std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status()?;
+        let mut c = std::process::Command::new("taskkill");
+        c.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        c
+    };
+
+    let output = command
+        .output()
+        .map_err(|e| format!("cannot run the stop command: {e}"))?;
+    if output.status.success() {
+        return Ok(());
     }
-    Ok(())
+    Err(match output.status.code() {
+        Some(code) => format!("stop command exited with status {code}"),
+        None => "stop command was terminated by a signal".to_string(),
+    })
 }
 
 /// Probe `GET /health` on the configured listener. Returns the body on a 2xx,
@@ -138,9 +216,13 @@ pub fn run_stop(c: &Config) -> i32 {
         return 1;
     };
     crate::log::info(&format!("sending SIGTERM to pid {pid}"));
+    // A failed signal is not reported as a failed stop until the port has been
+    // probed: the usual cause is that the process is already gone (a stale PID
+    // file, or the tray stopped it first), and saying "cannot signal" then exit
+    // 1 reads as a bug when nothing is wrong. A real failure — the port still
+    // answering — is reported below, where it can be stated as such.
     if let Err(e) = send_terminate(pid) {
-        crate::log::error(&format!("cannot signal pid {pid}: {e}"));
-        return 1;
+        crate::log::warn(&format!("{e}; checking whether the service is still up"));
     }
     // Wait up to ~5s for the listener to go away before declaring success.
     #[allow(clippy::arithmetic_side_effects)]
@@ -153,7 +235,10 @@ pub fn run_stop(c: &Config) -> i32 {
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
-    crate::log::warn("service did not release the port within 5s (PID file left in place)");
+    crate::log::error(&format!(
+        "pid {pid} did not stop within 5s — something is still listening on {}:{} (PID file left in place)",
+        c.host, c.port
+    ));
     1
 }
 
@@ -201,6 +286,34 @@ pub fn run_logs() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_flag_value_is_not_a_command() {
+        let args = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        // The documented flag-only forms: no command, so the server starts.
+        let flag_only = args(&["--port", "8803"]);
+        assert_eq!(subcommand(&flag_only), None);
+        let two_flags = args(&["--host", "0.0.0.0", "--port", "9000"]);
+        assert_eq!(subcommand(&two_flags), None);
+        let nothing = args(&[]);
+        assert_eq!(subcommand(&nothing), None);
+        // A value that happens to look like a command is still a value.
+        let tricky = args(&["--port", "config"]);
+        assert_eq!(subcommand(&tricky), None);
+
+        // The command is found wherever it sits, before or after the flags.
+        let leading = args(&["start", "--port", "9000"]);
+        assert_eq!(subcommand(&leading), Some("start"));
+        let trailing = args(&["--port", "9000", "status"]);
+        assert_eq!(subcommand(&trailing), Some("status"));
+    }
+
+    #[test]
+    fn the_help_text_names_every_command_that_can_be_run() {
+        for command in ["start", "stop", "status", "logs", "config"] {
+            assert!(HELP.contains(command), "help omits `{command}`");
+        }
+    }
 
     #[test]
     fn proxy_urls_are_masked_at_the_authority_boundary() {

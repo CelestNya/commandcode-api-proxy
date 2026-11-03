@@ -393,16 +393,90 @@ fn mask_ids(text: &str) -> String {
 #[test]
 fn an_empty_upstream_still_terminates_the_stream() {
     // A body with no events at all must still produce a well-formed ending;
-    // otherwise the client waits on a stream that will never close.
+    // otherwise the client waits on a stream that will never close. It must
+    // *not* produce a successful one: an upstream that said 200 and sent
+    // nothing has not answered, and a clean `stop` here would hand the caller a
+    // fabricated empty reply that reads as success in every log and ledger.
     let mut body = body_of(Failing::clean(""), Dialect::Openai, None);
     let text = read_all(&mut body);
-    assert!(text.contains(r#""finish_reason":"stop""#), "{text}");
+    assert!(!text.contains(r#""finish_reason":"stop""#), "{text}");
+    assert!(text.contains("[no-content]"), "{text}");
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 
     let mut body = body_of(Failing::clean(""), Dialect::Anthropic, None);
     let text = read_all(&mut body);
     assert!(text.contains("event: message_start"), "{text}");
+    assert!(text.contains("[no-content]"), "{text}");
     assert!(text.contains("event: message_stop"), "{text}");
+    assert!(!text.contains(r#""stop_reason":"end_turn""#), "{text}");
+}
+
+#[test]
+fn a_body_that_parses_to_nothing_is_an_error_not_an_empty_answer() {
+    // What a portal in front of CC produces: real bytes, HTTP 200, and not one
+    // line this protocol can read. It used to reach the client as `end_turn`
+    // with empty text and be billed `ok` — the hardest kind of failure to
+    // notice, because nothing anywhere said "failed".
+    let garbage = ndjson(&["{{{ not json", "also not json", "<html>502</html>"]);
+    for dialect in [Dialect::Openai, Dialect::Anthropic] {
+        let mut body = body_of(Failing::clean(&garbage), dialect, None);
+        let text = read_all(&mut body);
+        assert!(text.contains("[no-content]"), "{dialect:?}: {text}");
+        assert!(!text.contains(r#""finish_reason":"stop""#), "{dialect:?}");
+        assert!(!text.contains(r#""stop_reason":"end_turn""#), "{dialect:?}");
+    }
+}
+
+#[test]
+fn a_web_page_where_the_stream_should_be_is_reported_as_such() {
+    // The content type is the faster of the two signals: it is known before a
+    // single body byte is read, so the client is told what actually happened
+    // rather than "no content".
+    let page = "<!doctype html><html><body><h1>502 Bad Gateway</h1></body></html>";
+    let stream = UpstreamStream::new(Box::new(Failing::clean(page)), 800).with_html_body(true);
+    let mut body = SseBody::new(stream, Dialect::Anthropic, "m", None, SseBody::new_slot());
+    let text = read_all(&mut body);
+    assert!(text.contains("[upstream-html]"), "{text}");
+    assert!(text.contains("event: message_stop"), "{text}");
+}
+
+#[test]
+fn a_done_sentinel_alone_is_a_legitimate_empty_answer() {
+    // `[DONE]` is the upstream saying "that is all" in this protocol's own
+    // words, so it must not be reclassified: only a stream that never spoke
+    // the protocol at all is an error.
+    let mut body = body_of(Failing::clean(&ndjson(&["[DONE]"])), Dialect::Openai, None);
+    let text = read_all(&mut body);
+    assert!(!text.contains("[no-content]"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+}
+
+#[test]
+fn the_no_content_verdict_is_retryable_from_scratch() {
+    // Nothing reached the client, so a replacement must be re-sent from
+    // scratch and be invisible — the same recovery a silent start gets.
+    let first = ndjson(&["not json at all"]);
+    let stream = UpstreamStream::new(Box::new(Failing::clean(&first)), 800);
+    let replacement = ndjson(OPENAI_EVENTS);
+    let reconnect: Box<dyn FnMut() -> Result<UpstreamStream, StreamFailure> + Send> =
+        Box::new(move || {
+            Ok(UpstreamStream::new(
+                Box::new(Failing::clean(&replacement)),
+                800,
+            ))
+        });
+    let mut body = SseBody::with_no_output_retries(
+        stream,
+        Dialect::Openai,
+        "m",
+        Some(reconnect),
+        SseBody::new_slot(),
+        None,
+        1,
+    );
+    let text = read_all(&mut body);
+    assert!(!text.contains("[no-content]"), "{text}");
+    assert!(text.contains(r#""content":"hi""#), "{text}");
 }
 
 #[test]

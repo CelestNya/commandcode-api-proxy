@@ -5,6 +5,19 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let env = |k: &str| std::env::var(k).ok();
 
+    // Answered before anything is loaded, bound or logged. `--help` used to fall
+    // through to "start" and bind the port, so the question "what are the
+    // flags?" was answered with a daemon — the worst possible reply on a
+    // headless box, where it also succeeds silently in the background.
+    if argv.iter().any(|a| a == "--help" || a == "-h") {
+        print!("{}", ccproxy::cli::HELP);
+        return;
+    }
+    if argv.iter().any(|a| a == "--version" || a == "-V") {
+        println!("cc-proxy {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     // A one-shot maintenance command rather than a server flag: importing the
     // legacy history is something you run once after upgrading, and it must not
     // be entangled with starting the listener.
@@ -18,14 +31,10 @@ fn main() {
     let mut config = ccproxy::config::load(&argv, &env);
     ccproxy::log::init(&config.log_level);
 
-    // Subcommands: the first non-flag argument names the command; with none the
-    // server starts (the pre-existing behaviour, so `ccproxy --port 9000`
+    // Subcommands: the first positional argument names the command; with none
+    // the server starts (the pre-existing behaviour, so `ccproxy --port 9000`
     // keeps working and the tray's flag-less launch is unchanged).
-    let command = argv
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .map(String::as_str)
-        .unwrap_or("start");
+    let command = ccproxy::cli::subcommand(&argv).unwrap_or("start");
     match command {
         "stop" => std::process::exit(ccproxy::cli::run_stop(&config)),
         "status" => std::process::exit(ccproxy::cli::run_status(&config)),
