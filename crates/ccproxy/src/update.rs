@@ -100,8 +100,12 @@ impl State {
                 "at": s.at,
             })),
             "error": self.error,
-            // The page must not promise an install it cannot perform.
-            "installable": self.available(current) && !self.url.is_empty(),
+            // The page must not promise an install it cannot perform. That
+            // covers both halves: no asset for this platform *and* a platform
+            // that has no in-app install at all. On Linux the newest asset is a
+            // source tarball and the package manager owns `/usr`, so a button
+            // that always answers 400 is worse than no button.
+            "installable": SELF_UPDATE_SUPPORTED && self.available(current) && !self.url.is_empty(),
         })
     }
 }
@@ -658,7 +662,8 @@ mod tests {
         state.url = "https://example.invalid/win.zip".to_string();
         assert_eq!(
             state.to_json("0.7.7")["installable"],
-            serde_json::Value::Bool(true)
+            serde_json::Value::Bool(SELF_UPDATE_SUPPORTED),
+            "an install is only offered where this build can perform one"
         );
     }
 
