@@ -13,6 +13,9 @@ function route() {
     el("view-" + name).classList.toggle("active", name === view);
     el("nav-" + name).classList.toggle("active", name === view);
   });
+  /* 趋势悬停明细浮层挂在 body 直属层（避开 backdrop-filter 的包含块），
+     切视图时不会被面板一起藏住，这里显式收起。 */
+  if (typeof hideTrendTip === "function") hideTrendTip();
   /* The log follow poll is only worth running while the screen is visible;
      route() is the one place that knows, so it owns start/stop. */
   if (view === "logs") startLogPolling(); else stopLogPolling();

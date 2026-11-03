@@ -257,6 +257,15 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.50);
 }
 
+/* 悬停明细浮层：基线用 --surface-2（白 45%）作底，压在粉紫渐变上太薄，
+   柱/线会从字后面透出来。浮层已移到 body 直属层，直接叠页面底色，
+   这里单独给一层近实底粉白，保证数字干净可读。 */
+:root[data-theme="jelly"] .trend-tip {
+  background: rgba(255, 252, 254, 0.97);
+  border-color: rgba(196, 30, 98, 0.20);
+  box-shadow: 0 8px 24px rgba(31, 38, 135, 0.14);
+}
+
 /* 激活的导航项：参考的激活项是 primary 色的实底 + 白字
    （bg-gradient-to-r from-pink-400 to-pink-500 text-white）。
    参考的 pink-400 #F472B6 上白字只有 2.65:1——它是大色块不承载小字；

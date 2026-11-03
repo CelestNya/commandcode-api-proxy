@@ -126,7 +126,6 @@
               </div>
               <div class="trend-foot" id="trend-foot"></div>
             </div>
-            <div class="trend-tip" id="trend-tip" hidden></div>
           </div>
 
           <div class="panel">
@@ -314,6 +313,12 @@
     </main>
   </div>
 </div>
+<!-- 趋势悬停浮层必须挂在 .shell 之外。
+     果冻主题的 .panel 带 backdrop-filter，而 backdrop-filter 会为
+     position:fixed 的后代创建包含块 —— 浮层的 left/top 被当成「面板内
+     坐标」解释，实际渲染会跑到鼠标右下角、偏出一个面板原点的距离。
+     放在 body 直属层没有这个包含块，clientX/clientY 与视口一致。 -->
+<div class="trend-tip" id="trend-tip" hidden></div>
 <!-- Scripts, in load order. These are classic scripts (no modules): they share
      one global scope, and app.js wires everything up on DOMContentLoaded, so
      order is what makes the earlier files' functions visible to the later

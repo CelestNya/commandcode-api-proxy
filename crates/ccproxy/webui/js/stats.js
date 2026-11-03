@@ -123,6 +123,15 @@ var TREND_COLORS = {
  * 轮询每秒重画时悬停不闪断。 */
 var trendHover = { idx: -1, lines: [] };
 
+/* 收起悬停明细。浮层是 body 直属层（见 index.html 里 backdrop-filter
+ * 包含块的说明），切视图时不会被面板一起藏起来，所以由 route() 显式调用。 */
+function hideTrendTip() {
+  var t = el("trend-tip");
+  if (t) t.hidden = true;
+  trendHover.idx = -1;
+  trendHover.lines.forEach(function (l) { l.setAttribute("opacity", 0); });
+}
+
 function trendBucketX(i, n, ML, MR, W) {
   var slot = (W - ML - MR) / n;
   return ML + slot * (i + 0.5);
@@ -155,16 +164,18 @@ function renderTrend(raw, animate) {
         : "");
     tip.hidden = false;
     var tw = tip.offsetWidth, th = tip.offsetHeight;
-    var left = ev.clientX + 14, top = ev.clientY - th - 10;
-    if (left + tw > window.innerWidth - 8) left = ev.clientX - tw - 14;
-    if (top < 8) top = ev.clientY + 16;
+    /* 贴光标右侧、垂直居中于光标。不采用「整块悬在光标上方」：
+       浮层有 6~7 行、约 146px 高，比趋势图绘图区还高，往上放会盖住
+       面板标题与图例。左边/上下都做视口内收边。 */
+    var gap = 14;
+    var left = ev.clientX + gap;
+    if (left + tw > window.innerWidth - 8) left = ev.clientX - tw - gap;
+    if (left < 8) left = 8;
+    var top = ev.clientY - th / 2;
+    if (top + th > window.innerHeight - 8) top = window.innerHeight - th - 8;
+    if (top < 8) top = 8;
     tip.style.left = left + "px";
     tip.style.top = top + "px";
-  }
-  function hideTip() {
-    tip.hidden = true;
-    trendHover.idx = -1;
-    trendHover.lines.forEach(function (l) { l.setAttribute("opacity", 0); });
   }
   function moveHover(ev) {
     if (!n) return;
@@ -182,7 +193,7 @@ function renderTrend(raw, animate) {
   }
   [svgT, svgC, svgR].forEach(function (svg) {
     svg.onmousemove = moveHover;
-    svg.onmouseleave = hideTip;
+    svg.onmouseleave = hideTrendTip;
   });
 
   /* 空态：三张图各给一句短文案，不再画装饰折线 */

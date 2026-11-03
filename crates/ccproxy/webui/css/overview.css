@@ -148,7 +148,9 @@
 
 /* 悬停明细：fixed 定位跟随光标，深底描边卡，等宽字体 */
 .trend-tip {
-  position: fixed; z-index: 30; pointer-events: none;
+  /* 45：压在 sticky 侧栏/顶栏(40)之上、请求抽屉(50)之下。
+     浮层是 body 直属，见 index.html 里关于 backdrop-filter 包含块的说明。 */
+  position: fixed; z-index: 45; pointer-events: none;
   min-width: 190px; padding: 9px 11px;
   background: var(--surface-2); border: 1px solid var(--outline-strong);
   border-radius: var(--radius-card);
