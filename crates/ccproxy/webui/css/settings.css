@@ -125,6 +125,11 @@
 .sw-jelly i:nth-child(1) { background: rgba(255, 255, 255, .25); }
 .sw-jelly i:nth-child(2) { background: #C41E62; }
 .sw-jelly i:nth-child(3) { background: linear-gradient(90deg, #C41E62 0 38%, rgba(255, 255, 255, .25) 38% 100%); }
+/* 预览色板用 jelly-dark 的真实渐层（深梅紫底 + 玫红强调），与实况一致。 */
+.sw-jelly-dark { background: linear-gradient(135deg, #1c1330 0%, #241a3e 45%, #160f24 100%); }
+.sw-jelly-dark i:nth-child(1) { background: rgba(255, 255, 255, .10); }
+.sw-jelly-dark i:nth-child(2) { background: #FF5C9A; }
+.sw-jelly-dark i:nth-child(3) { background: linear-gradient(90deg, #FF5C9A 0 38%, rgba(255, 255, 255, .10) 38% 100%); }
 
 /* ── 底部操作条 ── */
 .set-foot {

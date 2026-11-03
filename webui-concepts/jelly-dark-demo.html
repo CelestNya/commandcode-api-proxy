@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>果冻主题 · 深色方案对比</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== 通用组件层（读 CSS 变量） ===== */
+  .app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    color: var(--text);
+    background: var(--bg-grad);
+    background-attachment: fixed;
+    position: relative;
+    overflow: hidden;
+  }
+  /* 三团光斑（暗色下用低透明度饱和色，避免糊成一片） */
+  .app::before, .app::after {
+    content: ""; position: fixed; border-radius: 50%; pointer-events: none; z-index: 0;
+    filter: blur(60px);
+  }
+  .app::before {
+    width: var(--glow1-s); height: var(--glow1-s);
+    top: var(--glow1-y); right: var(--glow1-x);
+    background: var(--glow1-c); opacity: var(--glow1-o);
+  }
+  .app::after {
+    width: var(--glow2-s); height: var(--glow2-s);
+    bottom: var(--glow2-y); left: var(--glow2-x);
+    background: var(--glow2-c); opacity: var(--glow2-o);
+  }
+
+  .topbar {
+    position: relative; z-index: 2;
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+    backdrop-filter: blur(var(--blur)) saturate(1.4);
+  }
+  .topbar .title { font-weight: 700; font-size: 15px; letter-spacing: .3px; }
+  .topbar .sub { font-size: 12px; color: var(--muted); }
+  .switches { margin-left: auto; display: flex; gap: 8px; }
+  .sw {
+    font-size: 12px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2); color: var(--muted);
+    transition: .15s;
+  }
+  .sw:hover { color: var(--text); }
+  .sw.on { background: var(--primary); color: #fff; border-color: transparent; }
+
+  .body { position: relative; z-index: 1; flex: 1; display: flex; }
+
+  .sidebar {
+    width: 200px; flex-shrink: 0; padding: 18px 12px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+    backdrop-filter: blur(var(--blur)) saturate(1.4);
+  }
+  .logo { font-weight: 800; font-size: 17px; padding: 6px 10px 18px; color: var(--text); }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 10px; margin-bottom: 4px;
+    color: var(--muted); font-size: 13.5px; cursor: pointer;
+  }
+  .nav-item .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .5; }
+  .nav-item.active {
+    background: var(--nav-active); color: #fff;
+    box-shadow: 0 2px 10px var(--nav-shadow);
+  }
+  .nav-item.active .dot { opacity: 1; background: #fff; }
+
+  .main { flex: 1; padding: 18px 22px; overflow: auto; }
+  .filterbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 14px; margin-bottom: 16px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+    backdrop-filter: blur(var(--blur)) saturate(1.4);
+  }
+  .chip {
+    font-size: 12.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border-strong); color: var(--muted);
+    background: var(--surface-2);
+  }
+  .chip.on { background: var(--primary); color: #fff; border-color: transparent; }
+  .filterbar .spacer { margin-left: auto; }
+  .ctrl {
+    font-size: 12.5px; padding: 6px 12px; border-radius: 9px;
+    border: 1px solid var(--border-strong); color: var(--text);
+    background: var(--surface-2);
+  }
+
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+  .card {
+    padding: 16px 18px; border-radius: 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    box-shadow: 0 8px 32px var(--card-shadow), inset 0 1px 0 var(--hi);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+    backdrop-filter: blur(var(--blur)) saturate(1.4);
+  }
+  .card .k { font-size: 12px; color: var(--muted); }
+  .card .v { font-size: 26px; font-weight: 700; margin-top: 6px; letter-spacing: .5px; }
+  .card .d { font-size: 11.5px; margin-top: 4px; color: var(--muted); }
+
+  .row2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .panel {
+    padding: 16px 18px; border-radius: 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    box-shadow: 0 8px 32px var(--card-shadow), inset 0 1px 0 var(--hi);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.4);
+    backdrop-filter: blur(var(--blur)) saturate(1.4);
+  }
+  .panel h3 { font-size: 13.5px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .panel h3 .tag { font-size: 11px; font-weight: 500; color: var(--muted); }
+  .legend { display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; }
+  td .model { color: var(--text); font-weight: 600; }
+  .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.err { background: var(--err-bg); color: var(--err); }
+
+  .donut-wrap { display: flex; align-items: center; gap: 16px; }
+  .donut-legend { font-size: 12px; color: var(--muted); line-height: 1.9; }
+  .donut-legend b { color: var(--text); font-weight: 600; }
+
+  /* ============================================================
+     方案 A — 暗夜粉紫（jelly-dark，推荐）
+     现有果冻的夜晚版：深梅紫渐层 + 粉紫玻璃 + 浅色文字
+     ============================================================ */
+  [data-variant="A"] {
+    --bg-grad: linear-gradient(135deg, #1c1330 0%, #241a3e 45%, #160f24 100%);
+    --glow1-c: #ff6b9d; --glow1-s: 420px; --glow1-x: -80px; --glow1-y: -120px; --glow1-o: .22;
+    --glow2-c: #7b61ff; --glow2-s: 360px; --glow2-x: 12%; --glow2-y: -60px; --glow2-o: .18;
+    --surface: rgba(255,255,255,.06);
+    --surface-2: rgba(255,255,255,.10);
+    --border: rgba(255,255,255,.10);
+    --border-strong: rgba(255,255,255,.22);
+    --hi: rgba(255,255,255,.10);
+    --blur: 24px;
+    --text: #ECE6FF;
+    --muted: #B3A8DA;
+    --card-shadow: rgba(31,38,135,.45);
+    --primary: #FF5C9A;
+    --nav-active: linear-gradient(135deg, #E0457F, #C41E62);
+    --nav-shadow: rgba(236,72,153,.4);
+    --ok: #4FD1A6; --ok-bg: rgba(79,209,166,.16);
+    --err: #FF7A9C; --err-bg: rgba(255,122,156,.16);
+    --chart-hit: #FF5C9A; --chart-out: #B388FF; --chart-7: #7C9CFF;
+    --chart-6: #C77DFF; --chart-10: #FF8FC0;
+  }
+
+  /* ============================================================
+     方案 B — 午夜深蓝（复刻参考 midnight）
+     深蓝底 + 靛蓝玻璃 + 浅灰文字（与果冻不同族）
+     ============================================================ */
+  [data-variant="B"] {
+    --bg-grad: linear-gradient(135deg, #0f172a 0%, #1e293b 45%, #0f172a 100%);
+    --glow1-c: #6366f1; --glow1-s: 420px; --glow1-x: -80px; --glow1-y: -120px; --glow1-o: .16;
+    --glow2-c: #8b5cf6; --glow2-s: 360px; --glow2-x: 12%; --glow2-y: -60px; --glow2-o: .12;
+    --surface: rgba(255,255,255,.05);
+    --surface-2: rgba(255,255,255,.08);
+    --border: rgba(148,163,184,.14);
+    --border-strong: rgba(148,163,184,.28);
+    --hi: rgba(255,255,255,.06);
+    --blur: 24px;
+    --text: #F1F5F9;
+    --muted: #94A3B8;
+    --card-shadow: rgba(15,23,42,.55);
+    --primary: #6366F1;
+    --nav-active: linear-gradient(135deg, #6366F1, #4F46E5);
+    --nav-shadow: rgba(99,102,241,.4);
+    --ok: #34D399; --ok-bg: rgba(52,211,153,.15);
+    --err: #F87171; --err-bg: rgba(248,113,113,.15);
+    --chart-hit: #818CF8; --chart-out: #A78BFA; --chart-7: #38BDF8;
+    --chart-6: #C084FC; --chart-10: #F472B6;
+  }
+
+  /* ============================================================
+     方案 C — 纯黑玻璃（近黑底 + 饱和粉紫玻璃，无发光）
+     更冷更酷，靠高饱和扁平色，不加任何光晕
+     ============================================================ */
+  [data-variant="C"] {
+    --bg-grad: #0a0a0f;
+    --glow1-c: #ff3d8b; --glow1-s: 380px; --glow1-x: -60px; --glow1-y: -100px; --glow1-o: .14;
+    --glow2-c: #a855f7; --glow2-s: 320px; --glow2-x: 14%; --glow2-y: -40px; --glow2-o: .12;
+    --surface: rgba(255,255,255,.04);
+    --surface-2: rgba(255,255,255,.07);
+    --border: rgba(255,255,255,.10);
+    --border-strong: rgba(255,255,255,.26);
+    --hi: rgba(255,255,255,.08);
+    --blur: 20px;
+    --text: #F5F0FF;
+    --muted: #9B93C4;
+    --card-shadow: rgba(0,0,0,.6);
+    --primary: #FF3D8B;
+    --nav-active: linear-gradient(135deg, #FF3D8B, #D61F6B);
+    --nav-shadow: rgba(255,61,139,.35);
+    --ok: #2DD4BF; --ok-bg: rgba(45,212,191,.15);
+    --err: #FB7185; --err-bg: rgba(251,113,133,.15);
+    --chart-hit: #FF3D8B; --chart-out: #A855F7; --chart-7: #5B8CFF;
+    --chart-6: #C084FC; --chart-10: #FF6FB0;
+  }
+
+  svg text { fill: var(--muted); font-size: 10px; }
+  .grid-line { stroke: var(--border); stroke-width: 1; }
+  .bar-in { fill: var(--chart-hit); }
+  .bar-out { fill: var(--chart-out); }
+  .bar-cache { fill: var(--chart-7); }
+  .hit-line { fill: none; stroke: var(--chart-10); stroke-width: 2; }
+  .donut-seg { stroke: var(--surface); stroke-width: 2; }
+</style>
+</head>
+<body>
+<div class="app" data-variant="A" id="app">
+  <div class="topbar">
+    <div>
+      <div class="title">CCProxy 控制台</div>
+      <div class="sub">果冻主题 · 深色方案对比</div>
+    </div>
+    <div class="switches">
+      <div class="sw on" data-v="A" onclick="setV('A')">暗夜粉紫</div>
+      <div class="sw" data-v="B" onclick="setV('B')">午夜深蓝</div>
+      <div class="sw" data-v="C" onclick="setV('C')">纯黑玻璃</div>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="sidebar">
+      <div class="logo">❄ CCProxy</div>
+      <div class="nav-item active"><span class="dot"></span>概览</div>
+      <div class="nav-item"><span class="dot"></span>请求</div>
+      <div class="nav-item"><span class="dot"></span>日志</div>
+      <div class="nav-item"><span class="dot"></span>设置</div>
+    </div>
+
+    <div class="main">
+      <div class="filterbar">
+        <span class="chip">1h</span>
+        <span class="chip">24h</span>
+        <span class="chip on">30d</span>
+        <span class="chip">全部</span>
+        <span class="spacer"></span>
+        <span class="ctrl">模型 ▾</span>
+        <span class="ctrl">状态 ▾</span>
+      </div>
+
+      <div class="cards">
+        <div class="card"><div class="k">总请求</div><div class="v">23,867</div><div class="d">↑ 12.4% 环比</div></div>
+        <div class="card"><div class="k">总费用</div><div class="v">$ 142.08</div><div class="d">↓ 3.1% 环比</div></div>
+        <div class="card"><div class="k">缓存命中率</div><div class="v">68.2%</div><div class="d">↑ 5.6pt</div></div>
+        <div class="card"><div class="k">平均延迟</div><div class="v">812ms</div><div class="d">↓ 44ms</div></div>
+      </div>
+
+      <div class="row2">
+        <div class="panel">
+          <h3>Token 趋势 <span class="tag">Input / Output / Cache Read · 30d</span></h3>
+          <svg viewBox="0 0 460 180" width="100%" height="180">
+            <!-- 网格 -->
+            <line class="grid-line" x1="30" y1="20" x2="450" y2="20"/>
+            <line class="grid-line" x1="30" y1="60" x2="450" y2="60"/>
+            <line class="grid-line" x1="30" y1="100" x2="450" y2="100"/>
+            <line class="grid-line" x1="30" y1="140" x2="450" y2="140"/>
+            <!-- Input -->
+            <rect class="bar-in" x="40"  y="70"  width="22" height="70"/>
+            <rect class="bar-in" x="80"  y="55"  width="22" height="85"/>
+            <rect class="bar-in" x="120" y="62"  width="22" height="78"/>
+            <rect class="bar-in" x="160" y="48"  width="22" height="92"/>
+            <rect class="bar-in" x="200" y="66"  width="22" height="74"/>
+            <rect class="bar-in" x="240" y="52"  width="22" height="88"/>
+            <rect class="bar-in" x="280" y="60"  width="22" height="80"/>
+            <rect class="bar-in" x="320" y="44"  width="22" height="96"/>
+            <rect class="bar-in" x="360" y="58"  width="22" height="82"/>
+            <rect class="bar-in" x="400" y="50"  width="22" height="90"/>
+            <!-- Output -->
+            <rect class="bar-out" x="64"  y="95"  width="22" height="45"/>
+            <rect class="bar-out" x="104" y="88"  width="22" height="52"/>
+            <rect class="bar-out" x="144" y="92"  width="22" height="48"/>
+            <rect class="bar-out" x="184" y="84"  width="22" height="56"/>
+            <rect class="bar-out" x="224" y="96"  width="22" height="44"/>
+            <rect class="bar-out" x="264" y="86"  width="22" height="54"/>
+            <rect class="bar-out" x="304" y="90"  width="22" height="50"/>
+            <rect class="bar-out" x="344" y="82"  width="22" height="58"/>
+            <rect class="bar-out" x="384" y="94"  width="22" height="46"/>
+            <rect class="bar-out" x="424" y="86"  width="22" height="54"/>
+            <!-- Cache Read (line) -->
+            <polyline class="hit-line" points="51,120 91,112 131,118 171,104 211,116 251,108 291,114 331,100 371,112 411,106"/>
+          </svg>
+          <div class="legend">
+            <span><i style="background:var(--chart-hit)"></i>Input</span>
+            <span><i style="background:var(--chart-out)"></i>Output</span>
+            <span><i style="background:var(--chart-7)"></i>Cache Read</span>
+            <span><i style="background:var(--chart-10)"></i>命中率</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>模型分布 <span class="tag">按费用</span></h3>
+          <div class="donut-wrap">
+            <svg viewBox="0 0 120 120" width="120" height="120">
+              <circle class="donut-seg" cx="60" cy="60" r="46" fill="var(--chart-hit)" stroke-width="0"/>
+              <path class="donut-seg" fill="var(--chart-out)" d="M60 14 A46 46 0 0 1 96 40 L60 60 Z"/>
+              <path class="donut-seg" fill="var(--chart-7)"  d="M96 40 A46 46 0 0 1 96 80 L60 60 Z"/>
+              <path class="donut-seg" fill="var(--chart-6)"  d="M96 80 A46 46 0 0 1 40 100 L60 60 Z"/>
+              <path class="donut-seg" fill="var(--chart-10)" d="M40 100 A46 46 0 0 1 24 60 L60 60 Z"/>
+              <path class="donut-seg" fill="var(--muted)"   d="M24 60 A46 46 0 0 1 60 14 L60 60 Z"/>
+              <circle cx="60" cy="60" r="24" fill="var(--surface)"/>
+            </svg>
+            <div class="donut-legend">
+              <div><b>claude-opus</b> 41%</div>
+              <div><b>gpt-4o</b> 23%</div>
+              <div><b>deepseek-v3</b> 18%</div>
+              <div><b>gemini</b> 11%</div>
+              <div><b>其他</b> 7%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>最近请求</h3>
+        <table>
+          <thead><tr><th>时间</th><th>模型</th><th>状态</th><th>用时</th><th>费用</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>14:22:08</td>
+              <td class="model">claude-opus-4.5</td>
+              <td><span class="badge ok">成功</span></td>
+              <td>1.2s</td>
+              <td>$0.042</td>
+            </tr>
+            <tr>
+              <td>14:21:55</td>
+              <td class="model">gpt-4o-mini</td>
+              <td><span class="badge err">错误</span></td>
+              <td>0.3s</td>
+              <td>$0.001</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function setV(v) {
+    document.getElementById('app').setAttribute('data-variant', v);
+    document.querySelectorAll('.sw').forEach(s => s.classList.toggle('on', s.dataset.v === v));
+  }
+</script>
+</body>
+</html>

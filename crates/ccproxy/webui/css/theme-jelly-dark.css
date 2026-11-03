@@ -1,0 +1,208 @@
+/* 果冻主题 · 暗夜档（jelly-dark / 冰态果冻的深色模式）
+ *
+ * 与 theme-jelly.css（浅色档）是同一套设计 DNA 的「亮度反转」：
+ * 组件配方（玻璃 blur/saturate、内高光、阴影偏移、三团光斑位置、圆角、
+ * 字体栈）逐字相同，只调亮度(L)与不透明度(A)，色相(H)全部守恒。
+ *
+ * 守恒映射（浅 → 暗，H 不变）：
+ *   背景   #FFF0F5→#FFE4E1→#E6E6FA 粉紫   →  #1c1330→#241a3e→#160f24 深梅紫
+ *   玻璃   rgba(255,255,255,.15)            →  rgba(255,255,255,.06)  （同白透配方，降 alpha）
+ *   文字   #312E81 靛蓝                     →  #ECE6FF 靛蓝染白
+ *   阴影   rgba(31,38,135,.20) 靛蓝紫       →  rgba(31,38,135,.45)   （同 hue 31,38,135，加浓度）
+ *   主色   #C41E62 玫红                     →  #FF5C9A 玫红（暗底提亮保对比）
+ *   光斑   粉/紫/橙 同色相                  →  同色相，降不透明度
+ *
+ * 与浅色档的唯一结构差异：@supports 降级时退回深不透明而非浅不透明。
+ * 其余（玻璃、阴影、控件、导航、表格、图表取色）配方完全一致。
+ */
+
+:root[data-theme="jelly-dark"] {
+  /* 原生控件跟随深色：日期控件、select 弹层、滚动条 */
+  color-scheme: dark;
+
+  /* 页面底：深梅紫渐层首色，作兜底；实际颜色由 body 渐层给出。 */
+  --bg: #160F24;
+
+  /* 卡片表面：白透降低一档（暗底上白 6% 即相当于浅底白 15% 的观感）。
+     仍是 liquid-glass 的同一种白透玻璃，只是浓度不同。 */
+  --surface: rgba(255, 255, 255, 0.06);
+
+  /* 内嵌块（输入框、表头、chip、分页按钮）：白透再提一档。 */
+  --surface-2: rgba(255, 255, 255, 0.10);
+  --surface-3: rgba(255, 255, 255, 0.08);
+
+  /* 描边：暗底上白边更收，用低 alpha 白；图表网格线再淡一档。 */
+  --outline: rgba(255, 255, 255, 0.10);
+  --outline-strong: rgba(255, 255, 255, 0.22);
+  --outline-variant: rgba(255, 255, 255, 0.12);
+
+  /* 文字：靛蓝染白——H 与浅档 #312E81 同一族，只是翻到亮端。
+     --muted 用 #B3A8DA：与浅档 #5855E8 同色相，翻到亮端以保粉紫玻璃上的可读性。 */
+  --text: #ECE6FF;
+  --muted: #B3A8DA;
+
+  /* 主色：玫红，H 与浅档 #C41E62 同一族；暗底上提亮到 #FF5C9A 才够 4.5:1。 */
+  --primary: #FF5C9A;
+  --cost: #FF7AB0;
+  --primary-container: rgba(255, 92, 154, 0.16);
+  --on-primary-container: #FFD0E4;
+  --primary-border: rgba(255, 92, 154, 0.45);
+
+  /* 状态色：与浅档同语义、同色相，暗底提亮（否则深绿/深玫在暗底上发闷）。
+     成功仍用青绿（与粉互补），H 守恒。 */
+  --ok: #4FD1A6;
+  --warn: #E0A14B;
+  --error: #FF7A9C;
+  --interrupted: #B388FF;
+  --aborted: #8B9BE0;
+
+  /* 图表系列色：与浅档同语义分工、同色相，暗底提亮以保对比度。
+     浅档的 --chart-out 等取值在暗底上偏暗，这里换成同色相的亮版。 */
+  --chart-hit: #FF5C9A;
+  --chart-out: #B388FF;
+  --chart-6: #C77DFF;
+  --chart-7: #7C9CFF;
+  --chart-8: #E0A14B;
+  --chart-9: #9B8BE8;
+  --chart-10: #FF8FC0;
+
+  /* 日志面板：暗纸（等宽代码需要稳定底，不能透）。 */
+  --log-bg: #14101E;
+
+  /* 字体：与浅档同一字体栈（PingFang SC 优先，无则落 YaHei）。 */
+  --font-sans: "PingFang SC", "苹方", Inter, "Microsoft YaHei",
+    -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+/* ── 背景：深梅紫渐层 + 三团径向光斑（位置与浅档逐点一致） ──
+   浅档是亮粉紫底上压淡彩；暗档是深梅紫底上透出同色相的彩光。
+   光斑不透明度压低（.22/.18/.14），否则暗底上三团会过曝。 */
+:root[data-theme="jelly-dark"] body {
+  background:
+    radial-gradient(circle 250px at calc(100% - 190px) 90px, rgba(255, 107, 157, 0.22) 0%, rgba(255, 107, 157, 0) 70%),
+    radial-gradient(circle 200px at calc(20% + 200px) calc(100% + 60px), rgba(123, 97, 255, 0.18) 0%, rgba(123, 97, 255, 0) 70%),
+    radial-gradient(circle 150px at calc(100% - 30% - 150px) 45%, rgba(255, 184, 107, 0.14) 0%, rgba(255, 184, 107, 0) 70%),
+    linear-gradient(135deg, #1c1330 0%, #241a3e 45%, #160f24 100%);
+  background-attachment: fixed;
+}
+
+/* ── 玻璃材质：liquid-glass（配方与浅档逐字相同） ──
+   blur(24px) saturate(1.5) + inset 0 1px 0 + 靛蓝紫阴影。
+   唯一差异：白透 alpha 由 .15 降到 .06（--surface），阴影浓度由 .20 升到 .45
+   ——两者都是「同 hue 的同一种配方」，只是暗底要更实的阴影才压得住。 */
+:root[data-theme="jelly-dark"] .mcard,
+:root[data-theme="jelly-dark"] .mini-card,
+:root[data-theme="jelly-dark"] .panel,
+:root[data-theme="jelly-dark"] .filterbar,
+:root[data-theme="jelly-dark"] .sidebar,
+:root[data-theme="jelly-dark"] .topbar {
+  background: var(--surface);
+  border-color: rgba(255, 255, 255, 0.10);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow:
+    0 8px 32px rgba(31, 38, 135, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* 侧栏 / 顶栏贴边：只保留内侧高光（与浅档一致）。 */
+:root[data-theme="jelly-dark"] .sidebar,
+:root[data-theme="jelly-dark"] .topbar {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* ── 密集数据：glass 档（比卡片更实一档） ──
+   与浅档同一逻辑：白透浓度高于卡片（.10 vs .06），让 12.5px 等宽数字稳。 */
+:root[data-theme="jelly-dark"] .table-wrap,
+:root[data-theme="jelly-dark"] .drawer {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.16);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow:
+    0 8px 32px rgba(31, 38, 135, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+/* 日志面板是纯暗纸：等宽代码需要一块稳定的底，不能透。 */
+:root[data-theme="jelly-dark"] .logpane {
+  background: var(--log-bg);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 8px 32px rgba(31, 38, 135, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* 表头：与浅档同结构（不透明淡底 + 一道底边），只是亮端反转。
+   左右边框压掉——它们取 --muted（薰衣草白），在暗玻璃上会画两道竖线。 */
+:root[data-theme="jelly-dark"] th {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--muted);
+  border-left-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: rgba(255, 255, 255, 0.16);
+}
+
+/* 行 hover：与浅档一致（更亮的白），不是粉。 */
+:root[data-theme="jelly-dark"] tr:hover td {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── 控件玻璃：glass-button / input-glass（配方与浅档逐字相同） ──
+   blur(8px) + 内高光 + 靛蓝紫阴影；白透 alpha 由 .45 降到 .22（暗底上更收）。 */
+:root[data-theme="jelly-dark"] .filterbar select,
+:root[data-theme="jelly-dark"] .filterbar button,
+:root[data-theme="jelly-dark"] .filterbar input,
+:root[data-theme="jelly-dark"] .pager select,
+:root[data-theme="jelly-dark"] .btn-mini,
+:root[data-theme="jelly-dark"] .set-control input,
+:root[data-theme="jelly-dark"] .set-control select {
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 2px 8px rgba(31, 38, 135, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+/* 激活的导航项：与浅档同「粉→深粉」走向，暗底提亮到 #E0457F→#C41E62 仍白字达标。 */
+:root[data-theme="jelly-dark"] .nav-item.active {
+  background: linear-gradient(135deg, #E0457F, #C41E62);
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(255, 92, 154, 0.40);
+}
+:root[data-theme="jelly-dark"] .nav-item.active svg { color: #FFFFFF; }
+
+/* 悬停：与浅档一致（更亮的白），不是粉。 */
+:root[data-theme="jelly-dark"] .nav-item:hover {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--text);
+}
+
+/* ── 暗底细节 ──
+   ① 状态胶囊：暗底上 currentColor 14% 才够淡底托住小字
+   ② 选中文本：暗底上 30% 玫红
+   ③ 原生 select 箭头 data URI：描边色用 --muted 亮端 */
+:root[data-theme="jelly-dark"] .badge {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+:root[data-theme="jelly-dark"] ::selection {
+  background: rgba(255, 92, 154, 0.30);
+}
+:root[data-theme="jelly-dark"] .filterbar select,
+:root[data-theme="jelly-dark"] .pager select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23B3A8DA' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* 面积填色提亮：暗底上 5% 几乎不可见，提到 10% 让趋势面积读得出。 */
+:root[data-theme="jelly-dark"] .trend-area { fill-opacity: 0.10; }
+
+/* ── 降级：不支持 backdrop-filter 时不留半透明壳 ──
+   与浅档同逻辑，只是退回深不透明（#1c1330 系）而非浅不透明。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-theme="jelly-dark"] {
+    --surface: rgba(28, 19, 48, 0.94);
+    --surface-2: #1a1330;
+  }
+}

@@ -329,7 +329,7 @@ function initSettings() {
  * `:root[data-theme="…"]` 选择器覆盖颜色令牌，结构令牌与图表系列色不变，
  * 所以切主题不会重排布局。
  */
-var THEME_KEYS = ["dark", "light", "jelly"];
+var THEME_KEYS = ["dark", "light", "jelly", "jelly-dark"];
 
 function currentTheme() {
   var t = document.documentElement.getAttribute("data-theme");
