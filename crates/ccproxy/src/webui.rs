@@ -973,15 +973,22 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
         out
     };
 
+    // A model the price table does not know contributes nothing to the sum, so
+    // the sum is a floor, not the bill. It used to be reported as `null` in
+    // that case — honest in theory, useless in practice: a handful of malformed
+    // model names (`m`, `von`, 4 到 146 条请求) made 「终身费用」 read "—" on
+    // forever, hiding the 99% that *is* priced. Report the floor and say it is
+    // one: the card renders a trailing "+" and the tooltip names the reason.
+    let window_priced = models
+        .iter()
+        .all(|m| m.get("costUsd").is_some_and(|c| !c.is_null()));
     let cost_total: f64 = models
         .iter()
         .filter_map(|m| m.get("costUsd").and_then(|c| c.as_f64()))
         .sum();
     // The same buckets with no window filter: this is what the overview shows
-    // as "终身". `None` rather than a partial sum when any bucket is unpriced —
-    // a number that silently drops an unknown model reads as a cheaper bill
-    // than the truth, and the panel already renders null as "—".
-    let cost_lifetime: Option<f64> = {
+    // as "终身".
+    let (cost_lifetime, lifetime_priced) = {
         let mut sum = 0.0f64;
         let mut priced = true;
         let mut any = false;
@@ -1008,10 +1015,10 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
                 }
             }
         }
-        if any && priced {
-            Some(sum)
+        if any {
+            (Some(sum), priced)
         } else {
-            None
+            (None, true)
         }
     };
     let pricing_meta = json!({
@@ -1048,6 +1055,7 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
             "hitRate": hit_rate,
             "latestTs": latest_ts,
             "costUsd": cost_lifetime,
+            "costPriced": lifetime_priced,
         },
         "window": {
             "attempts": window.0,
@@ -1063,6 +1071,7 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
             "avgTtfbMs": window.10,
             "hitRate": win_hit_rate,
             "costUsd": cost_total,
+            "costPriced": window_priced,
         },
         "trend": trend,
         "platforms": platforms,

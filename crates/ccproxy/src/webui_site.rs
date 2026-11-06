@@ -383,4 +383,190 @@ mod tests {
             "these variables are used but never declared, so they compute to unset: {missing:#?}"
         );
     }
+
+    #[test]
+    fn every_theme_card_can_survive_a_reload() {
+        // The anti-flash block in <head> re-applies the saved theme before the
+        // first paint, from its own hard-coded list — it has to, it runs before
+        // settings.js. That second copy went stale: `jelly-dark` was missing,
+        // so choosing it and reloading landed back on dark, and the picker
+        // (which reads the attribute, not localStorage) then showed dark as
+        // selected. Same class of bug as the missing `--surface-*` variables:
+        // two lists that must agree, no test that they do.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("webui");
+        let html = std::fs::read_to_string(root.join("index.html")).expect("index.html readable");
+
+        let cards: Vec<String> = html
+            .match_indices("data-theme-key=\"")
+            .filter_map(|(at, pat)| {
+                let rest = &html[at + pat.len()..];
+                rest.find('"').map(|end| rest[..end].to_string())
+            })
+            .collect();
+        assert!(!cards.is_empty(), "no theme cards found in index.html");
+
+        // The inline block is the only `<script>` without a src attribute; take
+        // its THEMES literal.
+        let preflash = html
+            .split("<script>")
+            .nth(1)
+            .and_then(|s| s.split("</script>").next())
+            .expect("the pre-paint theme block is gone");
+        let list_start = preflash.find("var THEMES = [").expect("no THEMES literal");
+        let list = &preflash[list_start..];
+        let list = &list[..list.find(']').expect("unterminated THEMES array")];
+        let known: Vec<String> = list
+            .match_indices('"')
+            .filter_map(|(at, _)| {
+                let rest = &list[at + 1..];
+                rest.find('"').map(|end| rest[..end].to_string())
+            })
+            .collect();
+
+        // `dark` is the default: it needs no attribute, so it need not be listed.
+        let missing: Vec<&String> = cards
+            .iter()
+            .filter(|c| c.as_str() != "dark" && !known.contains(c))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these themes have a card but the pre-paint list omits them, so a reload loses them: {missing:?} (list = {known:?})"
+        );
+    }
+
+    #[test]
+    fn the_nav_slider_and_the_selected_item_are_wired_together() {
+        // 选中底色现在由一块独立滑块（#nav-indicator）承担，导航项在 nav-slid
+        // 之后转透明。这两半必须同时在位：元素被删掉、或者 router.js 不再给
+        // nav 加 nav-slid，选中项就是全透明的——界面上"没有选中项"，但页面
+        // 不报错，四视图冒烟也照样绿。这里把它们钉在一起。
+        let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/webui"));
+        let html = std::fs::read_to_string(dir.join("index.html")).expect("index.html readable");
+        let css = std::fs::read_to_string(dir.join("css/layout.css")).expect("layout.css readable");
+        let js = std::fs::read_to_string(dir.join("js/router.js")).expect("router.js readable");
+
+        assert!(
+            html.contains("id=\"nav-indicator\""),
+            "index.html no longer carries #nav-indicator, so the selected pill has nothing to sit on"
+        );
+        assert!(
+            css.contains(".nav-indicator"),
+            "layout.css stopped styling .nav-indicator"
+        );
+        assert!(
+            css.contains(".side-nav.nav-slid .nav-item.active"),
+            "the nav-slid handoff rule is gone: the active item would stay opaque and hide the slider"
+        );
+        assert!(
+            js.contains("classList.add(\"nav-slid\")") && js.contains("function syncNavIndicator"),
+            "router.js must position #nav-indicator and hand off to nav-slid"
+        );
+        // 兜底：nav-slid 没出现时选中项必须还有自己的实底，否则 JS 早期报错就等于
+        // 导航没有选中态。这条断言守的是"降级路径还留着"。
+        assert!(
+            css.contains(".nav-item.active { color: var(--on-primary-container); background: var(--primary-container); }"),
+            "the fallback fill on .nav-item.active was removed; a JS failure would leave no selected state"
+        );
+    }
+
+    /// Split a stylesheet into `(selector, body)` pairs, nested at-rules
+    /// included: a header rule inside an `@media` still has to obey the rule.
+    fn css_rules(text: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut stack: Vec<(String, String)> = Vec::new();
+        let mut head = String::new();
+        for ch in text.chars() {
+            match ch {
+                '{' => {
+                    stack.push((head.trim().to_string(), String::new()));
+                    head.clear();
+                }
+                '}' => {
+                    if let Some(rule) = stack.pop() {
+                        out.push(rule);
+                    }
+                }
+                _ => match stack.last_mut() {
+                    Some((_, body)) => body.push(ch),
+                    None => head.push(ch),
+                },
+            }
+        }
+        out
+    }
+
+    /// True when the last compound of any comma-separated selector part is a
+    /// `th`: `.model-table thead th` and `th:first-child` both count, `td`
+    /// does not.
+    fn targets_th(selector: &str) -> bool {
+        selector.split(',').any(|part| {
+            let last = part.split_whitespace().last().unwrap_or("");
+            let base = last.split([':', '[', '.', '#']).next().unwrap_or_default();
+            base.eq_ignore_ascii_case("th")
+        })
+    }
+
+    #[test]
+    fn table_headers_are_filled_by_the_opaque_header_token() {
+        // 用户报「模型分布的表头全透明」。两处原因都在这里查：表头取的是
+        // `--surface`，而 `--surface` 就是卡片底色，深色与浅色两档里两者
+        // 一模一样，看上去等于没有表头；果冻暗档还把它压成 7% 白。表头又是
+        // sticky 的，半透明会让滚过的行从表头底下透上来。
+        //
+        // 于是定一条口径：th 的底色只能来自 `--surface-head`，而这个变量必须
+        // 跟 `--surface` 出现在同一批文件里——少写一个主题，那个主题就会静默
+        // 继承深色值（不报错、不白屏，只是换主题时表头颜色不对）。
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("webui");
+        let files = referenced_files(&dir);
+        assert!(!files.is_empty(), "webui/index.html references no assets");
+
+        let mut missing_token: Vec<String> = Vec::new();
+        let mut bad_fill: Vec<String> = Vec::new();
+        for path in &files {
+            if path.extension().is_none_or(|e| e != "css") {
+                continue;
+            }
+            let text = std::fs::read_to_string(path).expect("css readable");
+            let declares_surface = text
+                .lines()
+                .any(|l| l.trim_start().starts_with("--surface:"));
+            let declares_head = text
+                .lines()
+                .any(|l| l.trim_start().starts_with("--surface-head:"));
+            if declares_surface && !declares_head {
+                missing_token.push(path.display().to_string());
+            }
+            for (selector, body) in css_rules(&text) {
+                if !targets_th(&selector) {
+                    continue;
+                }
+                for decl in body.split(';') {
+                    let Some((prop, value)) = decl.split_once(':') else {
+                        continue;
+                    };
+                    let prop = prop.trim().to_ascii_lowercase();
+                    if prop != "background" && prop != "background-color" {
+                        continue;
+                    }
+                    if !value.contains("var(--surface-head)") {
+                        bad_fill.push(format!(
+                            "{} — {} {{ {prop}: {} }}",
+                            path.display(),
+                            selector,
+                            value.trim()
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            missing_token.is_empty(),
+            "these files set --surface but never --surface-head, so their table headers inherit the dark fill: {missing_token:#?}"
+        );
+        assert!(
+            bad_fill.is_empty(),
+            "table headers must be filled by the opaque --surface-head token: {bad_fill:#?}"
+        );
+    }
 }
