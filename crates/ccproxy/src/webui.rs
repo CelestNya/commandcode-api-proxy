@@ -785,6 +785,14 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
         // a 24h window collapsed to 4 buckets. The grain: ≤48h → hourly,
         // else daily. Recursion is capped so an absurd custom range cannot
         // stall the page.
+        //
+        // The daily branch must convert the *endpoints* to local before
+        // truncating to a date: `date(<utc ts>)` yields the UTC day, and east
+        // of UTC that loses the newest bucket for the first hours of the local
+        // day (at 00:05 in UTC+8 the axis stopped at yesterday while the
+        // aggregation had already bucketed those rows under today). Hours step
+        // UTC and convert per-row, which lands on the same local-hour keys the
+        // aggregation produces, so that branch is unaffected.
         let axis_sql = if span_hours <= 48.0 {
             "with recursive seq(u) as (
                  select datetime(substr(?1, 1, 19))
@@ -794,11 +802,11 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
              ) select strftime('%Y-%m-%dT%H:00', u, 'localtime') from seq limit 1200"
         } else {
             "with recursive seq(u) as (
-                 select date(substr(?1, 1, 19))
+                 select date(substr(?1, 1, 19), 'localtime')
                  union all
                  select date(u, '+1 day') from seq
-                 where u < date(substr(?2, 1, 19))
-             ) select strftime('%Y-%m-%d', u, 'localtime') from seq limit 1200"
+                 where u < date(substr(?2, 1, 19), 'localtime')
+             ) select u from seq limit 1200"
         };
         let mut axis: Vec<String> = Vec::new();
         if let Ok(mut stmt) = conn.prepare(axis_sql) {
@@ -1987,6 +1995,18 @@ mod tests {
         assert_eq!(arr[2]["ts"], "2026-09-12T10:00:00Z");
     }
 
+    /// The timestamp's *local* calendar day — the same conversion the trend
+    /// aggregation uses for its bucket keys (`strftime('%Y-%m-%d', ts,
+    /// 'localtime')`). Tests must not slice the UTC stamp's first ten
+    /// characters instead: east of UTC the two disagree for the first hours of
+    /// the local day (at 00:0x in UTC+8, `…T16:08Z` already belongs to
+    /// tomorrow's local date) and the assertion fails for a reason that has
+    /// nothing to do with the code under test.
+    fn local_day(conn: &rusqlite::Connection, ts: &str) -> String {
+        conn.query_row("select date(?1, 'localtime')", [ts], |r| r.get(0))
+            .expect("date(ts, 'localtime')")
+    }
+
     #[test]
     fn trend_is_newest_first_then_reversed_for_the_chart() {
         // Fixture dates are relative to "now": the trend window is a strict
@@ -2032,10 +2052,16 @@ mod tests {
         // both edges = 91 calendar days).
         assert_eq!(trend.len(), 91);
         assert_eq!(trend[0]["attempts"], 0); // leading hole
-        let date_before = &day_before[..10];
-        let date_y = &yesterday[..10];
-        let i15 = trend.iter().position(|d| d["date"] == date_before).unwrap();
-        let i16 = trend.iter().position(|d| d["date"] == date_y).unwrap();
+        let date_before = local_day(&conn, &day_before);
+        let date_y = local_day(&conn, &yesterday);
+        let i15 = trend
+            .iter()
+            .position(|d| d["date"].as_str() == Some(date_before.as_str()))
+            .unwrap();
+        let i16 = trend
+            .iter()
+            .position(|d| d["date"].as_str() == Some(date_y.as_str()))
+            .unwrap();
         assert_eq!(i15 + 1, i16);
         assert_eq!(trend[i16]["attempts"], 1);
         assert_eq!(trend[i16]["prompt"], 50);
@@ -2083,15 +2109,15 @@ mod tests {
         assert_eq!(trend[0]["attempts"], 0);
         assert_eq!(trend[7]["attempts"], 0);
         // Daily bucket shape: 10-char date, not hourly `T`-suffixed stamp.
+        // Expected day computed the same way the aggregation does (local), not
+        // by slicing the UTC stamp — see local_day().
+        let want = local_day(&conn, &yesterday);
         let hit = trend
             .iter()
-            .position(|d| d["date"].as_str().unwrap() == &yesterday[..10])
+            .position(|d| d["date"].as_str() == Some(want.as_str()))
             .unwrap();
         assert_eq!(trend[hit]["attempts"], 1);
-        assert_eq!(
-            &trend[hit]["date"].as_str().unwrap()[..10],
-            &yesterday[..10]
-        );
+        assert_eq!(&trend[hit]["date"].as_str().unwrap()[..10], want.as_str());
     }
 
     #[test]

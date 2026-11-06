@@ -11,7 +11,8 @@ function renderMiniCards(s) {
     { label: "窗口请求", value: fmtNum(w.attempts), sub: "累计 " + fmtNum(t.attempts) },
     { label: "窗口 Token", value: fmtTokens((w.promptTokens || 0) + (w.completionTokens || 0)), sub: "输入 " + fmtTokens(w.promptTokens) + " / 输出 " + fmtTokens(w.completionTokens) },
     { label: "缓存命中", value: fmtPct(w.hitRate), sub: fmtTokens(w.promptTokens || 0) + " 输入中命中 " + fmtTokens(w.cachedTokens || 0) },
-    { label: "窗口费用", value: fmtUsd(w.costUsd), sub: "终身 " + fmtUsd(t.costUsd) + "（按官网价估算）" },
+    /* 「90 天累计」不是「终身」：billing 表按 RETENTION_DAYS = 90 清理过期行 */
+    { label: "窗口费用", value: fmtUsd(w.costUsd), sub: "90 天累计 " + fmtUsd(t.costUsd) + "（按官网价估算）" },
     { label: "窗口成功率", value: fmtPct(w.attempts > 0 ? ((w.ok || 0) / w.attempts) : null), sub: "ok " + fmtNum(w.ok) + " / " + fmtNum(w.attempts) }
   ];
   el("mini-cards").innerHTML = cards.map(function (c) {

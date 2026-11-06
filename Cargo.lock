@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "ccproxy"
-version = "0.7.9"
+version = "0.7.10"
 dependencies = [
  "base64",
  "flate2",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "ccproxy-tray"
-version = "0.7.9"
+version = "0.7.10"
 dependencies = [
  "ccproxy",
  "ksni",

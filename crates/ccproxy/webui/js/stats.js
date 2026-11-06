@@ -38,19 +38,23 @@ function renderSummary(s) {
 
   /* 费用是「下界」不是账单：价目表不认识的模型按 0 计入，于是数字只能是
      「至少这么多」。末尾加 + 并在 title 里说明，比整块显示「—」有用得多 —
-     几个畸形模型名（`m`、`von`，合计不到 200 条请求）不该让终身费用永久
+     几个畸形模型名（`m`、`von`，合计不到 200 条请求）不该让累计费用永久
      空掉。注意「没计价」≠「零成本」，仍然不能把它们混为一谈。 */
   var wCost = fmtUsd(w.costUsd) + (w.costPriced === false ? "+" : "");
   var tCost = fmtUsd(t.costUsd) + (t.costPriced === false ? "+" : "");
   var costNote = (w.costPriced === false || t.costPriced === false)
     ? "部分模型不在价目表中，此处是已计价部分的下界"
     : "";
+  /* 叫「90 天累计」而不是「终身」：billing 表按 RETENTION_DAYS = 90 清理
+     过期行（billing.rs 的 prune_old_rows），这个和本来就是「保留期内」的
+     总和，标成终身是在说谎。 */
+  var totalLabel = "90 天累计 ";
 
   var cards = [
     { label: "窗口请求", value: fmtNum(w.attempts), sub: "总计: " + fmtNum(t.attempts), cls: "" },
     { label: "窗口 Token", value: fmtTokens(wTok), sub: "输入 " + fmtTokens(w.promptTokens) + "（含缓存 " + fmtTokens(w.cachedTokens) + "）/ 输出 " + fmtTokens(w.completionTokens), cls: "" },
     { label: "累计 Token", value: fmtTokens(tTok), sub: "输入 " + fmtTokens(t.promptTokens) + "（含缓存 " + fmtTokens(t.cachedTokens) + "）/ 输出 " + fmtTokens(t.completionTokens), cls: "accent" },
-    { label: "费用", value: wCost, sub: "终身 " + tCost, cls: "cost", title: costNote },
+    { label: "费用", value: wCost, sub: totalLabel + tCost, cls: "cost", title: costNote },
     { label: "缓存命中率", value: fmtPct(w.hitRate), sub: "窗口内命中 / 输入", cls: hrCls },
     { label: "总尝试", value: fmtNum(t.attempts), sub: "成功 " + fmtNum(t.ok) + " / 失败 " + fmtNum(fail), cls: "" }
   ];
