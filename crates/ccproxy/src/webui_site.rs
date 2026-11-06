@@ -346,7 +346,7 @@ mod tests {
                 continue;
             }
             let text = std::fs::read_to_string(path).expect("asset readable");
-            for line in text.lines() {
+            for line in strip_comments(&text).lines() {
                 defined.extend(declared_names(line));
             }
         }
@@ -405,15 +405,25 @@ mod tests {
             .collect();
         assert!(!cards.is_empty(), "no theme cards found in index.html");
 
-        // The inline block is the only `<script>` without a src attribute; take
-        // its THEMES literal.
-        let preflash = html
-            .split("<script>")
-            .nth(1)
-            .and_then(|s| s.split("</script>").next())
-            .expect("the pre-paint theme block is gone");
-        let list_start = preflash.find("var THEMES = [").expect("no THEMES literal");
-        let list = &preflash[list_start..];
+        // Take the block around the THEMES literal rather than "the second
+        // <script>": a nonce or an extra inline script would move that one.
+        let literal = html.find("var THEMES = [").expect("no THEMES literal");
+        let open = html[..literal]
+            .rfind("<script")
+            .expect("THEMES lives in a script");
+        let preflash = &html[open..];
+        let preflash = &preflash[..preflash.find("</script>").expect("unterminated script")];
+        // 名单对不对只是一半：名单还得真的被用来落主题。只改名单、删掉
+        // dataset.theme 那一行的话，刷新照样丢主题，而下面那条比对依旧绿。
+        assert!(
+            preflash.contains("document.documentElement.dataset.theme"),
+            "the pre-paint block no longer applies the theme it looks up, so a reload loses it"
+        );
+        assert!(
+            preflash.contains("THEMES.indexOf"),
+            "the pre-paint block stopped consulting the THEMES list"
+        );
+        let list = &preflash[literal - open..];
         let list = &list[..list.find(']').expect("unterminated THEMES array")];
         let known: Vec<String> = list
             .match_indices('"')
@@ -449,29 +459,118 @@ mod tests {
             html.contains("id=\"nav-indicator\""),
             "index.html no longer carries #nav-indicator, so the selected pill has nothing to sit on"
         );
+        // 规则本身要在位。`.nav-indicator.no-anim` 也含 ".nav-indicator" 这个
+        // 子串，光用 contains 会把"主定位规则被删干净"判成通过。
+        let rules = css_rules(&css);
+        let indicator = rules
+            .iter()
+            .find(|(sel, _)| flat(sel) == ".nav-indicator")
+            .map(|(_, body)| flat(body))
+            .unwrap_or_default();
         assert!(
-            css.contains(".nav-indicator"),
-            "layout.css stopped styling .nav-indicator"
+            indicator.contains("position:absolute"),
+            "layout.css no longer lays .nav-indicator out as an absolute pill: {indicator}"
         );
         assert!(
             css.contains(".side-nav.nav-slid .nav-item.active"),
             "the nav-slid handoff rule is gone: the active item would stay opaque and hide the slider"
         );
+        // 定位函数必须真的被调用。只断言 `function syncNavIndicator` 存在的话，
+        // 把 route()/resize 里的调用全删掉，滑块会永远停在原地，测试照样绿。
+        let route = function_body(&js, "route");
         assert!(
-            js.contains("classList.add(\"nav-slid\")") && js.contains("function syncNavIndicator"),
-            "router.js must position #nav-indicator and hand off to nav-slid"
+            route.contains("syncNavIndicator"),
+            "route() stopped positioning the slider, so it would never move when the view changes"
+        );
+        let sync = function_body(&js, "syncNavIndicator");
+        assert!(
+            sync.contains("classList.add(\"nav-slid\""),
+            "router.js no longer hands the active item over to nav-slid"
+        );
+        assert!(
+            sync.contains("getBoundingClientRect") && sync.contains("translate3d"),
+            "syncNavIndicator must measure with rects and write a translate3d offset, or the pill lands off the item"
         );
         // 兜底：nav-slid 没出现时选中项必须还有自己的实底，否则 JS 早期报错就等于
         // 导航没有选中态。这条断言守的是"降级路径还留着"。
+        let fallback = rules
+            .iter()
+            .find(|(sel, _)| flat(sel) == ".nav-item.active")
+            .map(|(_, body)| flat(body))
+            .unwrap_or_default();
         assert!(
-            css.contains(".nav-item.active { color: var(--on-primary-container); background: var(--primary-container); }"),
-            "the fallback fill on .nav-item.active was removed; a JS failure would leave no selected state"
+            fallback.contains("background:var(--primary-container)"),
+            "the fallback fill on .nav-item.active was removed; a JS failure would leave no selected state: {fallback}"
         );
+    }
+
+    /// Drop `/* … */` blocks. Both parsers below read CSS as plain text, and the
+    /// comments in this tree quote real declarations — `table { min-width:
+    /// 780px }`, `--surface-head: …` — which would otherwise be counted as
+    /// rules and as token definitions.
+    fn strip_comments(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(at) = rest.find("/*") {
+            out.push_str(&rest[..at]);
+            match rest[at + 2..].find("*/") {
+                Some(end) => rest = &rest[at + 2 + end + 2..],
+                None => return out,
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// Whitespace-insensitive form, so reformatting is not a test failure.
+    fn flat(text: &str) -> String {
+        text.split_whitespace().collect()
+    }
+
+    /// Body of `function <name>(…)`, up to the first line that closes it in
+    /// column zero. These files all close top-level functions that way, and it
+    /// keeps "what the function does" assertions off the whole-file text.
+    fn function_body<'a>(js: &'a str, name: &str) -> &'a str {
+        let Some(at) = js.find(&format!("function {name}(")) else {
+            return "";
+        };
+        let rest = &js[at..];
+        let end = rest[1..].find("\n}").map_or(rest.len(), |e| e + 1);
+        &rest[..end]
+    }
+
+    /// True when a fill hides whatever scrolls under it. A hex with an explicit
+    /// low alpha, or `rgba(…, 0.07)`, does not: that was the 果冻暗 7%-white
+    /// header regression.
+    fn opaque_fill(value: &str) -> bool {
+        let v = value
+            .trim()
+            .trim_end_matches(';')
+            .trim()
+            .to_ascii_lowercase();
+        if let Some(hex) = v.strip_prefix('#') {
+            return match hex.len() {
+                3 | 6 => true,
+                4 => &hex[3..] == "f",
+                8 => &hex[6..] == "ff",
+                _ => false,
+            };
+        }
+        if v.starts_with("rgba(") {
+            return v
+                .trim_end_matches(')')
+                .rsplit(',')
+                .next()
+                .and_then(|a| a.trim().parse::<f64>().ok())
+                .is_some_and(|a| a >= 1.0);
+        }
+        !v.is_empty() && v != "transparent" && !v.starts_with("hsla(")
     }
 
     /// Split a stylesheet into `(selector, body)` pairs, nested at-rules
     /// included: a header rule inside an `@media` still has to obey the rule.
     fn css_rules(text: &str) -> Vec<(String, String)> {
+        let text = strip_comments(text);
         let mut out = Vec::new();
         let mut stack: Vec<(String, String)> = Vec::new();
         let mut head = String::new();
@@ -522,6 +621,8 @@ mod tests {
 
         let mut missing_token: Vec<String> = Vec::new();
         let mut bad_fill: Vec<String> = Vec::new();
+        let mut translucent: Vec<String> = Vec::new();
+        let mut filled: Vec<String> = Vec::new();
         for path in &files {
             if path.extension().is_none_or(|e| e != "css") {
                 continue;
@@ -536,6 +637,20 @@ mod tests {
             if declares_surface && !declares_head {
                 missing_token.push(path.display().to_string());
             }
+            // 令牌本身也得是不透明的。果冻暗档曾经把它压成 7% 白，那一版下
+            // 表头确实"有底色"，只是滚过的行全从底下透上来。
+            if let Some(value) = text
+                .lines()
+                .find_map(|l| l.trim_start().strip_prefix("--surface-head:"))
+            {
+                if !opaque_fill(value) || value.contains("var(--surface)") {
+                    translucent.push(format!(
+                        "{} — --surface-head: {}",
+                        path.display(),
+                        value.trim()
+                    ));
+                }
+            }
             for (selector, body) in css_rules(&text) {
                 if !targets_th(&selector) {
                     continue;
@@ -548,7 +663,9 @@ mod tests {
                     if prop != "background" && prop != "background-color" {
                         continue;
                     }
-                    if !value.contains("var(--surface-head)") {
+                    if value.contains("var(--surface-head)") {
+                        filled.push(path.display().to_string());
+                    } else {
                         bad_fill.push(format!(
                             "{} — {} {{ {prop}: {} }}",
                             path.display(),
@@ -568,5 +685,19 @@ mod tests {
             bad_fill.is_empty(),
             "table headers must be filled by the opaque --surface-head token: {bad_fill:#?}"
         );
+        assert!(
+            translucent.is_empty(),
+            "--surface-head must be opaque and must not just re-spell --surface, or the rows show through: {translucent:#?}"
+        );
+        // 每个真正画表头的样式表都得有一条 th 规则给出底色。只核对"出现的
+        // background 对不对"是不够的：把给出底色的那一行整条删掉之后，上面的
+        // 循环看到的是空集合，bad_fill 依旧为空 —— 修 bug 的那两行当年就是这样
+        // 在没有测试红的情况下被删掉的。
+        for sheet in ["detail.css", "overview.css"] {
+            assert!(
+                filled.iter().any(|f| f.ends_with(sheet)),
+                "{sheet} no longer gives its header cells a --surface-head fill: {filled:?}"
+            );
+        }
     }
 }

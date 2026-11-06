@@ -41,9 +41,12 @@ function syncNavIndicator(instant) {
   var bar = el("nav-indicator");
   if (!nav || !bar) return;
   var active = nav.querySelector(".nav-item.active");
-  /* 极窄屏或视图还没排版时取不到尺寸，宁可先藏起来也不放一块 0×0 的色块 */
+  /* 极窄屏或视图还没排版时取不到尺寸，宁可先藏起来也不放一块 0×0 的色块。
+     同时摘掉 nav-slid：留着它，选中项的兜底实底仍是透明的，滑块又没落位，
+     界面上就没有任何选中态了。 */
   if (!active || !active.offsetWidth) {
     bar.style.opacity = "0";
+    nav.classList.remove("nav-slid");
     return;
   }
   var nr = nav.getBoundingClientRect();

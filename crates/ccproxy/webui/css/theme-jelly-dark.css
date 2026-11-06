@@ -148,12 +148,13 @@
 }
 
 /* 表头：底色统一走 --surface-head，这里只改描边。
-   左右边框压掉——它们取 --muted（薰衣草白），在暗玻璃上会画两道竖线。 */
+   左右边框压掉——它们取 --muted（薰衣草白），在暗玻璃上会画两道竖线。
+   下沿与浅档一致，取 outline-variant，别再写死一档白色。 */
 :root[data-theme="jelly-dark"] th {
   color: var(--muted);
   border-left-color: transparent;
   border-right-color: transparent;
-  border-bottom-color: rgba(255, 255, 255, 0.14);
+  border-bottom-color: var(--outline-variant);
 }
 
 /* 行 hover：与浅档一致（更亮的白），不是粉。 */

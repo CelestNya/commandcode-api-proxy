@@ -229,12 +229,13 @@
 
 /* 表头：底色统一走 --surface-head（见 tokens.css 的说明），这里只改描边。
    左右两侧的边框要压掉——它们取的是 --muted（靛蓝），在白玻璃表头上会画出
-   两道蓝竖线。 */
+   两道蓝竖线。下沿取 outline-variant：表头换成纯白之后，原来那条 75% 白的线
+   压在白底上等于没画，表头与首行会糊成一片。 */
 :root[data-theme="jelly"] th {
   color: var(--muted);
   border-left-color: transparent;
   border-right-color: transparent;
-  border-bottom-color: rgba(255, 255, 255, 0.75);
+  border-bottom-color: var(--outline-variant);
 }
 
 /* 行 hover：参考是 hover:bg-white/30（更亮的白），不是粉。 */

@@ -40,8 +40,8 @@ function renderSummary(s) {
      「至少这么多」。末尾加 + 并在 title 里说明，比整块显示「—」有用得多 —
      几个畸形模型名（`m`、`von`，合计不到 200 条请求）不该让累计费用永久
      空掉。注意「没计价」≠「零成本」，仍然不能把它们混为一谈。 */
-  var wCost = fmtUsd(w.costUsd) + (w.costPriced === false ? "+" : "");
-  var tCost = fmtUsd(t.costUsd) + (t.costPriced === false ? "+" : "");
+  var wCost = fmtUsdFloor(w.costUsd, w.costPriced);
+  var tCost = fmtUsdFloor(t.costUsd, t.costPriced);
   var costNote = (w.costPriced === false || t.costPriced === false)
     ? "部分模型不在价目表中，此处是已计价部分的下界"
     : "";
@@ -67,8 +67,9 @@ function renderSummary(s) {
   /* top-bar consumption chip follows the selected window (the money number
      the user is looking at) */
   var chipUsesWindow = w.costUsd != null;
-  el("chip-cost").textContent = fmtUsd(chipUsesWindow ? w.costUsd : t.costUsd) +
-    ((chipUsesWindow ? w.costPriced : t.costPriced) === false ? "+" : "");
+  el("chip-cost").textContent = chipUsesWindow
+    ? fmtUsdFloor(w.costUsd, w.costPriced)
+    : fmtUsdFloor(t.costUsd, t.costPriced);
   renderMiniCards(s);
 }
 

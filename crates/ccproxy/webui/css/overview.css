@@ -131,8 +131,11 @@
    models in the common case, dozens on a busy relay. It used to be capped at
    240px and scrolled in place, which put a native scrollbar inside a 200px
    panel and a nested wheel target inside the page scroll. The list now takes
-   its natural height and the page scrolls instead — hence no `.model-table-wrap`
-   rule at all: the wrap carries no overflow, so nothing to clip or fade. */
+   its natural height and the page scrolls instead — no vertical scroller, so
+   nothing to clip or fade. Horizontal is a different matter: the table keeps a
+   300px min-width, and below that the card would cut the fee column off with no
+   way to reach it (the wrap owns the sideways scroll, see the rule further
+   down). */
 .model-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
 .model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 7px 6px 5px; border-bottom: 1px solid var(--outline-variant); font-size: 11.5px; letter-spacing: .2px; }
 .model-table th:first-child { text-align: left; }
@@ -224,6 +227,10 @@
 .model-layout > * { width: 100%; min-width: 0; }
 #model-donut { max-width: 160px; height: auto; }
 .model-note { color: var(--muted); font-size: 11.5px; font-family: var(--font-mono); }
+/* 横向滚动留在这一层：表格自带 300px 最小宽度，窄屏（卡片比这还窄时）没有它
+   就会把费用列裁掉——卡片是 overflow:hidden 的边框，裁掉的列连滚都滚不到。
+   纵向不设限，列表跟页面一起滚。 */
+.model-table-wrap { overflow-x: auto; }
 /* 固定布局 + 列宽比例：auto 布局会把 100% 宽度平均分给各列（名称列被
    饿到 ~105px 触发省略号），fixed 下名称列吸收余量、数值列按内容定格。 */
 .model-table { width: 100%; min-width: 300px; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
@@ -237,7 +244,7 @@
   font-size: 11.5px;
   text-align: right;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--outline-strong);
+  border-bottom: 1px solid var(--outline-variant);
   white-space: nowrap;
 }
 .model-table th:first-child { text-align: left; }

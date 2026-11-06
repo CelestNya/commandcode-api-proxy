@@ -7,16 +7,21 @@
 function renderMiniCards(s) {
   if (!s) return;
   var t = s.totals || {}, w = s.window || {};
+  /* 与概览同一口径：未计价模型按 0 计，所以金额是下界，带 + 并在 tooltip 说明。
+     两页读的是同一份 stats 载荷，口径不一致比数字不准更让人怀疑。 */
+  var floorNote = (w.costPriced === false || t.costPriced === false)
+    ? "部分模型不在价目表中，此处是已计价部分的下界"
+    : "";
   var cards = [
     { label: "窗口请求", value: fmtNum(w.attempts), sub: "累计 " + fmtNum(t.attempts) },
     { label: "窗口 Token", value: fmtTokens((w.promptTokens || 0) + (w.completionTokens || 0)), sub: "输入 " + fmtTokens(w.promptTokens) + " / 输出 " + fmtTokens(w.completionTokens) },
     { label: "缓存命中", value: fmtPct(w.hitRate), sub: fmtTokens(w.promptTokens || 0) + " 输入中命中 " + fmtTokens(w.cachedTokens || 0) },
     /* 「90 天累计」不是「终身」：billing 表按 RETENTION_DAYS = 90 清理过期行 */
-    { label: "窗口费用", value: fmtUsd(w.costUsd), sub: "90 天累计 " + fmtUsd(t.costUsd) + "（按官网价估算）" },
+    { label: "窗口费用", value: fmtUsdFloor(w.costUsd, w.costPriced), sub: "90 天累计 " + fmtUsdFloor(t.costUsd, t.costPriced) + "（按官网价估算）", title: floorNote },
     { label: "窗口成功率", value: fmtPct(w.attempts > 0 ? ((w.ok || 0) / w.attempts) : null), sub: "ok " + fmtNum(w.ok) + " / " + fmtNum(w.attempts) }
   ];
   el("mini-cards").innerHTML = cards.map(function (c) {
-    return '<div class="mini-card"><div class="mc-label">' + c.label + '</div>' +
+    return '<div class="mini-card"' + (c.title ? ' title="' + c.title + '"' : "") + '><div class="mc-label">' + c.label + '</div>' +
       '<div class="mc-value">' + c.value + '</div><div class="mc-sub">' + c.sub + '</div></div>';
   }).join("");
 }

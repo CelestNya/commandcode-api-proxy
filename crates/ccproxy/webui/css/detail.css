@@ -142,7 +142,9 @@ th, td { padding: 9px 10px; text-align: left; white-space: nowrap; overflow: hid
 /* 序号列只放一两位数字，右内边距收紧，把宽度让给内容本身 */
 th:first-child, td:first-child { padding-right: 4px; }
 /* 粘在内容区顶部（.content 是唯一的滚动容器）。底色必须实色：半透明会让行
-   从表头里透出来；与卡片同色又会让表头整条消失。 */
+   从表头里透出来；与卡片同色又会让表头整条消失。
+   分隔线取 outline-variant 而不是 outline：果冻白档的 outline 是 45% 白，
+   压在纯白表头上等于没画线。 */
 th {
   position: sticky;
   top: 0;
@@ -152,7 +154,7 @@ th {
   font-size: 11.5px;
   letter-spacing: 0.2px;
   z-index: 2;
-  box-shadow: inset 0 -1px 0 var(--outline);
+  box-shadow: inset 0 -1px 0 var(--outline-variant);
 }
 /* 比卡片半径小 1px：卡片有 1px 描边，表格在描边内侧，同半径会差半像素。
    作用域限定在 .table-wrap 内，别波及概览那张模型表（它靠卡片 overflow 收边）。 */

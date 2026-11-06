@@ -15,7 +15,7 @@
 //! intermediate proxies keep the connection open.
 
 use crate::billing;
-use crate::pricing::{pricing_table, PRICING_SOURCE};
+use crate::pricing::{pricing_table, Pricing, PRICING_SOURCE};
 use crate::server::{RequestId, SharedState};
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -604,6 +604,104 @@ struct BucketRow {
     priced: bool,
 }
 
+/// One pass over every row in `billing`, priced: the 「90 天累计」 figure, plus
+/// whether the whole ledger could be priced at all (`false` makes the number a
+/// floor rather than a total).
+fn sum_lifetime_cost(conn: &Connection, pricing: &Pricing) -> (Option<f64>, bool) {
+    let mut sum = 0.0f64;
+    let mut priced = true;
+    let mut any = false;
+    if let Ok(mut stmt) = conn.prepare(&MODEL_BUCKETS.replace("{filter}", "")) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, i64>(7)?,
+            ))
+        }) {
+            for row in rows.flatten() {
+                let minute = if row.1 == 1 { 120 } else { 0 };
+                any = true;
+                match pricing.cost(&row.0, row.3, row.4, row.5, row.6, minute) {
+                    Some(cost) => sum += cost,
+                    None => priced = false,
+                }
+            }
+        }
+    }
+    if any {
+        (Some(sum), priced)
+    } else {
+        (None, true)
+    }
+}
+
+/// A cached 「90 天累计」 figure.
+struct LifetimeCost {
+    /// Ledger file it was computed from: two databases must never share an entry.
+    db: String,
+    /// `max(rowid)` at the time — a new row drops the entry.
+    mark: i64,
+    at: std::time::Instant,
+    cost: Option<f64>,
+    priced: bool,
+}
+
+/// How long a 「90 天累计」 total may be reused.
+///
+/// A 90-day sum has no business being second-fresh, but the unfiltered
+/// `group by model, peak` behind it reads *every* row in `billing` — 34 ms at
+/// 24k rows, measured, once per second while the dashboard is open. That was
+/// the most expensive thing the page did. The rowid mark keeps the number
+/// honest: it moves the moment a row lands, and only the 90-day prune (which
+/// deletes without bumping the mark) waits out the TTL.
+const LIFETIME_COST_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+static LIFETIME_COST: std::sync::Mutex<Option<LifetimeCost>> = std::sync::Mutex::new(None);
+
+/// `sum_lifetime_cost`, memoised per ledger file plus its newest rowid.
+///
+/// In-memory databases (all unit tests) have no path to key on and no lifetime
+/// of their own: caching them would leak one test's total into the next, so
+/// they always compute.
+fn lifetime_cost(conn: &Connection, pricing: &Pricing) -> (Option<f64>, bool) {
+    let db = conn.path().filter(|p| !p.is_empty()).map(str::to_string);
+    let mark = db.as_deref().and_then(|_| {
+        conn.query_row("select coalesce(max(rowid), 0) from billing", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .ok()
+    });
+    let keyed = db.as_deref().zip(mark);
+
+    if let Some((db, mark)) = keyed {
+        let cache = LIFETIME_COST.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hit) = cache.as_ref() {
+            if hit.db == db && hit.mark == mark && hit.at.elapsed() < LIFETIME_COST_TTL {
+                return (hit.cost, hit.priced);
+            }
+        }
+    }
+
+    let (cost, priced) = sum_lifetime_cost(conn, pricing);
+
+    if let Some((db, mark)) = keyed {
+        *LIFETIME_COST.lock().unwrap_or_else(|e| e.into_inner()) = Some(LifetimeCost {
+            db: db.to_string(),
+            mark,
+            at: std::time::Instant::now(),
+            cost,
+            priced,
+        });
+    }
+    (cost, priced)
+}
+
 /// Screen-one payload: lifetime totals, the stats of the selected window
 /// (default 24h) and a trend over that window with adaptive sampling.
 ///
@@ -995,40 +1093,8 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
         .filter_map(|m| m.get("costUsd").and_then(|c| c.as_f64()))
         .sum();
     // The same buckets with no window filter: this is what the overview shows
-    // as "终身".
-    let (cost_lifetime, lifetime_priced) = {
-        let mut sum = 0.0f64;
-        let mut priced = true;
-        let mut any = false;
-        if let Ok(mut stmt) = conn.prepare(&MODEL_BUCKETS.replace("{filter}", "")) {
-            if let Ok(rows) = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, i64>(7)?,
-                ))
-            }) {
-                for row in rows.flatten() {
-                    let minute = if row.1 == 1 { 120 } else { 0 };
-                    any = true;
-                    match pricing.cost(&row.0, row.3, row.4, row.5, row.6, minute) {
-                        Some(cost) => sum += cost,
-                        None => priced = false,
-                    }
-                }
-            }
-        }
-        if any {
-            (Some(sum), priced)
-        } else {
-            (None, true)
-        }
-    };
+    // as 「90 天累计」. Memoised — the scan is the pricey half of this payload.
+    let (cost_lifetime, lifetime_priced) = lifetime_cost(conn, &pricing);
     let pricing_meta = json!({
         "source": PRICING_SOURCE,
         "fetchedAt": pricing.fetched_at,

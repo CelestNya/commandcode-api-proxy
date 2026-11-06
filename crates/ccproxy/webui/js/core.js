@@ -31,6 +31,14 @@ function fmtUsd(v) {
   if (v > 0 && v < 0.0001) return "<$0.0001";
   return "$" + v.toFixed(4);
 }
+/* 费用是「下界」不是账单：价目表不认识的模型按 0 计入，数字只能是「至少这么
+   多」。加号只在真有数值时补——空账本显示 "—" 而不是 "—+"；也不和
+   "<$0.0001" 这种已经是量级说明的写法叠成 "<$0.0001+"。 */
+function fmtUsdFloor(v, priced) {
+  var s = fmtUsd(v);
+  if (v == null || isNaN(v) || priced !== false) return s;
+  return s.charAt(0) === "<" ? s : s + "+";
+}
 function fmtTokens(n) {
   if (n == null) return "—";
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";

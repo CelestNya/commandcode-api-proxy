@@ -111,3 +111,12 @@
 - 后端 trend 的 `costUsd` 由 webui.rs 的 trend 段 `pricing.cost_breakdown(...)` 产出（每 (bucket, model, peak) 行单独计价再合桶），`priced` 标志决定 null vs 数值。
 - 对比度实测（像素采样底色 + computed fill 混合）：三主题下 Token 柱/费用条/命中率线均 ≥5.14:1（AA 达标）；请求数淡柱 1.16–1.21 是**刻意低对比**（背景辅助量，右轴已标数值）。
 - 探针坑：CDP `Runtime.evaluate` 异步表达式必须带 `awaitPromise: true`，否则返回值是空对象 `{}`；截图路径要写 `.probe/shots/`。
+
+## 四路审查后的补齐（2026-11-07）
+- **果冻两档的 `--outline` / `--outline-strong` 都是白色系**（45%/75% 白、14%/30% 白），压在 `--surface-head`（果冻白为纯 `#FFFFFF`）上等于没画线。任何**表头/白底**上的描边统一用 `--outline-variant`（果冻白是 10% 靛蓝、果冻暗 12% 白）。凡新增白底容器都要回头检查它上面的所有 `outline*` 描边。
+- **费用口径只有一处实现：`core.js` 的 `fmtUsdFloor(v, priced)`**。空值回「—」不加号、`<$0.0001` 不叠成 `<$0.0001+`。概览卡片、顶栏 chip、明细迷你卡三处都走它，别再内联拼 `+`。
+- **「90 天累计」有 10 秒缓存**（`webui.rs` 的 `lifetime_cost`）：key = 账本路径 + `billing` 的 `max(rowid)`，新行落地立刻失效，只有 90 天 prune（删行不动 rowid）要等 TTL。**内存库直接绕过缓存**（单测全是 `open_in_memory`，不 key 就会串味）。实测：2.4 万行账本 `/webui/api/stats` 148ms → 63ms。
+- **守门测试的铁律：必须负向验证**（把被守的那行改坏，确认测试真的红）。本轮修掉 5 条假绿：表头底色（只查「出现的 background」→ 现在必须存在且值正确）、滑块定位（`.nav-indicator.no-anim` 会命中子串 → 现在按规则体断言 `position:absolute` + 函数体断言 `getBoundingClientRect`/`translate3d`）、`route()` 必须真的调用 `syncNavIndicator`、首屏必须真的写 `dataset.theme` 并用 `THEMES.indexOf`、注释不再被当成 token 声明（`strip_comments`）。负向脚本在 `.probe/neg/run.sh`（连跑会重编译，约 10s/条）。
+- **CSS 注释里不要写 `{ }` 和 `--token:` 形式**：守门测试把 CSS 当纯文本解析，注释里的 `table { min-width: 780px }`、`--surface-head: …` 会被读成规则和声明。已加 `strip_comments`，但新代码继续避开这种写法。
+- **窄屏（<340px）模型表**：`.model-table` 有 `min-width: 300px`、卡片是 `overflow: hidden`，所以 `.model-table-wrap { overflow-x: auto }` 必须留着，否则费用列被静默裁掉且无处可滚（页面本身不横滚，`docHScroll=0`）。
+- **本分支 `webui_site` 守门测试共 10 项**，跑 `cargo test -p ccproxy` 全量 366 passed / 1 ignored；`cargo clippy -p ccproxy --all-targets -- -D warnings` 干净。
