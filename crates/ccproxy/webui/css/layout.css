@@ -44,7 +44,32 @@
 .logo-mark .lm-bg { fill: var(--surface-3); stroke: var(--outline-strong); }
 .logo-mark .lm-play { fill: var(--primary); }
 .logo-mark .lm-cursor { stroke: var(--text); stroke-width: 2.4; stroke-linecap: round; }
-.side-nav { display: flex; flex-direction: row; gap: 6px; flex: 1; min-width: 0; }
+.side-nav { display: flex; flex-direction: row; gap: 6px; flex: 1; min-width: 0; position: relative; }
+/* 选中态由一块独立滑块承担，切视图时它平移到新项，而不是两项各自闪一下底色。
+   滑块与文字必须分层：滑块 z-index:0，导航项 z-index:1，否则文字压在底下。
+   位置与尺寸由 router.js 的 syncNavIndicator() 写入（读 getBoundingClientRect，
+   不受 offsetParent 是 .sidebar 还是 .side-nav 影响）。 */
+.nav-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-radius: var(--radius-pill);
+  background: var(--primary-container);
+  opacity: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition:
+    transform var(--t-slow),
+    width var(--t-slow),
+    height var(--t-slow),
+    background var(--t-base),
+    box-shadow var(--t-base),
+    opacity var(--t-fast);
+}
+/* 首帧与窗口尺寸变化时直接落位，不从 0 宽滑过来 */
+.nav-indicator.no-anim { transition: none; }
 .nav-item {
   display: flex;
   align-items: center;
@@ -57,11 +82,19 @@
   min-height: 38px;
   white-space: nowrap;
   flex: none;
+  position: relative;
+  z-index: 1;
   transition: background var(--t-base), color var(--t-base);
 }
 .nav-item svg { width: 18px; height: 18px; flex: none; }
-.nav-item:hover { color: var(--text); background: var(--surface-2); }
+/* :not(.active) 不是多余的：果冻两档的悬停规则写在选中规则之后（同特异性），
+   悬停选中项时白色遮罩会盖掉粉底——遮罩比强调色"层级更高"就是这么来的。
+   两处都已经加了排除，这里的排除是为了让四条主题行为一致。 */
+.nav-item:hover:not(.active) { color: var(--text); background: var(--surface-2); }
+/* 选中态默认是实底：滑块没接管（JS 早期报错、元素被删）时仍然看得出选中谁。
+   滑块落位成功后 router.js 给 .side-nav 加 nav-slid，项自身才转透明。 */
 .nav-item.active { color: var(--on-primary-container); background: var(--primary-container); }
+.side-nav.nav-slid .nav-item.active { background: transparent; }
 .nav-item.active svg { color: var(--primary); }
 /* 本机信息行在窄屏没有位置，≥901px 恢复（responsive.css） */
 .side-foot { display: none; }

@@ -40,7 +40,10 @@
 .mcard.warn .mvalue { color: var(--warn); }
 
 /* ── panels ── */
-.ov-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px; }
+/* `align-items: start`：两个面板各按内容高度收口。默认 stretch 会让矮的那个
+   （只有两个模型时的模型分布 / 只有三条趋势的用量面板）被拉到对方的高度，
+   底下留一大片空。模型表不再内滚之后这一点更要紧——长列表会把邻座拉长。 */
+.ov-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px; align-items: start; }
 .panel {
   background: var(--surface);
   border: 1px solid var(--outline);
@@ -124,28 +127,21 @@
   background: var(--surface); border: 1px solid var(--outline-variant);
   border-radius: var(--radius-card); overflow: hidden;
 }
-/* The model list is unbounded: a busy gateway racks up dozens of entries, and an
-   uncapped table then dictates the height of the whole .ov-row — the panel grows
-   past the viewport on every poll and drags 状态分布 (and the page scroll length)
-   with it. Cap the list and scroll it in place; max-height (not height) keeps a
-   short list compact instead of leaving an empty scroll area. */
-.model-table-wrap {
-  max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
-  /* No fade-out mask here. It looked fine mid-scroll but dimmed the last row
-     once you reached the bottom — the one moment every row has to be readable.
-     The card's own frame is the boundary; a row clipped by it reads as content
-     continuing below, which is exactly what it is. */
-  /* The extra pixel keeps the sticky header's bottom border from being clipped
-     at the box edge. */
-  padding-bottom: 1px;
-}
+/* The model list grows with the gateway, not with the viewport: a handful of
+   models in the common case, dozens on a busy relay. It used to be capped at
+   240px and scrolled in place, which put a native scrollbar inside a 200px
+   panel and a nested wheel target inside the page scroll. The list now takes
+   its natural height and the page scrolls instead — hence no `.model-table-wrap`
+   rule at all: the wrap carries no overflow, so nothing to clip or fade. */
 .model-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
 .model-table th { color: var(--muted); font-weight: 500; text-align: right; padding: 7px 6px 5px; border-bottom: 1px solid var(--outline-variant); font-size: 11.5px; letter-spacing: .2px; }
 .model-table th:first-child { text-align: left; }
-/* Pin the header inside .model-table-wrap; the opaque fill is mandatory, or the
-   rows show through it while scrolling. It is --surface on purpose: that is also
-   the card's fill, so the corners clipped by the card's radius stay invisible. */
-.model-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+/* Header fill comes from --surface-head: the same value the card is filled with
+   (--surface) made the band invisible on dark and glass themes — the user read
+   it as "表头全透明". No sticky here: the list has no inner scroller, and the
+   card's `overflow: hidden` would pin any sticky header to a box that never
+   scrolls anyway. */
+.model-table thead th { background: var(--surface-head); }
 .model-table td { padding: 6px 6px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--outline-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The table runs edge to edge inside the card (no wrapper padding, or the row
    rules would stop short of the frame). The outer columns get the breathing
@@ -228,7 +224,6 @@
 .model-layout > * { width: 100%; min-width: 0; }
 #model-donut { max-width: 160px; height: auto; }
 .model-note { color: var(--muted); font-size: 11.5px; font-family: var(--font-mono); }
-.model-table-wrap { overflow-x: auto; }
 /* 固定布局 + 列宽比例：auto 布局会把 100% 宽度平均分给各列（名称列被
    饿到 ~105px 触发省略号），fixed 下名称列吸收余量、数值列按内容定格。 */
 .model-table { width: 100%; min-width: 300px; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }

@@ -23,6 +23,8 @@
 @media (prefers-reduced-motion: reduce) {
   .view.active { animation: none; }
   .nav-item { transition: none; }
+  /* 滑块的位移也是动效；关掉后选中色直接落位，不会"飞过去" */
+  .nav-indicator { transition: none; }
   /* The chart draw-in is decorative; honour the preference by rendering the
      final state immediately. */
   .trend-animate .trend-line,

@@ -32,7 +32,7 @@
      键名与设置页「外观」面板的主题卡一一对应。 -->
 <script>
 (function () {
-  var THEMES = ["light", "jelly"];
+  var THEMES = ["light", "jelly", "jelly-dark"];
   var want = null;
   var q = new URLSearchParams(location.search).get("theme");
   if (q) want = q;
@@ -48,6 +48,7 @@
       <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true"><rect class="lm-bg" width="32" height="32" rx="9"/><path class="lm-play" d="M8 10l8 6-8 6z"/><path class="lm-cursor" d="M17 22h7"/></svg>
     </div>
     <nav class="side-nav">
+      <span class="nav-indicator" id="nav-indicator" aria-hidden="true"></span>
       <a href="#/stats" class="nav-item active" id="nav-stats">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
         <span>概览</span>
@@ -65,7 +66,7 @@
         <span>设置</span>
       </a>
     </nav>
-    <div class="side-foot">本机代理服务<br>端口 8787 · 数据本机存储</div>
+    <div class="side-foot">本机代理服务<br><span id="side-port">端口 —</span> · 数据本机存储</div>
   </aside>
 
   <div class="main">

@@ -35,6 +35,9 @@
      悬停底比 --surface-3 再深一点，否则白底上看不出行选中。 */
   --surface-high: #FFFFFF;
   --surface-variant: #E9EEF5;
+  /* 表头：白卡片上的表头必须低一档才是"带"，而 sticky 表头不能透，
+     所以直接取 --surface-2 那一档的实色。 */
+  --surface-head: #EEF2F7;
   --shadow-hover: 0 10px 28px rgba(23, 32, 48, 0.16);
   --outline: #DAE1EB;
   --outline-strong: #BFC9D8;

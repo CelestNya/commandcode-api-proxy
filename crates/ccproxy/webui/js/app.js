@@ -208,6 +208,15 @@ document.addEventListener("DOMContentLoaded", function () {
     el("log-autoscroll").classList.toggle("active", atBottom);
   });
 
+  /* 侧栏脚注的端口必须是真正在服务的那个：写死 8787 会让任何改过端口的
+     实例在界面上说谎（8894 的实例写着 8787），排查时最容易被带偏。
+     location 本身就是事实，不用问后端。 */
+  var sidePort = el("side-port");
+  if (sidePort) {
+    sidePort.textContent = "端口 " +
+      (location.port || (location.protocol === "https:" ? "443" : "80"));
+  }
+
   /* Astro-style static first: the page itself carries no data (which is what
      makes its ETag stable), so hydrate from the JSON APIs in parallel — the
      round-trip is loopback-scale. */

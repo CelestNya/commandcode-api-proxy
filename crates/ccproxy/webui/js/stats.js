@@ -36,22 +36,35 @@ function renderSummary(s) {
   var hr = w.hitRate;
   var hrCls = hr == null ? "" : hr >= 0.8 ? " ok" : hr >= 0.5 ? "" : hr > 0 ? " warn" : " err";
 
+  /* 费用是「下界」不是账单：价目表不认识的模型按 0 计入，于是数字只能是
+     「至少这么多」。末尾加 + 并在 title 里说明，比整块显示「—」有用得多 —
+     几个畸形模型名（`m`、`von`，合计不到 200 条请求）不该让终身费用永久
+     空掉。注意「没计价」≠「零成本」，仍然不能把它们混为一谈。 */
+  var wCost = fmtUsd(w.costUsd) + (w.costPriced === false ? "+" : "");
+  var tCost = fmtUsd(t.costUsd) + (t.costPriced === false ? "+" : "");
+  var costNote = (w.costPriced === false || t.costPriced === false)
+    ? "部分模型不在价目表中，此处是已计价部分的下界"
+    : "";
+
   var cards = [
     { label: "窗口请求", value: fmtNum(w.attempts), sub: "总计: " + fmtNum(t.attempts), cls: "" },
     { label: "窗口 Token", value: fmtTokens(wTok), sub: "输入 " + fmtTokens(w.promptTokens) + "（含缓存 " + fmtTokens(w.cachedTokens) + "）/ 输出 " + fmtTokens(w.completionTokens), cls: "" },
     { label: "累计 Token", value: fmtTokens(tTok), sub: "输入 " + fmtTokens(t.promptTokens) + "（含缓存 " + fmtTokens(t.cachedTokens) + "）/ 输出 " + fmtTokens(t.completionTokens), cls: "accent" },
-    { label: "费用", value: fmtUsd(w.costUsd), sub: "终身 " + fmtUsd(t.costUsd), cls: "cost" },
+    { label: "费用", value: wCost, sub: "终身 " + tCost, cls: "cost", title: costNote },
     { label: "缓存命中率", value: fmtPct(w.hitRate), sub: "窗口内命中 / 输入", cls: hrCls },
     { label: "总尝试", value: fmtNum(t.attempts), sub: "成功 " + fmtNum(t.ok) + " / 失败 " + fmtNum(fail), cls: "" }
   ];
   el("metric-cards").innerHTML = cards.map(function (c) {
-    return '<div class="mcard ' + c.cls + '"><div class="mlabel">' + c.label + '</div>' +
+    return '<div class="mcard ' + c.cls + '"' + (c.title ? ' title="' + c.title + '"' : "") +
+           '><div class="mlabel">' + c.label + '</div>' +
            '<div class="mvalue">' + c.value + '</div><div class="msub">' + c.sub + '</div></div>';
   }).join("");
 
   /* top-bar consumption chip follows the selected window (the money number
      the user is looking at) */
-  el("chip-cost").textContent = fmtUsd(w.costUsd != null ? w.costUsd : t.costUsd);
+  var chipUsesWindow = w.costUsd != null;
+  el("chip-cost").textContent = fmtUsd(chipUsesWindow ? w.costUsd : t.costUsd) +
+    ((chipUsesWindow ? w.costPriced : t.costPriced) === false ? "+" : "");
   renderMiniCards(s);
 }
 
@@ -62,7 +75,7 @@ function renderSummary(s) {
  * 三张图共用同一套桶几何（viewBox 宽、左右边距一致），x 轴刻度只画在最底部。
  *
  * 口径：cachedTokens 是 promptTokens 的子集（命中率 = cached / prompt），
- * 所以 Token 图三根柱（Input / Output / Cache Read）互不叠加，Cache Read
+ * 所以 Token 图三根柱（Input / Cache Read / Output）互不叠加，Cache Read
  * 只是 Input 的一部分 —— 脚注里明说，避免读者把三根柱加总。
  */
 
@@ -153,8 +166,8 @@ function renderTrend(raw, animate) {
     tip.innerHTML =
       "<div class='tt-head'><b>" + esc(fmtTickDate(d.date)) + "</b><span>" + fmtNum(d.attempts) + " 请求</span></div>" +
       "<div class='tt-row'><b>Input</b><span>" + fmtNum(d.prompt) + (d.cached > 0 ? "（含缓存 " + fmtNum(d.cached) + "）" : "") + "</span></div>" +
-      "<div class='tt-row'><b>Output</b><span>" + fmtNum(d.completion) + "</span></div>" +
       "<div class='tt-row'><b>Cache Read</b><span>" + fmtNum(d.cached) + "</span></div>" +
+      "<div class='tt-row'><b>Output</b><span>" + fmtNum(d.completion) + "</span></div>" +
       "<div class='tt-row'><b>费用</b><span class='tt-cost'>" + (d.costUsd != null ? fmtUsd(d.costUsd) : "—") + "</span></div>" +
       "<div class='tt-row'><b>命中率</b><span>" + fmtPct(d.hitRate) + "</span></div>" +
       /* 均费只在费用已知时给：costUsd 为 null 表示「没计价」，不是「零成本」
@@ -213,11 +226,11 @@ function renderTrend(raw, animate) {
     return;
   }
 
-  /* 图一：Token 分组柱（Input / Output / Cache Read，同一量程） */
+  /* 图一：Token 分组柱（Input / Cache Read / Output，同一量程） */
   el("trend-legend").innerHTML =
     "<span><i class='k-sq' style='background:" + TREND_COLORS.input + "'></i>Input</span>" +
-    "<span><i class='k-sq' style='background:" + TREND_COLORS.output + "'></i>Output</span>" +
-    "<span><i class='k-sq' style='background:" + TREND_COLORS.cached + "'></i>Cache Read</span>";
+    "<span><i class='k-sq' style='background:" + TREND_COLORS.cached + "'></i>Cache Read</span>" +
+    "<span><i class='k-sq' style='background:" + TREND_COLORS.output + "'></i>Output</span>";
   drawTokenBars(svgT, buckets, W, ML, MR, narrow, animate);
   /* 图二：费用条（同 x 轴，独立量程） */
   drawCostBars(svgC, buckets, W, ML, MR, animate);
@@ -253,7 +266,9 @@ function drawTokenBars(svg, buckets, W, ML, MR, narrow, animate) {
   var n = buckets.length, slot = pw / n;
   var gw = Math.min(slot * 0.66, 34);           /* 宽桶（≤10 根）不铺满，居中留白 */
   var bw = Math.max(1, (gw - 3) / 3);
-  var vals = ["prompt", "completion", "cached"], cols = [TREND_COLORS.input, TREND_COLORS.output, TREND_COLORS.cached];
+  /* 组内顺序 Input → Cache Read → Output。按量级排：completion 通常比 cached
+     小一个量级，夹在两根高柱中间会挖出一个凹槽，读起来像"中间那根缺数据"。 */
+  var vals = ["prompt", "cached", "completion"], cols = [TREND_COLORS.input, TREND_COLORS.cached, TREND_COLORS.output];
   buckets.forEach(function (d, idx) {
     var x0 = ML + slot * idx + (slot - gw) / 2;
     vals.forEach(function (k, j) {

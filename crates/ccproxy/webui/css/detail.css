@@ -112,25 +112,41 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* ── table ── */
-/* No overflow here on purpose: a nested scroller would become the sticky
-   header's containing block and break pinning. On narrow screens the whole
-   `.content` scrolls sideways instead (the table keeps its min-width). */
+/* 卡片只是个「框」：描边 + 圆角，不裁剪内容；整页滚动是唯一的滚动行为。
+ *
+ * 这里刻意不加 overflow：任何 overflow 值都会让卡片成为 sticky 表头的裁剪框/
+ * 包含块，表头立刻钉不住。想让「卡片固定、表头在卡片顶部粘住、行在表头下沿
+ * 消失」，就必须再加一个内层滚动区，而两段滚动（页面 → 表内）的交接只能靠脚本
+ * 接管滚轮，那会牵出一整套时序与竞态问题。为了一个表格不值得，已整体退回原生。
+ *
+ * 表头的两个上角由 `th` 自己用圆角画出来（下面 .table-wrap > table 那段）。
+ * 卡片不能裁、所以只能让表头自己弯：底部两个角归卡片，顶部两个角归表头，
+ * 静止时看起来是一个完整的圆角卡片。
+ *
+ * 已知且接受的观感代价：
+ *  · 表头 sticky 贴到内容区顶部时，它自己的圆角会在两条上角露出一个小缺口，
+ *    底下那行滚过去的底色会透一点；
+ *  · 窄屏 780px 的表格比卡片宽，横向超出部分由 .content 整页横滚，不夹在卡片里。
+ * 两条都已和用户确认，接受。 */
 .table-wrap {
   background: var(--surface);
   border: 1px solid var(--outline);
   border-radius: var(--radius-card);
 }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; min-width: 780px; }
+/* `collapse` 下 Chrome 不裁切单元格自己的圆角，表头就算写了半径也是方角。
+   separate + border-spacing: 0 让单元格的圆角真正生效；表里只有横线，
+   不存在相邻边框合并的问题，视觉上与 collapse 一致。 */
+.table-wrap > table { border-collapse: separate; border-spacing: 0; }
 th, td { padding: 9px 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 序号列只放一两位数字，右内边距收紧，把宽度让给内容本身 */
 th:first-child, td:first-child { padding-right: 4px; }
-/* Sticky within `.content` (the only scroller). `top: 0` now meets the topbar
-   flush because `.content` carries no padding, so rows never surface above
-   the header. The background must be opaque and the z-index above the rows. */
+/* 粘在内容区顶部（.content 是唯一的滚动容器）。底色必须实色：半透明会让行
+   从表头里透出来；与卡片同色又会让表头整条消失。 */
 th {
   position: sticky;
   top: 0;
-  background: var(--surface-2);
+  background: var(--surface-head);
   color: var(--muted);
   font-weight: 500;
   font-size: 11.5px;
@@ -138,9 +154,14 @@ th {
   z-index: 2;
   box-shadow: inset 0 -1px 0 var(--outline);
 }
-thead tr:first-child th:first-child { border-top-left-radius: var(--radius-card); }
-thead tr:first-child th:last-child { border-top-right-radius: var(--radius-card); }
+/* 比卡片半径小 1px：卡片有 1px 描边，表格在描边内侧，同半径会差半像素。
+   作用域限定在 .table-wrap 内，别波及概览那张模型表（它靠卡片 overflow 收边）。 */
+.table-wrap thead tr:first-child th:first-child { border-top-left-radius: calc(var(--radius-card) - 1px); }
+.table-wrap thead tr:first-child th:last-child { border-top-right-radius: calc(var(--radius-card) - 1px); }
 td { border-top: 1px solid var(--outline); font-variant-numeric: tabular-nums; }
+/* 表头下沿由 `th` 的 inset 阴影画，第一行数据不再叠一条 border-top，否则
+   两条 1px 挨在一起会变成一条比别处粗一倍的横线。 */
+.table-wrap > table tbody tr:first-child td { border-top: none; }
 tr:hover td { background: var(--surface-2); }
 td { transition: background var(--t-fast); }
 .tokens-cell b { font-weight: 600; }
@@ -234,8 +255,33 @@ td { transition: background var(--t-fast); }
 #drawer-body h3 { font-size: 13.5px; margin: 14px 0 8px; word-break: break-all; }
 #drawer-body h4 { font-size: 12px; color: var(--muted); margin: 16px 0 8px; letter-spacing: 0.3px; font-family: var(--font-mono); }
 #drawer-body h4 small { color: var(--muted); font-weight: 400; }
-.drawer-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.drawer-table td { border: none; border-bottom: 1px solid var(--outline); padding: 5px 4px; }
+/* 抽屉里是「标签 / 值」两列，值可能是很长的模型名、reqId、错误信息。
+   detail.css 里那条全局 `th, td { white-space: nowrap }` 是给明细大表用的，
+   在这里会把值单元格的 min-content 撑成整串模型名 → 表格比抽屉还宽、右边被
+   切掉，抽屉底部还会冒出一条横向滚动条。所以这里显式放开换行，并用
+   table-layout: fixed 让 td:first-child 的 40% 真正生效（auto 布局下
+   百分比宽度只是建议，长内容会把列撑开）。 */
+.drawer-table {
+  width: 100%;
+  /* 明细大表有一条全局 `table { min-width: 780px }`（给 12 列的数据表用的），
+     抽屉里这张两列小表也被它命中 —— 440px 宽的抽屉里塞一张 780px 的表，
+     整块就顶到抽屉外面去了。这里必须显式归零。 */
+  min-width: 0;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  table-layout: fixed;
+}
+.drawer-table td {
+  border: none;
+  border-bottom: 1px solid var(--outline);
+  padding: 5px 4px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  /* anywhere 而不是 break-word：break-word 不参与 min-content 计算，
+     fixed 布局下仍可能把长串顶出去 */
+  overflow-wrap: anywhere;
+}
 .drawer-table td:first-child { color: var(--muted); width: 40%; font-family: var(--font-mono); font-size: 12px; }
 .drawer-tokens { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
 .drawer-tokens div {
@@ -247,7 +293,9 @@ td { transition: background var(--t-fast); }
   gap: 2px;
 }
 .drawer-tokens span { color: var(--muted); font-size: 11.5px; }
-.drawer-tokens b { font-size: 14px; font-variant-numeric: tabular-nums; }
+/* 半宽的小卡里要塞「76,672（99.5%）」这种值：窄屏（375 时每卡约 150px）
+   再大一点的数就可能顶出卡片，允许它在卡内换行而不是撑破抽屉。 */
+.drawer-tokens b { font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .cost-formula .drawer-total td { font-weight: 700; border-top: 1px solid var(--outline-strong); }
 .cost-formula .drawer-total td:last-child { color: var(--cost); font-size: 15px; }
 .attempt-chain { margin: 0; padding-left: 22px; font-size: 12.5px; font-family: var(--font-mono); }

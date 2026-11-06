@@ -69,6 +69,10 @@
      这里给到 86%，只保留一档"仍是玻璃"的通透感。 */
   --surface-high: rgba(255, 255, 255, 0.86);
   --surface-variant: rgba(255, 255, 255, 0.55);
+  /* 表头：参考的表格头是 bg-white/20，但本项目的表头是 sticky 的——半透明
+     会让滚过的行从表头底下透出来。这里取"白玻璃压到底"的实色：纯白，靠
+     底边那道白描边把表头与卡片分开。 */
+  --surface-head: #FFFFFF;
   --shadow-hover: 0 10px 28px rgba(150, 40, 90, 0.18);
 
   /* 描边：参考 liquid-glass 的 rgba(255,255,255,0.25)；图表网格线再淡一档，
@@ -223,12 +227,10 @@
   backdrop-filter: none;
 }
 
-/* 表头：参考的表格头是 bg-white/20 + border-b border-white/20。
-   本项目的表头是 sticky 的（要盖住滚过的行），半透明会让行透上来，
-   所以用不透明的淡粉白 + 一道白底边。左右两侧的边框要压掉——它们取的是
-   --muted（靛蓝），在白玻璃表头上会画出两道蓝竖线。 */
+/* 表头：底色统一走 --surface-head（见 tokens.css 的说明），这里只改描边。
+   左右两侧的边框要压掉——它们取的是 --muted（靛蓝），在白玻璃表头上会画出
+   两道蓝竖线。 */
 :root[data-theme="jelly"] th {
-  background: rgba(255, 255, 255, 0.72);
   color: var(--muted);
   border-left-color: transparent;
   border-right-color: transparent;
@@ -276,16 +278,30 @@
    （bg-gradient-to-r from-pink-400 to-pink-500 text-white）。
    参考的 pink-400 #F472B6 上白字只有 2.65:1——它是大色块不承载小字；
    我们的导航项是 13.5px 正文，渐变两端都要够。改用 #CE2266 → #B8185A
-   （白字 5.19 / 6.33:1），走向仍是参考的"粉→深粉"。 */
+   （白字 5.19 / 6.33:1），走向仍是参考的"粉→深粉"。
+   底色与阴影挂在滑块上（.nav-indicator），这样切换时是整块粉底平移过去。
+   滑块落位后 nav-slid 出现，选中项才转透明——在此之前由这里当兜底底色，
+   JS 挂掉时导航不会整条"没有选中项"。 */
+:root[data-theme="jelly"] .nav-indicator {
+  background: linear-gradient(135deg, #CE2266, #B8185A);
+  box-shadow: 0 2px 8px rgba(236, 72, 153, 0.28);
+}
 :root[data-theme="jelly"] .nav-item.active {
   background: linear-gradient(135deg, #CE2266, #B8185A);
-  color: #FFFFFF;
   box-shadow: 0 2px 8px rgba(236, 72, 153, 0.28);
+  color: #FFFFFF;
+}
+/* 比上一条多一级 .side-nav.nav-slid，特异性更高才压得住 */
+:root[data-theme="jelly"] .side-nav.nav-slid .nav-item.active {
+  background: transparent;
+  box-shadow: none;
 }
 :root[data-theme="jelly"] .nav-item.active svg { color: #FFFFFF; }
 
-/* 悬停：参考是更亮的白（hover:bg-white/20），不是粉。 */
-:root[data-theme="jelly"] .nav-item:hover {
+/* 悬停：参考是更亮的白（hover:bg-white/20），不是粉。
+   必须排除选中项——本规则在 .active 之后、特异性相同，不排除就会把
+   悬停中的白遮罩盖在粉底上（看起来像"选中色被压暗了"）。 */
+:root[data-theme="jelly"] .nav-item:hover:not(.active) {
   background: rgba(255, 255, 255, 0.30);
   color: var(--text);
 }
