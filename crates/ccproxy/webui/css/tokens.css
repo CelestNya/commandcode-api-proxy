@@ -20,9 +20,15 @@
   --surface: #12141C;
   --surface-2: #181B24;
   --surface-3: #1F2330;
+  /* 抬升面 + 它的悬停/选中底：弹出层（自绘下拉菜单）与浮层要用不透明的一档，
+     复用 --surface-2/3 会和背后的表格糊在一起。合并主线控件套件时漏了这一对，
+     菜单当时是透底的。 */
+  --surface-high: #262B38;
+  --surface-variant: #1C202B;
   --outline: #232733;
   --outline-variant: #232733; /* JS 契约名：图表网格线 */
   --outline-strong: #2E3342;
+  --shadow-hover: 0 10px 28px rgba(0, 0, 0, 0.45);
 
   --text: #EDEFF5;
   --muted: #8A90A3;

@@ -271,4 +271,116 @@ mod tests {
             }
         }
     }
+
+    /// Every `var(--name)` occurrence on a line, paired with whether it spells
+    /// a fallback (`var(--x, 0)`). A fallback means the author accepted the
+    /// missing case, so only bare references have to resolve.
+    fn var_references(line: &str) -> Vec<(String, bool)> {
+        let mut out = Vec::new();
+        let mut rest = line;
+        while let Some(at) = rest.find("var(--") {
+            rest = &rest[at + 4..];
+            let end = rest.find(')').unwrap_or(rest.len());
+            let body = &rest[..end];
+            rest = &rest[end..];
+            let (name, fallback) = match body.split_once(',') {
+                Some((name, _)) => (name, true),
+                None => (body, false),
+            };
+            // `var(--…)` in prose and other non-ASCII spellings are not
+            // property names; a name is ASCII `[A-Za-z0-9-]`.
+            let name = name.trim().trim_start_matches('-').trim();
+            let valid =
+                !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+            if valid {
+                out.push((name.to_string(), fallback));
+            }
+        }
+        out
+    }
+
+    /// Names declared on a line, in either spelling used here: a stylesheet's
+    /// `--name: value` at the start of a line, or a script's
+    /// `style="--name: 3"` written inline on an element. Anything followed by
+    /// `)` is a reference, not a declaration.
+    fn declared_names(line: &str) -> Vec<String> {
+        let bytes = line.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i + 2 < bytes.len() {
+            if bytes[i] == b'-' && bytes[i + 1] == b'-' {
+                let mut j = i + 2;
+                while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'-') {
+                    j += 1;
+                }
+                if j > i + 2 && j < bytes.len() && bytes[j] == b':' {
+                    out.push(line[i + 2..j].to_string());
+                }
+                i = j.max(i + 2);
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn every_variable_reference_resolves_to_a_definition() {
+        // Merging the mainline control kit into this branch left three
+        // variables referenced but never declared — `--surface-high`,
+        // `--surface-variant`, `--shadow-hover`. A `var()` on a missing name
+        // computes to `unset`, so every self-drawn dropdown opened with a
+        // transparent menu and no shadow, on all four themes, and no test
+        // noticed: the radius gate only looked at radii.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("webui");
+        let files = referenced_files(&dir);
+        assert!(!files.is_empty(), "webui/index.html references no assets");
+
+        let mut defined = std::collections::HashSet::new();
+        for path in &files {
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default();
+            if ext != "css" && ext != "js" {
+                continue;
+            }
+            let text = std::fs::read_to_string(path).expect("asset readable");
+            for line in text.lines() {
+                defined.extend(declared_names(line));
+            }
+        }
+        assert!(
+            defined.contains("primary"),
+            "token definitions were not picked up: {defined:?}"
+        );
+
+        let mut missing: Vec<String> = Vec::new();
+        for path in &files {
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default();
+            if ext != "css" && ext != "js" {
+                continue;
+            }
+            let text = std::fs::read_to_string(path).expect("asset readable");
+            for (i, line) in text.lines().enumerate() {
+                for (name, fallback) in var_references(line) {
+                    if fallback || defined.contains(&name) {
+                        continue;
+                    }
+                    missing.push(format!(
+                        "{}:{} --{name}",
+                        path.display(),
+                        i.saturating_add(1)
+                    ));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "these variables are used but never declared, so they compute to unset: {missing:#?}"
+        );
+    }
 }

@@ -115,6 +115,34 @@ const LOG_READ_CAP_BYTES: u64 = 8 * 1024 * 1024;
 /// giant frame.
 const LOG_INCREMENT_CAP_BYTES: usize = 256 * 1024;
 
+/// Per-model, per-rate-period token buckets — one definition, two runnings.
+///
+/// `{filter}` is spliced in front of the GROUP BY: the overview's windowed
+/// breakdown binds `where ts >= ?1 and ts <= ?2`, the lifetime figure binds
+/// nothing. Keeping the SQL in one place is the point — the window filter was
+/// once added to the only copy, and the "终身" cost on the overview silently
+/// became a window cost.
+///
+/// Buckets are formed in SQL rather than from the aggregate because a
+/// peak-hour request must keep its peak price however much later the page is
+/// opened; the aggregate cannot know which rows were peak.
+const MODEL_BUCKETS: &str = "select model,
+                        case when (
+                            (cast(strftime('%H', ts) as integer) * 60
+                             + cast(strftime('%M', ts) as integer)) between 60 and 239
+                            or (cast(strftime('%H', ts) as integer) * 60
+                             + cast(strftime('%M', ts) as integer)) between 360 and 599
+                        ) then 1 else 0 end as peak,
+                        count(*),
+                        coalesce(sum(promptTokens), 0),
+                        coalesce(sum(cachedTokens), 0),
+                        coalesce(sum(cacheCreationTokens), 0),
+                        coalesce(sum(completionTokens), 0),
+                        coalesce(sum(reasoningTokens), 0)
+                 from billing{filter}
+                 group by model, peak
+                 order by count(*) desc, 4 desc";
+
 /// Which log a log-screen request refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LogKind {
@@ -863,25 +891,7 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
         // is what makes that exact — the aggregate cannot know which rows were
         // peak.
         let stmt = conn
-            .prepare(
-                "select model,
-                        case when (
-                            (cast(strftime('%H', ts) as integer) * 60
-                             + cast(strftime('%M', ts) as integer)) between 60 and 239
-                            or (cast(strftime('%H', ts) as integer) * 60
-                             + cast(strftime('%M', ts) as integer)) between 360 and 599
-                        ) then 1 else 0 end as peak,
-                        count(*),
-                        coalesce(sum(promptTokens), 0),
-                        coalesce(sum(cachedTokens), 0),
-                        coalesce(sum(cacheCreationTokens), 0),
-                        coalesce(sum(completionTokens), 0),
-                        coalesce(sum(reasoningTokens), 0)
-                 from billing
-                 where ts >= ?1 and ts <= ?2
-                 group by model, peak
-                 order by count(*) desc, 4 desc",
-            )
+            .prepare(&MODEL_BUCKETS.replace("{filter}", " where ts >= ?1 and ts <= ?2"))
             .ok();
         // model -> accumulated totals across its peak and off-peak buckets.
         #[derive(Default)]
@@ -967,6 +977,43 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
         .iter()
         .filter_map(|m| m.get("costUsd").and_then(|c| c.as_f64()))
         .sum();
+    // The same buckets with no window filter: this is what the overview shows
+    // as "终身". `None` rather than a partial sum when any bucket is unpriced —
+    // a number that silently drops an unknown model reads as a cheaper bill
+    // than the truth, and the panel already renders null as "—".
+    let cost_lifetime: Option<f64> = {
+        let mut sum = 0.0f64;
+        let mut priced = true;
+        let mut any = false;
+        if let Ok(mut stmt) = conn.prepare(&MODEL_BUCKETS.replace("{filter}", "")) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            }) {
+                for row in rows.flatten() {
+                    let minute = if row.1 == 1 { 120 } else { 0 };
+                    any = true;
+                    match pricing.cost(&row.0, row.3, row.4, row.5, row.6, minute) {
+                        Some(cost) => sum += cost,
+                        None => priced = false,
+                    }
+                }
+            }
+        }
+        if any && priced {
+            Some(sum)
+        } else {
+            None
+        }
+    };
     let pricing_meta = json!({
         "source": PRICING_SOURCE,
         "fetchedAt": pricing.fetched_at,
@@ -1000,7 +1047,7 @@ fn stats_json(conn: &Connection, from_ts: &str, to_ts: &str) -> Value {
             "avgTtfbMs": avg_ttfb_ms,
             "hitRate": hit_rate,
             "latestTs": latest_ts,
-            "costUsd": cost_total,
+            "costUsd": cost_lifetime,
         },
         "window": {
             "attempts": window.0,
@@ -1608,6 +1655,72 @@ mod tests {
         // The completed prefix of a burst is taken; the fragment stays.
         let read = "a\nb\nc still writing";
         assert_eq!(increment_body(read, 0), (false, "a\nb\n".to_string(), 4));
+    }
+
+    #[test]
+    fn the_lifetime_buckets_see_rows_the_window_excludes() {
+        // The overview prints two money figures: the selected window's, and the
+        // lifetime total in the card's subtitle. Both come from one SQL
+        // definition, run with and without the window filter — when the filter
+        // leaked into the only copy, "终身" silently showed the 24 h number.
+        // This asserts the two runnings actually disagree.
+        let conn = ledger(&[
+            (
+                "2026-01-02T03:00:00.000Z",
+                "openai",
+                "recent",
+                "ok",
+                10,
+                0,
+                5,
+                100,
+                1,
+                0,
+            ),
+            (
+                "2020-01-02T03:00:00.000Z",
+                "openai",
+                "ancient",
+                "ok",
+                10,
+                0,
+                5,
+                100,
+                1,
+                0,
+            ),
+        ]);
+        let models_in = |filter: &str| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(&MODEL_BUCKETS.replace("{filter}", filter))
+                .unwrap();
+            let mut names: Vec<String> = if filter.is_empty() {
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .flatten()
+                    .collect()
+            } else {
+                stmt.query_map(
+                    rusqlite::params!["2026-01-01T00:00:00", "2027-01-01T00:00:00"],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+                .flatten()
+                .collect()
+            };
+            names.sort();
+            names
+        };
+        assert_eq!(
+            models_in(""),
+            vec!["ancient", "recent"],
+            "unfiltered = every row, which is what the lifetime figure sums"
+        );
+        assert_eq!(
+            models_in(" where ts >= ?1 and ts <= ?2"),
+            vec!["recent"],
+            "the windowed running must leave the old row out"
+        );
     }
 
     #[test]
