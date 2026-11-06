@@ -13,9 +13,17 @@
 
 浮层铁律（2026-11-03 浮层偏移事故）：**`backdrop-filter` / `filter` / `transform` / `will-change` / `contain:paint` 会给 `position:fixed` 的后代创建包含块**——浮层的 `left/top` 会被当成「容器内坐标」解释，渲染偏出正好一个容器原点。果冻主题给 `.panel` 加了 `backdrop-filter: blur(24px)`，里面的 `.trend-tip` 就跑到鼠标右下角很远（实测 Δ(265,206) = 面板 rect(264,205)；基线主题 panel 无 filter 时 Δ(0,0)）。规则：**任何 fixed 浮层（tooltip/drawer/下拉）都不要放进带玻璃材质的容器里**，挂 body 直属层；脱离面板后它不会被视图切换一起藏住，切视图时必须显式收起。另：趋势浮层约 146px 高、比绘图区还高，「整块悬在光标上方」会盖住面板标题，改用「贴光标右侧 + 垂直居中 + 三向视口内收边」。
 
+**时区铁律：桶键与轴都必须是本地日期**（2026-11-06 深夜修，本地 00:0x 时两条单测变红才发现）
+- 聚合桶用 `strftime('%Y-%m-%d', ts, 'localtime')`，轴如果写 `date(<utc ts>)` 就会在本地 00:00–08:00（UTC+8）差一天：轴上没有「今天」，当天已落桶的行整段丢掉，概览 7d/30d 曲线右端凭空少一天。
+- 正确写法：端点先转再截 —— `date(substr(?1,1,19), 'localtime')`，日步进用 `date(u,'+1 day')`，输出直接用 `u`。小时轴**不要**跟着改：「UTC 步进 + 逐行转本地」本来就落在同一批本地小时键上，改成先转本地会多偏一次。
+- 前端传的 `from`/`to` 一律是 **UTC ISO**（`new Date(datetimeLocal).toISOString().slice(0,19)`，见 `app.js:100`），所以后端可以放心再转 localtime。
+- 单测里别截 UTC 字符串前十位当期望日期，用 `local_day(&conn, ts)`（`select date(?1,'localtime')`），否则本地凌晨必红。
+
 ## git 协作纪律（2026-11-06 用户强制要求）
 - **没有用户指令，不做大的 git 改动**：合并 PR、向 `main` 推送、打 tag、改 release、rebase、force-push —— 一律先问。允许的动作：在自己分支提交、推 `origin/feat/ux`、开 PR 供 review。
-- PR #3（base `main` ← head `feat/ux`）状态：**OPEN，未合并**；sourcery-ai 给了 APPROVED，`mergeable=MERGEABLE`，但等用户点头才动。
+- PR #3（base `main` ← head `feat/ux`）状态：**OPEN，未合并**（2026-11-06 深夜：6 提交 / 21 文件 / +1183 −97），等用户点头才动。
+- **`gh` CLI 在本仓库会解析到错的 repo**：直接 `gh pr view 3` / `gh pr list` 返回的是另一条记录（#3 显示成 stream 修复），`gh pr create` 报「No commits between main and feat/ux」。一律走全路径 API：`gh api repos/CelestNya/commandcode-api-proxy/...`。本地 `main` 还挂在另一个 worktree 上且落后 41 个提交，别拿它做基准，用 `origin/main`。
+- 机器人审查：安全扫描（`Sourcery review` check）每次都会 failure —— 它对 `innerHTML` 出现即报，6 条全是 stats.js 里只拼数字/常量的位置，属误报；仓库里所有上游来源文本（模型名/reqId/errorTag）都在插入点过了 `esc()`（`core.js:61`）。复核结论贴在 PR #3 的 issue comment 里，别每次重新查。`main` 没有分支保护，这个红叉不挡合并。
 - 注意：发 v0.7.9 时 `main` 被快进到 `bebe94e`（= 当时的 feat/ux），所以 `feat/ux → main` 的 PR 里**只有最后 2 个提交的 diff**，看不到 ux 全量改动。要看全量：`git log v0.7.8..bebe94e`（47 commits / 116 文件 / +11871 −939）。
 
 ## 界面打磨约定（2026-11-06 起，用户逐条指出的毛病）
