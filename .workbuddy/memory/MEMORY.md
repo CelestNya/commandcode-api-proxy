@@ -120,3 +120,11 @@
 - **CSS 注释里不要写 `{ }` 和 `--token:` 形式**：守门测试把 CSS 当纯文本解析，注释里的 `table { min-width: 780px }`、`--surface-head: …` 会被读成规则和声明。已加 `strip_comments`，但新代码继续避开这种写法。
 - **窄屏（<340px）模型表**：`.model-table` 有 `min-width: 300px`、卡片是 `overflow: hidden`，所以 `.model-table-wrap { overflow-x: auto }` 必须留着，否则费用列被静默裁掉且无处可滚（页面本身不横滚，`docHScroll=0`）。
 - **本分支 `webui_site` 守门测试共 10 项**，跑 `cargo test -p ccproxy` 全量 366 passed / 1 ignored；`cargo clippy -p ccproxy --all-targets -- -D warnings` 干净。
+
+## v0.7.10 发布与生产自更新实测（2026-11-07）
+- `feat/ux` 以 **fast-forward** 并入 `main`（`bebe94e..164d63d`），未用 squash/merge commit；PR #3 由 GitHub 自动标记 merged（`merge_commit_sha` 记的是 head 提交）。tag `v0.7.10` 附注式，正文写在 `.probe/tag-msg.txt` 再 `git tag -F`。
+- Release 工作流 `on.push.tags: v*` → windows / linux / publish 三 job，`make_latest: true`。Windows 资产名 `commandcode-proxy-v<ver>-windows-x86_64.zip`，必须与 `update::asset_suffix()` 的 `windows-x86_64.zip` 后缀对上。
+- **自更新是「自动检测 + 手动安装」**：proxy 内 `update::spawn_detector` 每 6h 探一次 GitHub latest 写状态文件；安装要 POST `/webui/api/update {"action":"install"}`（或面板/托盘点按钮）。状态文件在 `<install>/service/.ccproxy-update.json`（与 settings config 同目录），字段 `latest/url/size/staged/error`。
+- 安装布局是 A/B 兄弟目录：`install_root()` 从 exe 路径推（`…/service/` 的上一级），`staged_root_for(v)` = 父目录下 `CCProxy-v<v>-rust`。生产实测 0.7.8 → 0.7.10：新目录 `D:/Windows/Desktop/CCProxy-Release/CCProxy-v0.7.10-rust` 由程序自己下载解压，`inherit()` 把 `ccproxy.json`（含用户改过的 maxBodyBytes/imageCompress）与 `logs/` 拷过去，然后写 control 文件交接，旧托盘 stand down、新托盘起新 proxy 抢 8787。
+- **实测结论**：交接窗口约 3–6 秒（期间接口不通属正常），升级后 `/health` 报 0.7.10、egress proxied、账本连续（30413 条 / $70.20），旧 0.7.8 目录保留可直接回滚（跑旧 `CCProxyTray.exe` 即可）。
+- 注：`webui/api/sysinfo` 在 0.7.10 里 uptime 字段可能为 None，别拿它判断刚重启。
