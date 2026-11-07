@@ -349,14 +349,24 @@ pub fn handle_attempts(state: &SharedState, req: Request, _ctx: &RequestId) {
 ///
 /// `since` is the byte length the client already holds. The reply carries only
 /// the complete lines after that offset plus the new length, which keeps both
-/// the payload and the page's render incremental. A `since` beyond the file's
-/// length means the log shrank underneath the client (rotation truncates), so
-/// the reply is the full tail plus `reset`, which the page repaints from.
+/// the payload and the page's render incremental. `since == 0` (a cold client)
+/// and an offset beyond the file's length (a rotation truncated it) both get
+/// the full tail plus `reset`, which the page repaints from.
 pub fn handle_logs(state: &SharedState, req: Request, _ctx: &RequestId) {
     let _ = state;
     let kind = log_kind(req.url());
     let since = parse_since(req.url());
     respond_json(req, &log_increment(kind, since));
+}
+
+/// Whether this poll should answer with the tail instead of an increment.
+///
+/// `since == 0` is a cold client — the first open, or a switch to the other
+/// log file — and it is answered with the tail so it starts at "caught up".
+/// An offset past the file's length means the log shrank under the client
+/// (rotation truncates), so that offset is invalid as well.
+fn wants_tail(since: usize, len: usize) -> bool {
+    since == 0 || since > len
 }
 
 /// The increment payload for one log poll. `since` is a byte offset the client
@@ -375,9 +385,15 @@ fn log_increment(kind: LogKind, since: usize) -> Value {
             "len": 0,
         });
     };
-    if since > len as usize {
-        // Rotation shrank the file: hand back the whole tail and let the page
-        // repaint from scratch.
+    if wants_tail(since, len as usize) {
+        // `since == 0` is the first poll (page open, log file switch): reply
+        // with the tail and claim the whole file as consumed. Without this the
+        // pane starts chasing the backlog 256 KiB per 700 ms tick — on a 4 MB
+        // log that is fifteen full repaints before it reaches live, which is a
+        // ten-second stall on the first open.
+        //
+        // A `since` beyond the file's length is a rotation that shrank the log:
+        // same shape, the page repaints from scratch.
         let tail = read_log_tail(kind).unwrap_or_default();
         return json!({
             "which": kind.name(),
@@ -2371,6 +2387,21 @@ mod tests {
         // newline must not produce a phantom empty last line.
         assert_eq!(tail_lines("a\nb\nc\n", LOG_TAIL_LINES), "a\nb\nc");
         assert_eq!(tail_lines("", LOG_TAIL_LINES), "");
+    }
+
+    #[test]
+    fn only_a_cold_or_invalid_offset_asks_for_the_tail() {
+        // A cold client (offset 0) must be answered with the tail: if it were
+        // answered with an increment instead, the pane would chase the whole
+        // backlog 256 KiB per tick, repainting thousands of rows per poll —
+        // the first open of a 4 MB log froze the page for seconds.
+        assert!(wants_tail(0, 4_400_000));
+        // A live client keeps its increment: no repaint, no scroll jump.
+        assert!(!wants_tail(4_400_000, 4_400_000));
+        assert!(!wants_tail(262_087, 4_400_000));
+        // An offset past the end is a shrunk file: the tail is the only
+        // answer that can restore a sane offset.
+        assert!(wants_tail(4_400_001, 4_400_000));
     }
 
     #[test]

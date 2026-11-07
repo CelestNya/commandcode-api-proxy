@@ -43,6 +43,14 @@ function logLineHtml(line) {
   return '<span class="ln ' + logLevel(line) + '">' + head + esc(body) + "</span>";
 }
 
+/* 行与行之间不能插文本节点：`.ln` 是 block，换行靠它自己。
+ *
+ * 以前两处渲染都 `join("\n")`，而这里只删元素——每删一行就留下一个孤立的
+ * "\n" 文本节点，永远清不掉。`.logpane` 是 `white-space: pre`，每个这样的
+ * 文本节点都排成一个空行：实测 2000 行的面板里堆了 37,240 个文本节点，
+ * scrollHeight 涨到 39,241 行的高度（真实内容只 2000 行），滚动条长度是假的，
+ * 滚动时整块重排 —— 长任务到 11 秒，日志页就是在这里卡死的。
+ * 保持"只有元素"这个不变量，下面的上限才真的成立。 */
 function trimLogDom(pane) {
   while (pane.childElementCount > LOG_DOM_MAX) {
     pane.removeChild(pane.firstElementChild);
@@ -78,7 +86,7 @@ function renderLog(d, full) {
     /* Full paint: first entry, the file switch, or a rotation that shrank the
        file under the client's offset. Rebuild once, then re-anchor. */
     var lines = (d.lines || "").split("\n").filter(function (l) { return l !== "" && logShown(l); });
-    pane.innerHTML = lines.map(logLineHtml).join("\n");
+    pane.innerHTML = lines.map(logLineHtml).join("");
     logState.len = d.len || 0;
     trimLogDom(pane);
     if (logState.autoScroll) scrollLogToBottom();
@@ -94,7 +102,7 @@ function renderLog(d, full) {
   if (d.lines) {
     var atBottom = logState.autoScroll;
     var add = d.lines.split("\n").filter(function (l) { return l !== "" && logShown(l); })
-      .map(logLineHtml).join("\n");
+      .map(logLineHtml).join("");
     if (add) {
       pane.insertAdjacentHTML("beforeend", add);
       trimLogDom(pane);

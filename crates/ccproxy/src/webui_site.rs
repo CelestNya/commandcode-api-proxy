@@ -700,4 +700,30 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn log_lines_are_joined_without_text_separators() {
+        // 行与行之间不能插分隔符。`.logpane` 是 `white-space: pre`、`.ln` 是
+        // block，所以那个分隔符不是"换行"而是一个额外的文本节点；而 trimLogDom
+        // 只按元素数裁剪（childElementCount / firstElementChild），文本节点永远
+        // 删不掉。实测把日志追到 4.4 MB 时，2000 行的面板里堆了 37,240 个文本
+        // 节点，每个都排成一个空行，scrollHeight 变成 39,241 行的高度，滚动时
+        // 整块重排，主线程长任务到 11 秒 —— 日志页"上下滚动会卡死"就是这个。
+        // 两处渲染（整段重画 + 增量追加）都必须空串拼接。
+        let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/webui"));
+        let js = std::fs::read_to_string(dir.join("js/logs.js")).expect("logs.js readable");
+        let code = flat(&strip_comments(&js));
+
+        assert!(
+            !code.contains("logLineHtml).join(\"\\n\")"),
+            "logs.js joins rendered lines with a newline again: trimLogDom only removes \
+             elements, so those text nodes pile up and each renders as a blank row"
+        );
+        assert_eq!(
+            code.matches("map(logLineHtml).join(\"\")").count(),
+            2,
+            "both log paints (full repaint and incremental append) must join with an empty \
+             separator; found a different one"
+        );
+    }
 }
