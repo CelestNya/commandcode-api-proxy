@@ -102,12 +102,21 @@ if [ -z "$LIST_METHOD" ] || [ ! -s "$LIST_TMP" ]; then
 fi
 echo "listing method: $LIST_METHOD"
 
+# Normalize listing paths: strip the method-dependent prefix (`./` from find,
+# `squashfs-root/` from unsquashfs), so anchors can match the exact AppDir
+# relative path. Then use `grep -Fx` (exact line match) — a plain -F substring
+# count would double-count `usr/bin/commandcode-proxy` inside
+# `usr/bin/commandcode-proxy-tray`.
+NORM_TMP="$(mktemp)"
+sed -E 's#^(squashfs-root/|\./)##' "$LIST_TMP" > "$NORM_TMP"
+mv "$NORM_TMP" "$LIST_TMP"
+
 need_anchor() {
     needle="$1"
-    count="$(grep -c -F "$needle" "$LIST_TMP" || true)"
+    count="$(grep -c -Fx "$needle" "$LIST_TMP" || true)"
     if [ "$count" != "1" ]; then
         echo "error: AppImage missing anchor '$needle' (matches=$count)" >&2
-        echo "--- listing ---" >&2
+        echo "--- listing (normalized) ---" >&2
         cat "$LIST_TMP" >&2
         rm -f "$LIST_TMP"
         exit 1
