@@ -36,7 +36,7 @@ description: cc-proxy 的 GitHub Actions CI/CD 设计——质量门、原生构
 - **Windows（windows-latest）**：`cargo test` → `cargo build --release --locked` → `cargo xtask dist --platform windows --skip-build`。xtask 从 `packaging/layout.toml` stage `windows-portable`（tray 在根、proxy 在 `service/`、WebUI 整树、生成的无 BOM `package.json` 与默认 `ccproxy.json`），打确定性 ZIP，并**用 `ccproxy::archive::read` 回读**证明自更新器能打开。产物名 `commandcode-proxy-v<ver>-windows-x86_64.zip`（带 `v`，updater 按此后缀匹配）。
 - **Linux tarball（ubuntu-22.04）**：同一条 `cargo xtask dist --platform linux --skip-build` 产 `commandcode-proxy-<ver>-linux-x86_64.tar.gz`（**不带 `v`**，与已发布 Release 及 AUR 拉取名一致）+ 同名 `.manifest.json` / `.SHA256SUMS`。
 - **deb×2**：xtask 只铺 Debian root（FHS 树 + `DEBIAN/control`，control 来自 `layout.toml` 的 `[deb.proxy]`/`[deb.tray]`，`Version=<ver>-1`；tray `Depends=commandcode-proxy (= <ver>-1)`），maintainer scripts 原样拷自 `packaging/deb/scripts/`。runner 上用 `dpkg-shlibdeps` 对真实 binary 生成 proxy 的 `Depends`（不靠猜），再 `dpkg-deb --build` 并用 `dpkg-deb --field/--contents` 断言包名/版本/架构/依赖/关键文件。**cargo-deb 已移除**。
-- **AppImage**：xtask 产 `dist/appimage/AppDir`（含 `AppRun`，`AppRun` 内 `export CC_WEBUI_DIR=$APPDIR/usr/share/commandcode-proxy/webui`）；`packaging/appimage/build-appimage.sh` 只下载 appimagetool **v12（SHA-256 固定校验）**并打包，不再复制二进制/WebUI。
+- **AppImage**：xtask 产 `dist/appimage/AppDir`（含 `AppRun`，`AppRun` 内 `export CC_WEBUI_DIR=$APPDIR/usr/share/commandcode-proxy/webui`）；**AppDir 根必须有与 desktop `Icon=` 同名的 `.svg` 和 `.DirIcon`**（xtask 从 layout 的 svg 条目复制到根，缺了 appimagetool 直接报 not found 退出 1）。`packaging/appimage/build-appimage.sh` 只下载 appimagetool **v12（SHA-256 固定校验）**并打包，不再复制二进制/WebUI；打包后做大小门槛 + squashfs 锚点（`usr/bin/commandcode-proxy`、`…-tray`、`webui/index.html`、`.DirIcon`）精确行核对。
 - **AUR**：`packaging/aur/build-tarball.sh` 只把 xtask 的 tar.gz 拷到 `packaging-out/`；`verify-aur.sh` 在 `archlinux:latest` 容器里跑真实 `makepkg -f` 与 `makepkg --printsrcinfo`。PKGBUILD 的 `package()` 只做 `cp -a usr lib etc "$pkgdir/"`，**不维护第二份逐文件清单**。
 - **版本唯一来源**：workspace `Cargo.toml`（semver 校验）；deb 文件名由 xtask 写到 `dist/deb-names.txt`，workflow 消费它而不是从 git ref 反推（避免 feature 分支 dry-run 产出 `…_feat/multidist-1_amd64.deb`）。
 
@@ -47,6 +47,16 @@ description: cc-proxy 的 GitHub Actions CI/CD 设计——质量门、原生构
 - 哪些**必须**原生 runner：Linux-only 的 ksni/zbus tray、unix signal/单实例、`dpkg-shlibdeps`/`dpkg-deb`/`systemd-analyze`；Windows-only 的 Win32 tray、命名互斥、Job Object 交接。本机单平台通过不代表另一平台。
 - 哪些**仍是实机项**（CI 无头环境验不了，勿宣称已覆盖）：KDE 真实桌面 SNI 图标/右键菜单视觉与点击、systemd 真实 `start/stop/enable` 启停（容器只能 `systemd-analyze verify`）、AppImage 在真实桌面运行、AUR `git push` 发布。
 - CI 失败排查：读 `actions/upload-artifact` 与对应 job 日志尾部，本地用同一条 `cargo … --locked` 复现，不盲改。
+
+## 实跑踩坑（release dry-run 才能暴露，改 CI 时勿重犯）
+
+1. **`cmd | grep -q` 在 `set -o pipefail` 下会静默失败。** `grep -q` 提前关闭读端，上游收到 SIGPIPE(141)，pipefail 把它判成非零——但常被外层 `|| true` 吞掉，断言等于没跑。**正确做法**：把命令输出先 `> 临时文件`，再对文件 `grep -c` 计数（读满整文件，不产生 SIGPIPE）。
+2. **`dpkg-deb --info` ≠ `dpkg-deb --field`。** `--info` 输出带缩进的多行，用 `^Package:` 正则会漏；`--field <deb> <Name>` 直接吐值、无管道无正则，字段断言用它。文件清单用 `dpkg-deb --contents > 文件` 后 `grep -c -F`。
+3. **`upload-artifact@v4` / `action-gh-release` 默认跳过 dotfile。** `.SRCINFO`、`.DirIcon`、`.gitkeep` 这类以 `.` 开头的文件会被静默排除，需要么加 `include-hidden-files: true`，么像本仓库一样在容器内另存一份非 dot 的 `SRCINFO` 再传。
+4. **glob `commandcode-proxy_*_amd64.deb` 匹配不到 `commandcode-proxy-tray_…`。** `*` 不横跨 `-tray` 那段；两个 deb 要各写一条 glob。
+5. **docker 容器里别用 `bash -c '...'` 三层引号。** 单引号 docker 参数 + 内层 sudo/bash -c 再加注释或换行就 `unexpected EOF`。**正确做法**：宿主写临时脚本文件，`-v "$SCRIPT:/verify.sh:ro"` bind-mount 进去 `bash /verify.sh`；脚本内部用 quoted heredoc（`<<'EOF'`，任何层都不展开）。
+6. **AppImage 列 squashfs 不能直接 `unsquashfs -l <file>`。** AppImage = ELF runtime 前缀 + 偏移处的 squashfs，要先 `--appimage-offset` 再 `unsquashfs -o <offset> -l`；列完归一化路径前缀（`./`、`squashfs-root/`），锚点用 `grep -Fx` 整行匹配——子串 `-F` 计数会让 `usr/bin/commandcode-proxy` 在 `…-tray` 行命中两次。
+7. **`systemd-analyze verify --root` 在 systemd 249 不支持。** 该 `--root` 只对 cat-config 生效；要么把 staged 二进制临时 `install` 到 `/usr/bin` 再 verify，并用 trap 清理，且只把以 `^<unit>.service:` 开头的诊断当失败（宿主自身单元如 snapd/netplan 的告警放行）。
 
 ## Self-Evolving
 

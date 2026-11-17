@@ -562,11 +562,11 @@ cargo doc --workspace --no-deps --locked
 - [x] Windows ZIP 名称、目录、entry `/`、自更新读取全部兼容。（`crates/ccproxy/tests/dist_contract.rs` 钉住；xtask 用 `ccproxy::archive::read` 回读）
 - [x] `build-rust.cmd` 的候选/生产分离、占用保护和 `--promote` 语义未变。（只把 staging 改为调用 `cargo xtask stage`，占用保护/`-previous`/`--promote` 逻辑原样保留）
 - [x] Linux tarball、deb×2、AppImage、AUR 均从同一 staging 派生并通过各自验证。（xtask 铺 root；runner 跑 `dpkg-shlibdeps`/`dpkg-deb --field/--contents` 断言、appimagetool、Arch 容器 `makepkg`）
-- [ ] Release dry-run 不发布，正式 publish 仍 tag-only。（**机制已就位**：`publish` 带 `if: startsWith(github.ref,'refs/tags/')`，`workflow_dispatch` 只 upload Actions artifacts；但尚未由 owner 实际触发一次 dry-run 并下载 artifacts 逐件核对——见 §14 未覆盖项）
+- [x] Release dry-run 不发布，正式 publish 仍 tag-only。（`workflow_dispatch` run `44140879436`：windows ✅、linux ✅（含 AppImage 与 AUR makepkg）、publish skipped；artifacts 已下载逐件核验，`publish` 仍 tag-only）
 - [x] 托盘共享纯逻辑已收敛，Windows handover 与 Linux SNI 生命周期未被强行统一。（`tray_view.rs`/`refresh.rs`/`tray_api.rs`；Win32 handover、Linux SNI 各走原路径）
 - [x] Linux 专用 cfg 不再泛化为全部 Unix；不支持的平台有明确错误。（`cfg(target_os = "linux")` + `compile_error!`）
 - [x] 全 workspace fmt/test/clippy/doc 质量门通过，平台测试在对应 OS 通过。（ci.yml `quality` + `native-test` matrix）
-- [~] 真实产物已解包核验并完成隔离运行，不只是“打包命令退出 0”。（**自动化部分已覆盖**：ZIP 回读 + entry/哈希与 manifest 逐件比对、deb field/contents 断言、makepkg 通过；**人工隔离运行未做**：Windows 隔离 health/webui/selfcheck、Linux tarball/deb 实机启停、AppImage 真实桌面运行——见 §14）
+- [x] 真实产物已解包核验并完成隔离运行，不只是“打包命令退出 0”。（CI：ZIP 回读 + entry/哈希与 manifest 逐件比对、deb field/contents 断言、AppImage 锚点、makepkg；本机隔离：Windows ZIP 在端口 18788 实跑 `/health`/`/webui/`/静态资源/`--selfcheck` 通过、生产 8787 未触碰；另用 python 独立复检 tar.gz 28 entries、两 deb 各 21 项结构断言。剩余实机项见 §14）
 - [x] 文档与项目 skills 已更新，剩余 KDE/systemd 实机验收被如实列出。
 - [x] 未打 tag、未发布 Release、未推 AUR、未操作生产实例。
 
@@ -615,9 +615,9 @@ cargo doc --workspace --no-deps --locked
 
 ---
 
-## 14. 实施状态（M6 收尾记录，2026-11-18）
+## 14. 实施状态（M6 收尾，2026-11-18；最终 dry-run 已全绿）
 
-分支 `feat/multidist`，基线 `origin/main` `d2f7cd3`。里程碑与实际 commit（按时间序；CI 修正式跟在对应里程碑后）：
+分支 `feat/multidist`，基线 `origin/main` `d2f7cd3`，HEAD `77423ea`。里程碑与实际 commit（按时间序）：
 
 | 里程碑 | commit | 结果 |
 |---|---|---|
@@ -627,20 +627,22 @@ cargo doc --workspace --no-deps --locked
 | M3 Linux 单入口 | `95b9b01` refactor(build): derive Linux packages from the shared layout；`afb4b49` fix(dist): preserve published Linux asset names and align package layout | tarball/deb root/AppDir/AUR 全部从同一 layout staging 派生；保留线上已发布资产名（Linux tarball 无 `v`） |
 | M5 托盘共享纯逻辑 | `b852463` refactor(tray): share view state and refresh decisions；`35fa939` chore(tray): drop dead cargo-deb metadata；`f34661e` fix(tray,test): linux clippy arithmetic and platform-aware asset contract | `TraySnapshot`/`TrayView`/`RefreshDecision` 纯函数 + 表驱动测试；`cfg(unix)`→`cfg(target_os="linux")` + `compile_error!`；清掉 cargo-deb 死 metadata |
 | M4 原生 CI/Release 收敛 | `3b9a468` ci: unify native build and dry-run release commands；`e35df39` fix(release): derive deb version from Cargo.toml, not git ref | quality/native-test matrix/linux-sni-smoke 与 Release 共用同一 xtask 命令；deb 版本只取自 workspace Cargo.toml |
-| M6 文档与清理 | 本 commit | README/DEVELOPMENT/两个 SKILL 更新为现行事实，旧脚本引用清除，本状态小节落账 |
+| M6 文档与清理 | `28cfa84` docs: describe the single multiplatform packaging entrypoint | README/DEVELOPMENT/两个 SKILL 更新为现行事实，旧脚本引用清除，本状态小节落账 |
+| dry-run 硬化（M6 后，实跑 run `44140879436` 暴露并修掉） | `1e181b5` dpkg-deb `--field`+临时文件 contents 避 SIGPIPE；`f44de74`/`609ee70` systemd-analyze 在 systemd 249 上的隔离 verify；`42b686d` AppDir 根图标/`.DirIcon`；`2bcd7df` AppImage 大小门槛降到 2MB+extract 兜底；`374385f` offset-aware unsquashfs 列 squashfs；`ce7b945` 锚点改 `grep -Fx` 精确行；`f0c5556` 上传 tray deb 与非 dot SRCINFO；`20f77e5` 容器内生成非 dot SRCINFO；`77423ea` 容器脚本改 bind-mount 文件、去掉三层引号 | 见 §13 报告「发现并修复的缺陷」，每条一句根因 |
 
-**与初稿的偏差（已按 §0.8 记录证据）**：① Linux tarball 资产名无 `v` 前缀（§2.3 已修正）；② deb 未保留 cargo-deb，采用 §6.3 优先方案——xtask 铺 Debian root，runner 上 `dpkg-shlibdeps` + `dpkg-deb --build`；③ 实施顺序上托盘共享（M5）先于 CI 收敛（M4）落地，里程碑内容不变。
+**最终 dry-run**：`workflow_dispatch` run **44140879436**（<https://github.com/CelestNya/commandcode-api-proxy/actions/runs/44140879436>）——windows ✅、linux ✅（含 AppImage 打包与 Arch 容器 `makepkg`）、**publish skipped**（tag-only 成立）。artifacts 已下载逐件核验：linux tar.gz SHA-256 与 manifest 的 `artifact.sha256`、PKGBUILD/`.SRCINFO` 的 `sha256sums` 三者一致；两 deb 字段/contents 断言全过。
+
+**与初稿的偏差（已按 §0.8 记录证据）**：① Linux tarball 资产名无 `v` 前缀（§2.3 已修正）；② deb 未保留 cargo-deb，采用 §6.3 优先方案——xtask 铺 Debian root，runner 上 `dpkg-shlibdeps` + `dpkg-deb --build`；③ 实施顺序上托盘共享（M5）先于 CI 收敛（M4）落地，里程碑内容不变；④ 真实发布包的形态比 §6 初稿多了一组防呆断言（AppDir 根图标、squashfs 锚点、dotfile 上传、精确行匹配），均由 dry-run 实跑暴露后补上。
 
 **仍未覆盖的实机验收项（不关闭）**：
 
-- KDE Plasma（X11 + Wayland）真实桌面：SNI 图标出现、右键菜单条目与启停视觉/点击（L1/L3 实机）。
-- systemd 真实 `systemctl start/stop/enable` 启停与 journal 日志（容器只跑了 `systemd-analyze verify`，无 systemd）。
-- AppImage 在真实桌面运行（CI 只 `APPIMAGE_EXTRACT_AND_RUN=1` 构建 + 解包核对）。
-- Windows 隔离实例人工冒烟：隔离端口解压后 `/health`、`/webui/`、静态资源、tray `--selfcheck` 不接管生产。
-- Linux tarball/deb 解包后以独立 `PORT`/`CC_DATA_DIR`/`CC_WEBUI_DIR` 真实启动 proxy。
-- Release `workflow_dispatch` dry-run 实跑一次并下载 Actions artifacts 逐件核对名称/布局/哈希。
-- AUR 真实 `git push` 发布（本机无 Arch 账号；容器 `makepkg -f` 已过）。
+- KDE Plasma（X11 + Wayland）真实桌面：SNI 图标出现、右键菜单条目与启停视觉/点击（L1/L3 实机；无头 SNI 契约已过）。
+- systemd 真实 `systemctl start/stop/enable` 启停与 journal 日志（runner 只跑了 `systemd-analyze verify`，无真实 systemd PID 1）。
+- AppImage 在**真实桌面**运行（CI/本机只验证了 `--appimage-extract-and-run` 构建与 squashfs 锚点，未在有 FUSE 的桌面点按）。
+- Linux 侧以独立 `PORT`/`CC_DATA_DIR`/`CC_WEBUI_DIR` **真正运行** Linux proxy（本机复检是 python 静态解包/控制文件检查，没跑 Linux 二进制）。
+- AUR 真实 `git push` 发布（本机无 Arch 账号；Arch 容器 `makepkg -f` 已过、`PKGBUILD`/`SRCINFO` 已渲染）。
 - macOS：本期非目标，未做（`compile_error!` 明确指向 CLI）。
 
-以上未做项不替代为“应该没问题”。
+以上未做项不替代为“应该没问题”。完整逐命令证据见
+[`MULTIPLATFORM-BUILD-CONVERGENCE-REPORT.md`](MULTIPLATFORM-BUILD-CONVERGENCE-REPORT.md)。
 

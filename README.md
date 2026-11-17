@@ -53,11 +53,12 @@ Release 附件有四类，全部从同一份声明式布局 `packaging/layout.to
 
 - `commandcode-proxy_<ver>-1_amd64.deb` 与 `commandcode-proxy-tray_<ver>-1_amd64.deb`
   （后者依赖前者、带托盘；systemd 单元、WebUI、env、桌面入口与图标随包安装）
-- `commandcode-proxy-<ver>-x86_64.AppImage`（免安装，加可执行权限后直接运行）
+- `commandcode-proxy-<ver>-x86_64.AppImage`（免安装，加可执行权限后运行；无 FUSE 的系统改用 `--appimage-extract-and-run`）
 - `commandcode-proxy-<ver>-linux-x86_64.tar.gz`（通用 FHS 树，手动解包到 `/`）
 - AUR 包 `commandcode-proxy-bin`（`PKGBUILD` + `.SRCINFO`，由 `paru`/`yay` 等助手拉取）
 
-deb 用 `sudo dpkg -i …` 安装，随后 `sudo systemctl enable --now commandcode-proxy`。
+`deb` 用 `sudo dpkg -i …` 安装；安装后**不会**自启服务（postinst 只建目录、拷 env、reload systemd），
+需要时手动 `sudo systemctl enable --now commandcode-proxy`。
 
 ### 命令行（任意平台，从源码）
 
