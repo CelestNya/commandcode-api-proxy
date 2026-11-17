@@ -55,20 +55,31 @@ ls -lh "$APPIMAGE"
 # to unsquashfs -l if present.
 test -s "$APPIMAGE" || { echo "error: AppImage is empty" >&2; exit 1; }
 SIZE="$(stat -c%s "$APPIMAGE")"
-if [ "$SIZE" -lt 5000000 ]; then
-    echo "error: AppImage too small ($SIZE bytes); expected >5MB" >&2
+# Empirical floor: the squashfs filesystem compresses ~7.0MB of staged content
+# to ~3.42MB at ~50% ratio; with the runtime prefix the real artifact is
+# ~3.78MB. 2MB only catches an empty/broken AppImage, not a thin-but-valid one.
+if [ "$SIZE" -lt 2000000 ]; then
+    echo "error: AppImage too small ($SIZE bytes); expected >2MB (empty-shell guard)" >&2
     exit 1
 fi
 
+# List the squashfs contents. Prefer --appimage-list on the runtime; fall back
+# to unsquashfs -l; if neither is available, extract to a mktemp dir and list
+# the tree. Clean up in all branches.
 LIST_TMP="$(mktemp)"
 if "$APPIMAGE" --appimage-list > "$LIST_TMP" 2>/dev/null; then
     : # runtime list worked
 elif command -v unsquashfs >/dev/null 2>&1; then
     unsquashfs -l "$APPIMAGE" > "$LIST_TMP"
 else
-    echo "error: neither --appimage-list nor unsquashfs available to inspect AppImage" >&2
-    rm -f "$LIST_TMP"
-    exit 1
+    EXTRACT_DIR="$(mktemp -d)"
+    APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --appimage-extract > /dev/null 2>&1 || true
+    # appimageruntime extracts to ./squashfs-root relative to cwd; move it.
+    if [ -d squashfs-root ]; then
+        mv squashfs-root "$EXTRACT_DIR/"
+    fi
+    (cd "$EXTRACT_DIR" && find . -type f | sort) > "$LIST_TMP"
+    rm -rf "$EXTRACT_DIR"
 fi
 
 need_anchor() {
