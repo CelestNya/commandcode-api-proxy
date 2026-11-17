@@ -47,3 +47,44 @@ APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGETOOL" --no-appstream "$APPDIR" "$APPIMAGE"
 
 echo "AppImage: $APPIMAGE"
 ls -lh "$APPIMAGE"
+
+# Post-build assertions: a non-empty AppImage is not enough. Verify the file
+# exists, is large enough to have squashfs'd real content, and actually
+# contains the anchor files we ship. We list the squashfs by running the
+# produced AppImage with --appimage-list (supported by runtime v2); fall back
+# to unsquashfs -l if present.
+test -s "$APPIMAGE" || { echo "error: AppImage is empty" >&2; exit 1; }
+SIZE="$(stat -c%s "$APPIMAGE")"
+if [ "$SIZE" -lt 5000000 ]; then
+    echo "error: AppImage too small ($SIZE bytes); expected >5MB" >&2
+    exit 1
+fi
+
+LIST_TMP="$(mktemp)"
+if "$APPIMAGE" --appimage-list > "$LIST_TMP" 2>/dev/null; then
+    : # runtime list worked
+elif command -v unsquashfs >/dev/null 2>&1; then
+    unsquashfs -l "$APPIMAGE" > "$LIST_TMP"
+else
+    echo "error: neither --appimage-list nor unsquashfs available to inspect AppImage" >&2
+    rm -f "$LIST_TMP"
+    exit 1
+fi
+
+need_anchor() {
+    needle="$1"
+    count="$(grep -c -F "$needle" "$LIST_TMP" || true)"
+    if [ "$count" != "1" ]; then
+        echo "error: AppImage missing anchor '$needle' (matches=$count)" >&2
+        echo "--- listing ---" >&2
+        cat "$LIST_TMP" >&2
+        rm -f "$LIST_TMP"
+        exit 1
+    fi
+}
+need_anchor "usr/bin/commandcode-proxy"
+need_anchor "usr/bin/commandcode-proxy-tray"
+need_anchor "usr/share/commandcode-proxy/webui/index.html"
+need_anchor ".DirIcon"
+rm -f "$LIST_TMP"
+echo "AppImage anchors OK"

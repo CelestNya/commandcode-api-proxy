@@ -227,7 +227,36 @@ fn run(args: &[String]) -> Result<()> {
                     appdir.join("commandcode-proxy.desktop"),
                     deb::APP_DESKTOP.as_bytes(),
                 )?;
-                println!("appdir: {}", appdir.display());
+                // AppImage requires a top-level icon matching the desktop file's
+                // `Icon=` key (and a `.DirIcon` symlink/copy). Find the layout's
+                // .svg entry targeting appimage and copy it to the AppDir root.
+                let icon = layout
+                    .entries
+                    .iter()
+                    .find(|e| e.targets.iter().any(|t| t == "appimage") && e.dest.ends_with(".svg"))
+                    .ok_or_else(|| {
+                        DistError(
+                            "layout has no .svg entry targeting appimage; AppDir root icon is required"
+                                .to_string(),
+                        )
+                    })?;
+                let staged_icon = appdir.join(icon.dest.trim_start_matches('/'));
+                if !staged_icon.is_file() {
+                    return Err(DistError(format!(
+                        "staged AppDir icon missing at {}",
+                        staged_icon.display()
+                    )));
+                }
+                let stem = std::path::Path::new(&icon.dest)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("commandcode-proxy");
+                std::fs::copy(&staged_icon, appdir.join(format!("{stem}.svg")))?;
+                std::fs::copy(&staged_icon, appdir.join(".DirIcon"))?;
+                println!(
+                    "appdir: {} (root icon: {stem}.svg, .DirIcon)",
+                    appdir.display()
+                );
             }
             println!(
                 "dist OK: {} (manifest: {}, sums: {})",
@@ -340,4 +369,39 @@ fn sums_for_manifest(manifest_out: &std::path::Path) -> PathBuf {
     let mut p = manifest_out.to_path_buf();
     p.set_file_name(format!("{base}.SHA256SUMS"));
     p
+}
+
+#[cfg(test)]
+mod appicon_tests {
+    use super::*;
+
+    /// Parse `Icon=` out of a desktop file blob.
+    fn desktop_icon(blob: &str) -> Option<&str> {
+        blob.lines()
+            .find(|l| l.starts_with("Icon="))
+            .map(|l| l.trim_start_matches("Icon=").trim())
+    }
+
+    #[test]
+    fn appdir_icon_name_matches_layout_svg_entry() {
+        // The AppDir root icon is copied from the layout's .svg entry that
+        // targets appimage, and its stem must equal the desktop file's Icon=.
+        // If the icon is renamed in layout.toml, update APP_DESKTOP to match.
+        let workspace = xtask::workspace_root();
+        let layout = layout::Layout::load(&workspace).expect("layout loads");
+        let svg = layout
+            .entries
+            .iter()
+            .find(|e| e.targets.iter().any(|t| t == "appimage") && e.dest.ends_with(".svg"))
+            .expect("layout has an appimage-targeting .svg entry");
+        let stem = std::path::Path::new(&svg.dest)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("svg dest has a file stem");
+        assert_eq!(
+            desktop_icon(deb::APP_DESKTOP),
+            Some(stem),
+            "APP_DESKTOP Icon= must match the layout svg entry stem"
+        );
+    }
 }
