@@ -65,9 +65,10 @@ fn run(args: &[String]) -> Result<()> {
             let opts = Parse::from(&args[1..]);
             let input = PathBuf::from(opts.required("input")?);
             let out = PathBuf::from(opts.required("out")?);
+            let platform = opts.required("platform")?;
             let version = xtask::workspace_version()?;
             let files = list_staged(&input)?;
-            let bytes = manifest::write(&files, &version, "windows", "x86_64", &input)?;
+            let bytes = manifest::write(&files, &version, &platform, "x86_64", &input)?;
             std::fs::write(&out, bytes)?;
             println!("wrote {}", out.display());
             Ok(())

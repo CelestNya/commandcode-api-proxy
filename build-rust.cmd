@@ -83,40 +83,20 @@ if not exist "%TRAY%" (
   exit /b 1
 )
 
-rem ---- staging package ----
-rem The tray is the entry point and stays in the root; the proxy it launches
-rem lives in service\. Both binaries used to sit side by side, and the first
-rem person to open the package double-clicked the proxy — a console program
-rem with no UI — and read the result as a broken release. The layout now says
-rem which one to run.
+rem ---- staging package via xtask ----
+rem cargo xtask stage reads packaging/layout.toml and materialises the same
+rem tree the CI zip uses: tray at root, proxy in service/, WebUI tree, plus
+rem generated package.json and a default ccproxy.json (no BOM, never a copy of
+rem a developer-local config). It wipes PKG first via Rust fs APIs.
 set PKG=%ROOT%\release\CCProxyRust
-if exist "%PKG%" rmdir /s /q "%PKG%"
-mkdir "%PKG%" 2>nul
-mkdir "%PKG%\service" 2>nul
-
-copy /y "%PROXY%" "%PKG%\service" >nul || goto :pack_fail
-copy /y "%TRAY%" "%PKG%" >nul || goto :pack_fail
-rem Ship the WebUI sources next to the proxy so a stylesheet can be edited and
-rem the page reloaded without a rebuild. The proxy prefers this loose copy and
-rem falls back to the one compiled in, so deleting this directory is also a
-rem valid choice for a smaller package.
-xcopy /e /i /y /q "%ROOT%crates\ccproxy\webui" "%PKG%\service\webui" >nul || goto :pack_fail
-rem The outbound-proxy policy lives in this file so a person can read and edit
-rem it; without a shipped copy, setting it would mean an environment variable
-rem nobody can see. Written rather than copied, so a local edit never leaks
-rem into a release. The annotated field reference is ccproxy.example.json at
-rem the repo root; this ships the minimal equivalent.
-> "%PKG%\service\ccproxy.json" echo {
->> "%PKG%\service\ccproxy.json" echo   "proxy": "default",
->> "%PKG%\service\ccproxy.json" echo   "noProxy": "localhost,127.0.0.1"
->> "%PKG%\service\ccproxy.json" echo }
-rem The tray and the proxy both read the version from this file (tray tooltip,
-rem /health is compiled in). Written rather than copied so the package carries
-rem the workspace version even though it ships no package.json of its own.
-> "%PKG%\package.json" echo {"version":"%VER%"}
-rem Never ship runtime state produced by local testing.
-if exist "%PKG%\selfcheck.log" del /q "%PKG%\selfcheck.log"
-if exist "%PKG%\logs" rmdir /s /q "%PKG%\logs"
+pushd "!ROOT!"
+cargo xtask stage --platform windows --target windows-portable --out "%PKG%"
+if errorlevel 1 (
+  popd
+  echo Staging failed.
+  exit /b 1
+)
+popd
 
 for %%F in ("%PKG%\service\ccproxy.exe") do echo service\ccproxy.exe: %%~zF bytes
 for %%F in ("%PKG%\CCProxyTray.exe") do echo CCProxyTray.exe: %%~zF bytes

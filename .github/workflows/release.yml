@@ -43,42 +43,20 @@ jobs:
         run: cargo test --locked
       - name: Build both binaries
         run: cargo build --release --locked
-      - name: Stage the runnable package
-        shell: pwsh
-        run: |
-          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches.Groups[1].Value
-          New-Item -ItemType Directory -Force pkg/service | Out-Null
-          Copy-Item target/release/CCProxyTray.exe pkg/
-          Copy-Item target/release/ccproxy.exe pkg/service/
-          Set-Content -Path pkg/package.json -Value ('{"version":"' + $ver + '"}') -Encoding utf8
-          # The two extra pieces build-rust.cmd stages, so a downloaded
-          # release behaves like a local build: the proxy serves the panel
-          # from the webui/ folder on disk (single source of truth), and the
-          # config beside the exe is where the egress policy is set. Keep
-          # this list in step with build-rust.cmd.
-          Copy-Item crates/ccproxy/webui pkg/service/webui -Recurse
-          # Written through WriteAllText rather than Set-Content: `-Encoding
-          # utf8` means "with a BOM" on Windows PowerShell, and the parser
-          # rejects a BOM, which would silently discard the whole file.
-          $cfg = @('{', '  "proxy": "default",', '  "noProxy": "localhost,127.0.0.1"', '}') -join "`n"
-          [System.IO.File]::WriteAllText("$PWD/pkg/service/ccproxy.json", $cfg)
-          Write-Output "staged version $ver"
-      - name: Zip the package
-        shell: pwsh
-        run: |
-          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches.Groups[1].Value
-          # Not Compress-Archive: its entry-name separator follows the
-          # PowerShell version (5.1 '\' vs 7.x '/'), and clients at 0.7.7/0.7.8
-          # refuse a backslash name outright — a package built by 5.1 would be
-          # uninstallable by them. zip-package.ps1 normalises to '/' explicitly,
-          # so the artifact has the same shape on any runner.
-          ./packaging/windows/zip-package.ps1 -Source pkg -Destination ("commandcode-proxy-v" + $ver + "-windows-x86_64.zip")
-          Write-Output "packaged commandcode-proxy-v$ver-windows-x86_64.zip"
+      - name: Stage and zip the runnable package
+        # `cargo xtask dist` is the single Windows packaging entry point: it
+        # reads packaging/layout.toml, stages windows-portable (tray at root,
+        # proxy in service/, WebUI tree, generated package.json and default
+        # config), writes a deterministic ZIP, SHA256SUMS and a JSON manifest,
+        # and re-reads the ZIP with ccproxy::archive::read to prove the updater
+        # can open it. --skip-build because the binaries were just built above.
+        run: cargo xtask dist --platform windows --skip-build
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: commandcode-proxy-v*.zip
+          # Only the final ZIP; dist/stage/ is an intermediate tree, never a release.
+          path: dist/commandcode-proxy-v*-windows-x86_64.zip
           if-no-files-found: error
 
   linux:

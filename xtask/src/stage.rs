@@ -19,14 +19,21 @@ pub fn stage(layout: &Layout, target: &str, out_dir: &Path) -> Result<Vec<Staged
         return Err(DistError(format!("unknown target `{target}`")));
     }
     let root = workspace_root();
-    // The output must live under <workspace>/dist. Resolve (creating if needed)
-    // and canonicalise the parent before we ever delete it.
+    // The output must live somewhere inside the workspace: `dist/stage/<t>`
+    // for CI archives, or a tool directory like `release/CCProxyRust` for a
+    // local hot-swap build. We refuse the workspace root itself and anything
+    // outside it (repo root, drive root, a path that escapes via `..`); the
+    // check is done on canonicalised paths before we ever delete the target.
     std::fs::create_dir_all(out_dir)?;
-    let dist_root = root.join("dist");
-    std::fs::create_dir_all(&dist_root)?;
-    let canon_out = ensure_inside(&dist_root, out_dir)?;
-    if canon_out == dist_root {
-        return Err("refusing to stage directly into dist/; choose dist/stage/<target>".into());
+    let canon_root = root
+        .canonicalize()
+        .map_err(|e| format!("cannot canonicalize workspace root {}: {e}", root.display()))?;
+    let canon_out = ensure_inside(&root, out_dir)?;
+    if canon_out == canon_root {
+        return Err(
+            "refusing to stage directly into the workspace root; choose a product subdirectory"
+                .into(),
+        );
     }
 
     // Wipe a previous staging run of this target, via fs APIs only.
