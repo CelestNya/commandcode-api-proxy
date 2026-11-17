@@ -47,11 +47,17 @@ Command Code 有两套接口，能用哪套取决于你的订阅：
 
 不需要装 Rust，也不需要命令行。日志和配置都在解压出来的目录里，绿色免安装。
 
-### Linux：deb / AppImage / AUR
+### Linux：deb / AppImage / tarball / AUR
 
-Release 附件里有 `commandcode-proxy` 与 `commandcode-proxy-tray` 两个 deb
-（后者依赖前者，带托盘）、一个 AppImage，以及 `commandcode-proxy-bin` 的
-AUR 源。systemd 单元与桌面入口随 deb 安装。
+Release 附件有四类，全部从同一份声明式布局 `packaging/layout.toml` 派生：
+
+- `commandcode-proxy_<ver>-1_amd64.deb` 与 `commandcode-proxy-tray_<ver>-1_amd64.deb`
+  （后者依赖前者、带托盘；systemd 单元、WebUI、env、桌面入口与图标随包安装）
+- `commandcode-proxy-<ver>-x86_64.AppImage`（免安装，加可执行权限后直接运行）
+- `commandcode-proxy-<ver>-linux-x86_64.tar.gz`（通用 FHS 树，手动解包到 `/`）
+- AUR 包 `commandcode-proxy-bin`（`PKGBUILD` + `.SRCINFO`，由 `paru`/`yay` 等助手拉取）
+
+deb 用 `sudo dpkg -i …` 安装，随后 `sudo systemctl enable --now commandcode-proxy`。
 
 ### 命令行（任意平台，从源码）
 
@@ -62,8 +68,22 @@ cargo build --release --locked
 target/release/ccproxy    # Windows 上是 ccproxy.exe
 ```
 
-需要 Rust stable（Windows 上是 MSVC 工具链）。自己构建的话没有托盘，代理直接
-在前台运行。
+需要 Rust stable（Windows 上是 MSVC 工具链）。自己构建的话代理直接在前台运行；
+托盘二进制同名，在 Linux 上是 `commandcode-proxy-tray`。
+
+打包发布物由 xtask 统一生成，本地与 CI 跑同一条命令（详见
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 的「单一打包入口」）：
+
+```bash
+cargo xtask dist --platform windows   # → dist/commandcode-proxy-v<ver>-windows-x86_64.zip
+cargo xtask dist --platform linux     # → dist/*.tar.gz + deb root + AppDir（在 Linux 上跑）
+# 已经 cargo build --release 过，可追加 --skip-build 跳过编译
+```
+
+Windows 本地热替换发布用根目录的 `build-rust.cmd`：不带参数只产出候选目录
+`CCProxy-v<ver>-rust`，**不切换** `CCProxy-current`；确认无误后再带 `--promote`
+才切到当前运行版本。构建候选与切换生产是两个动作，旧版本目录一律保留用于回滚。
+它内部同样调用 `cargo xtask stage`，与 Release 用的是同一份布局。
 
 ## 接入你的客户端
 

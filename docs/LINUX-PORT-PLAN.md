@@ -1,6 +1,7 @@
 # cc-proxy Linux 移植开发计划
 
 状态：**方案已定，待实施**（2026-10-15 综合评审）
+> **2026-11-18 注（M6 收尾）：本计划为历史文档，以下结论不再逐字反映现状——打包与发布已收敛到唯一入口 `cargo xtask dist`，布局唯一来源 `packaging/layout.toml`，deb 走 xtask 铺 root + runner 上 `dpkg-shlibdeps`/`dpkg-deb`（cargo-deb 已移除）。现行事实以 `docs/MULTIPLATFORM-BUILD-CONVERGENCE-SPEC.md` §14「实施状态」、`docs/DEVELOPMENT.md`「单一打包入口」与两个 skills 为准。保留本文是为了留存决策由来，勿据此改打包。**
 范围：cc-proxy（Rust API 翻译/转发代理）Linux 版——CLI + systemd + SNI 托盘，deb/AppImage/AUR 发布。
 
 ---

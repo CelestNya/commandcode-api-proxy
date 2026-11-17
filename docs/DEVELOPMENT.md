@@ -17,16 +17,24 @@
 
 ```bash
 cargo build --release --locked   # Both binaries: ccproxy + CCProxyTray
-cargo test                       # Unit + fixture + ledger + tray tests (303)
+cargo test                       # Unit + fixture + ledger + tray tests
 cargo clippy --all-targets --all-features --locked -- -D warnings   # The lint gate
 cargo fmt --check
-build-rust.cmd                   # Package + publish to the hot-swap folder
+build-rust.cmd                   # Windows: package + publish to the hot-swap folder
 ```
 
-## Windows tray (Rust, `crates/ccproxy-tray`)
+## Tray (`crates/ccproxy-tray`, Windows + Linux)
 
 The tray is a second Rust binary in the same workspace, not a separate artifact.
-It is Windows-only and optional: the proxy runs fine on its own.
+It builds on both desktop targets: the Windows path uses raw `windows-sys`
+(Job Object, named-mutex handover, Shell_NotifyIcon); the Linux path uses zbus
+StatusNotifierItem with no GTK. Non-Windows/non-Linux targets get an explicit
+`compile_error!` pointing at the `ccproxy` CLI — there is no empty `main`.
+
+The tray itself is optional: the proxy runs fine on its own. Shared, platform-pure
+logic (snapshot → view, menu model, refresh decisions) lives in `tray_view.rs`,
+`tray_api.rs` and `refresh.rs`; platform lifecycle (Windows handover/supervision,
+Linux SNI event loop + CLI start/stop) is deliberately *not* unified.
 
 Test a build against an isolated namespace so a running production instance is
 untouched:
@@ -107,6 +115,84 @@ with no edits is a zero-byte 304. If `webui/` is missing entirely, `/webui/`
 answers 404 with an explanatory plain-text body — the package must ship the
 directory; there is no fallback copy in the binary.
 
+## Single packaging entrypoint (xtask)
+
+There is exactly one way to assemble a release artifact, and it runs the same
+command locally and in CI:
+
+```bash
+cargo xtask dist --platform windows [--skip-build]
+cargo xtask dist --platform linux   [--skip-build]
+```
+
+`dist` runs the whole chain: layout check → `cargo build --release --locked`
+(skipped only with `--skip-build`; verification never skips) → stage from the
+declarative layout → deterministic archive → per-artifact JSON manifest +
+`SHA256SUMS` → verify. On Linux it additionally lays out the two Debian roots
+and the AppDir; the runner then runs `dpkg-shlibdeps` / `dpkg-deb --build`,
+`packaging/appimage/build-appimage.sh` and `packaging/aur/verify-aur.sh`.
+
+### `packaging/layout.toml` is the only layout description
+
+One row per `(source → destination → product)`:
+
+| source kind | meaning |
+| --- | --- |
+| `{ built = "ccproxy" \| "CCProxyTray" }` | a release binary from `<target>/release/` |
+| `{ generated = "windows-package-json" \| "windows-default-config" }` | metadata xtask writes (no-BOM UTF-8; never a copy of a developer-local config) |
+| `{ tree = "crates/ccproxy/webui" }` | a whole directory, copied recursively |
+| `{ file = "packaging/…" }` | a single static file (systemd unit, desktop, icon, env.example) |
+
+`dest` is a forward-slash relative path inside the product; `mode` is the Unix
+mode (decimal); `targets` lists which products ship the row. The split contract
+is fixed in the file: `deb-proxy` carries proxy + WebUI + systemd + env,
+`deb-tray` carries tray + desktop + icon and `Depends: commandcode-proxy (=
+<ver>-1)`. `[deb.proxy]` / `[deb.tray]` are the single source for
+`DEBIAN/control`.
+
+`cargo xtask layout --check` (also a CI step) rejects empty fields, absolute
+or `..`/backslash destinations, duplicate destinations per target, unknown
+targets/binary/generated kinds, missing sources, empty WebUI trees, symlink
+sources, and platform-mixed paths.
+
+### Adding files
+
+- **A new WebUI asset referenced from `index.html`** → add it under
+  `crates/ccproxy/webui/` and reference it in `index.html`. It ships in every
+  product automatically; staging parses `index.html`'s local CSS/JS references
+  and fails if one is missing. No packaging edit, ever.
+- **A new packaged file** (e.g. a config snippet shipped to Linux) → add one
+  `[[entry]]` row to `packaging/layout.toml` and list the right `targets`.
+  There is no second per-file list in `Cargo.toml`, no `PKGBUILD` file list
+  (`package()` does `cp -a usr lib etc "$pkgdir/"`), and no PowerShell staging
+  script to keep in step.
+
+### Artifact names are a public contract
+
+The filenames are pinned in `xtask/src/main.rs` and by
+`crates/ccproxy/tests/dist_contract.rs`:
+
+- Windows ZIP: `commandcode-proxy-v<ver>-windows-x86_64.zip` — the updater's
+  `update::asset_suffix()` matches this suffix.
+- Linux tarball: `commandcode-proxy-<ver>-linux-x86_64.tar.gz` — **no `v`**
+  (verified against published Releases; AUR and user scripts fetch it by this
+  exact name).
+- Debs: `commandcode-proxy{,-tray}_<ver>-1_amd64.deb` (Debian policy, no `v`).
+- AppImage: `commandcode-proxy-<ver>-x86_64.AppImage`.
+
+Renaming any of these 404s existing updaters and AUR — treat them as API.
+
+### Verification before you trust a package
+
+`dist` already re-reads the produced Windows ZIP with `ccproxy::archive::read`
+and checks every entry's hash against the manifest (this is what the self-updater
+uses, so a ZIP the updater cannot open fails here). For a real release you still
+isolate-run it: unpack into a temp dir, set `CC_TRAY_NS` / `CC_TRAY_PORT` /
+`CC_DATA_DIR` / `CC_LOG_DIR` to a scratch port under `%TEMP%`, start the unpacked
+proxy and hit `/health` + `/webui/` + a CSS/JS asset, run the tray
+`--selfcheck`, then confirm every process exits and the production `:8787`
+instance is untouched.
+
 ## Project structure
 
 ```
@@ -140,22 +226,36 @@ crates/
 │   │   └── translate/       # openai.rs, anthropic_stream.rs, openai_stream.rs,
 │   │                        #   nonstream.rs, models.rs, terminal.rs, util.rs
 │   └── webui/               # Panel sources, served loose beside the exe (css/, js/, index.html)
-└── ccproxy-tray/          # The tray binary — Win32 FFI confined to win.rs/tray.rs/owner.rs
+└── ccproxy-tray/          # The tray binary — shared pure logic + platform thin adapters
     └── src/
-        ├── main.rs          # Role determination + handover loop
-        ├── win.rs           # The only unsafe surface: job objects, mutex/events,
-                              #   GetExtendedTcpTable, Shell_NotifyIcon, registry
+        ├── main.rs          # Role determination + handover loop; cfg(target_os="linux")
+        ├── tray_api.rs      # Menu model, build_menu, MockTray (shared)
+        ├── tray_view.rs     # Snapshot -> View, pure (shared)
+        ├── refresh.rs       # Refresh/push decisions, pure (shared)
         ├── owner.rs         # Handover verdict state machine (pure)
         ├── portguard.rs     # Port ownership policy (free/ours/foreign)
-        ├── process.rs       # Child supervision, log rotation, egress env
+        ├── process.rs       # Child supervision, log rotation, egress env (Windows)
         ├── tray.rs          # Menu, icon, UI state
-        └── health.rs        # /health probe for the handover gate
-build-rust.cmd             # Packaging + hot-swap publish (root; the release gate)
+        ├── supervision.rs   # Supervision/refresh policy, table-tested
+        ├── health.rs        # /health probe for the handover gate
+        ├── win.rs           # Windows-only unsafe surface: job objects, mutex/events,
+        │                    #   GetExtendedTcpTable, Shell_NotifyIcon, registry
+        └── linux/           # target_os = "linux" only: SNI tray, actions, settings,
+                             #   single-instance pid lock, log
+xtask/                     # The single packaging entrypoint (layout/stage/archive/manifest/verify/dist)
+packaging/
+├── layout.toml            # The one declarative file layout + [deb.*] metadata
+├── deb/scripts/            # preinst/postinst/prerm/postrm, copied verbatim into DEBIAN/
+├── systemd/ desktop/ icons/
+├── appimage/build-appimage.sh   # thin: downloads pinned appimagetool v12 (SHA-256) + packages AppDir
+└── aur/                   # PKGBUILD.template + verify-aur.sh (real makepkg in an Arch container)
+build-rust.cmd             # Windows hot-swap candidate publish; calls `cargo xtask stage` internally
 chaos/                     # Handover and soak scripts (manual, Python)
 docs/
 ├── DEVELOPMENT.md               # This file
 ├── RUST-REWRITE-SPEC.md         # Behaviour contract (historical spec)
 ├── ADEVIATIONS.md               # Intentional deviations from the Node version
+├── MULTIPLATFORM-BUILD-CONVERGENCE-SPEC.md   # Multiplatform build convergence (executed, see 实施状态)
 ├── adr/                         # Architecture decision records (start here for "why")
 └── archive/                     # Superseded working documents
 ```
