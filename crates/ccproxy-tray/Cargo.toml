@@ -32,10 +32,12 @@ assets = [
 ccproxy = { path = "../ccproxy" }
 serde_json = { workspace = true }
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 # zbus StatusNotifierItem 实现（零 GTK）。blocking feature 提供同步 API，
 # 避免引入 tokio 运行时（ksni readme 亦提示 zbus/tokio 依赖树的已知 panic
 # 场景——本项目无 tokio，直接走 blocking 最干净）。
+# 精确到 Linux：`cfg(unix)` 会把 macOS 等其他 Unix 也拉上 ksni，而本托盘
+# 并未在那些平台验证过。
 ksni = { version = "0.3", features = ["blocking"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -60,7 +62,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-[target.'cfg(unix)'.dev-dependencies]
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 # SNI 契约测试（linux/tray.rs 的 sni_contract_tests）：伪造 watcher + 以
 # DBus 客户端身份消费托盘。与 ksni 的 zbus 同版本，共享编译产物。
 zbus = "5"

@@ -1,8 +1,9 @@
 //! 跨平台托盘契约：平台无关的菜单模型、事件与后端 trait。
 //!
 //! 三个实现共享此契约：
-//! - Windows：`tray.rs`/`win.rs` 的 Shell_NotifyIcon 实现（现有，菜单经
-//!   `menu_entries` 构建，事件经 `Action` 枚举）；
+//! - Windows：`tray.rs`/`win.rs` 的 Shell_NotifyIcon 实现（菜单经
+//!   `tray_view::TrayView` 构建、`win_menu_entries` 翻译成 Win32 条目，
+//!   事件经 `Action` 枚举）；
 //! - Linux：`linux/tray.rs` 的 zbus StatusNotifierItem 实现（ksni，零 GTK）；
 //! - 测试：`MockTray` 记录调用序列，契约测试断言生命周期与事件转发。
 //!
@@ -178,9 +179,10 @@ pub fn menu_id_map(menu: &[MenuItem]) -> Vec<(i32, String)> {
         .collect()
 }
 
-/// 菜单模型构建：跨平台唯一来源。
+/// 菜单模型构建：跨平台唯一来源（Windows 经 `TrayView` 消费后由
+/// `win_menu_entries` 翻译为 Win32 条目）。
 ///
-/// 与 Windows `tray::menu_entries` 同构——条目集合与置灰规则保持一致：
+/// 条目集合与置灰规则两端一致：
 /// 运行中禁用"启动"、停止时禁用"停止 / 打开 WebUI"；两行缓存统计为只读
 /// 标签；版本行只读。返回平台无关模型，各后端自行转成原生菜单。
 #[must_use]

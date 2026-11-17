@@ -18,6 +18,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONDBLCLK, WM_RBUTTONUP,
 };
 
+use crate::tray_api::MenuItem;
+use crate::tray_view::{tooltip_text, TraySnapshot, TrayView};
 use crate::win::{write_wide_field, Wide};
 
 /// The callback message the shell sends for icon events.
@@ -177,12 +179,11 @@ impl UiState {
             ..Default::default()
         };
         let running = (self.running)();
-        let state = if running {
-            format!("CC Proxy — running (:{})", self.port)
-        } else {
-            "CC Proxy — stopped".to_string()
-        };
-        write_wide_field(&mut nid.szTip, &format!("{state}  v{}", self.version));
+        // Tooltip 措辞两端统一（运行带端口，停止不带）。
+        write_wide_field(
+            &mut nid.szTip,
+            &tooltip_text(running, self.port, &self.version),
+        );
         nid
     }
 
@@ -218,16 +219,10 @@ impl UiState {
 
     /// Build and run the context menu; record the choice.
     fn show_menu(&self, hwnd: HWND) {
-        let running = (self.running)();
-        let staged = (self.update)();
-        let entries = menu_entries(
-            running,
-            (self.autostart)(),
-            (self.image_compress)(),
-            &self.cache_lines(),
-            &self.version,
-            staged.as_deref(),
-        );
+        // 展开时现读所有事实（不缓存启动值），视图经 TrayView::from_snapshot
+        // 统一构建，Win32 条目由 win_menu_entries 翻译。
+        let view = TrayView::from_snapshot(&self.snapshot());
+        let entries = win_menu_entries(&view);
 
         // SAFETY: the menu handle is checked before use and destroyed on every
         // path out of this block.
@@ -272,6 +267,21 @@ impl UiState {
     /// `tray_api::cache_lines`, so Windows and Linux cannot drift apart).
     fn cache_lines(&self) -> (String, String) {
         crate::tray_api::cache_lines((self.stats)())
+    }
+
+    /// Read every live reader and assemble the platform-neutral snapshot the
+    /// view is built from. Called per right-click, so the menu reflects current
+    /// numbers rather than startup values.
+    fn snapshot(&self) -> TraySnapshot {
+        TraySnapshot {
+            running: (self.running)(),
+            autostart: (self.autostart)(),
+            image_compress: (self.image_compress)(),
+            cache: self.cache_lines(),
+            staged_version: (self.update)(),
+            version: self.version.clone(),
+            port: self.port,
+        }
     }
 }
 
@@ -328,60 +338,35 @@ unsafe fn state_of(hwnd: HWND) -> Option<&'static UiState> {
     Some(unsafe { &*(raw as *const UiState) })
 }
 
-/// The context menu, top to bottom, as `(command id, label, enabled)`.
+/// Translate the platform-neutral [`TrayView`] into the Win32 menu triples
+/// `(command id, label, enabled)` that Shell_NotifyIcon consumes.
 ///
-/// Split out of `show_menu` so the composition — which entries appear, and
-/// which are greyed — is testable without a live shell: the Win32 calls that
-/// consume it cannot run in a test.
+/// The base menu is the shared `build_menu` output, so entry order, labels and
+/// greying match Linux exactly. The one Windows-only addition is the staged-update
+/// row, inserted right after the image-compress toggle. Split out of `show_menu`
+/// so the composition stays testable without a live shell.
 #[must_use]
-pub fn menu_entries(
-    running: bool,
-    autostart: bool,
-    image_compress: bool,
-    cache: &(String, String),
-    version: &str,
-    staged_update: Option<&str>,
-) -> Vec<(usize, String, bool)> {
-    let autostart_line = if autostart {
-        "开机自启 ✓".to_string()
-    } else {
-        "开机自启".to_string()
-    };
-    let image_compress_line = if image_compress {
-        "图片压缩 ✓".to_string()
-    } else {
-        "图片压缩".to_string()
-    };
-    vec![
-        (cmd::LABEL, cache.0.clone(), false),
-        (cmd::LABEL, cache.1.clone(), false),
-        (cmd::SEPARATOR, String::new(), false),
-        (cmd::START, "启动代理".into(), !running),
-        (cmd::STOP, "停止代理".into(), running),
-        (cmd::SEPARATOR, String::new(), false),
-        // The page is served by the proxy itself, so there is nothing to open
-        // while it is stopped — greyed rather than hidden, so the option stays
-        // discoverable.
-        (cmd::OPEN_WEBUI, "打开 WebUI".into(), running),
-        (cmd::OPEN_LOG, "打开代理日志".into(), true),
-        (cmd::OPEN_TRAY_LOG, "打开托盘日志".into(), true),
-        (cmd::AUTOSTART, autostart_line, true),
-        // Toggling rewrites the exe-adjacent ccproxy.json and restarts the
-        // proxy, so the change applies without a manual stop/start.
-        (cmd::IMAGE_COMPRESS, image_compress_line, true),
-        // Only a *staged* release is actionable: the install is a local file
-        // copy plus a handover, so offering the command before the bytes are
-        // on disk would be a button that fails. Availability is shown by the
-        // WebUI page instead.
-        match staged_update {
-            Some(v) => (cmd::UPDATE, format!("重启并更新到 v{v}"), true),
-            None => (cmd::LABEL, "已是最新版本".to_string(), false),
-        },
-        (cmd::SEPARATOR, String::new(), false),
-        (cmd::QUIT, "退出（同时停止代理）".into(), true),
-        (cmd::SEPARATOR, String::new(), false),
-        (cmd::LABEL, format!("版本：{version}"), false),
-    ]
+fn win_menu_entries(view: &TrayView) -> Vec<(usize, String, bool)> {
+    let mut out = Vec::with_capacity(view.menu.len().saturating_add(1));
+    for item in &view.menu {
+        match item {
+            MenuItem::Separator => out.push((cmd::SEPARATOR, String::new(), false)),
+            MenuItem::Entry(e) => {
+                let id = usize::try_from(e.id).unwrap_or(0);
+                out.push((id, e.label.clone(), e.enabled));
+                // 暂存更新行紧跟在「图片压缩」之后、分隔线之前（历史布局）。
+                if e.id == crate::tray_api::cmd::IMAGE_COMPRESS {
+                    match &view.staged_version {
+                        Some(v) => {
+                            out.push((cmd::UPDATE, format!("重启并更新到 v{v}"), true));
+                        }
+                        None => out.push((cmd::LABEL, "已是最新版本".to_string(), false)),
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The two logomark bitmaps, built once from GDI objects.
@@ -582,9 +567,29 @@ mod tests {
         assert_ne!(cmd::LABEL, cmd::START);
     }
 
+    /// Build the Win32 menu triples the way `show_menu` does: snapshot -> view ->
+    /// adapter. Centralising the fixture here keeps every menu assertion on the
+    /// real shared composition path rather than a parallel hand-built vec.
+    fn win_entries(
+        running: bool,
+        autostart: bool,
+        image_compress: bool,
+        staged: Option<&str>,
+    ) -> Vec<(usize, String, bool)> {
+        let view = TrayView::from_snapshot(&TraySnapshot {
+            running,
+            autostart,
+            image_compress,
+            cache: ("24h 缓存率：—".to_string(), " ".to_string()),
+            staged_version: staged.map(str::to_string),
+            version: "0.7.7".to_string(),
+            port: 8787,
+        });
+        win_menu_entries(&view)
+    }
+
     fn webui_entry(running: bool) -> (String, bool) {
-        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
-        let entry = menu_entries(running, false, false, &cache, "0.5.2", None)
+        let entry = win_entries(running, false, false, None)
             .into_iter()
             .find(|(id, ..)| *id == cmd::OPEN_WEBUI)
             .expect("the WebUI entry is always present");
@@ -601,9 +606,8 @@ mod tests {
     fn every_action_in_the_menu_has_an_entry() {
         // A menu that silently loses an entry is how "打开 WebUI" would go
         // missing again; every actionable id must appear exactly once.
-        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
         for (running, autostart) in [(true, true), (true, false), (false, true), (false, false)] {
-            let ids: Vec<usize> = menu_entries(running, autostart, false, &cache, "0.5.2", None)
+            let ids: Vec<usize> = win_entries(running, autostart, false, None)
                 .into_iter()
                 .map(|(id, ..)| id)
                 .collect();
@@ -631,8 +635,7 @@ mod tests {
         // The proxy log and the tray log live in different directories; the
         // whole point of splitting them is that a user can open either. If a
         // later edit collapses them, this names the regression.
-        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
-        let entries = menu_entries(true, false, false, &cache, "0.6.2", None);
+        let entries = win_entries(true, false, false, None);
         let label = |id: usize| {
             entries
                 .iter()
@@ -648,9 +651,8 @@ mod tests {
     fn the_image_compress_entry_carries_the_checkmark_state() {
         // Same convention as 开机自启: the ✓ is the only state display the
         // menu has, so it must track the setting both ways.
-        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
         let label = |on: bool| {
-            menu_entries(true, false, on, &cache, "0.7.2", None)
+            win_entries(true, false, on, None)
                 .into_iter()
                 .find(|(id, ..)| *id == cmd::IMAGE_COMPRESS)
                 .map(|(_, text, _)| text)
@@ -665,8 +667,7 @@ mod tests {
         // The menu must not offer "update" before the bytes are on disk: the
         // install is a local copy plus a handover, so an early entry would be
         // a button that fails. Detection alone shows a greyed line.
-        let cache = ("24h 缓存率：—".to_string(), " ".to_string());
-        let idle = menu_entries(true, false, false, &cache, "0.7.7", None);
+        let idle = win_entries(true, false, false, None);
         assert!(
             idle.iter().all(|(id, ..)| *id != cmd::UPDATE),
             "no UPDATE command before staging"
@@ -677,7 +678,7 @@ mod tests {
             "the idle state is still visible as a greyed line"
         );
 
-        let ready = menu_entries(true, false, false, &cache, "0.7.7", Some("0.8.0"));
+        let ready = win_entries(true, false, false, Some("0.8.0"));
         let entry = ready
             .iter()
             .find(|(id, ..)| *id == cmd::UPDATE)

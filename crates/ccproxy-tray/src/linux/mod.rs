@@ -2,7 +2,7 @@
 //! 平台动作（xdg-open / XDG autostart / 代理启停）。
 //!
 //! 与 Windows 侧（`win.rs`/`process.rs`/`settings.rs` 等）平行，二者共享
-//! `tray_api` 契约。本模块只在 `cfg(unix)` 下编译。
+//! `tray_api` 契约。本模块只在 `target_os = "linux"` 下编译。
 
 pub mod actions;
 pub mod log;

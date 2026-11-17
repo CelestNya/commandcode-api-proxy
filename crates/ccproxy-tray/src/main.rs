@@ -31,7 +31,7 @@
 )]
 
 mod health;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod linux;
 #[cfg(windows)]
 mod owner;
@@ -39,6 +39,11 @@ mod owner;
 mod portguard;
 #[cfg(windows)]
 mod process;
+// 刷新决策是纯函数：Linux 后台轮询线程是它唯一的生产调用方（Windows 展开
+// 菜单时现读，不跑轮询）。在 Windows 上它只被本模块的纯函数测试引用，故非
+// 测试编译下豁免 dead_code（与 tray_api 同模式）。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod refresh;
 #[cfg(windows)]
 mod settings;
 #[cfg(windows)]
@@ -47,8 +52,11 @@ mod supervision;
 mod tray;
 // `tray_api` is the Linux-side contract layer; on Windows nothing outside the
 // tests references it, so silence dead-code there without relaxing it on Linux.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod tray_api;
+// Platform-independent view composition (Snapshot -> View) and refresh
+// decisions. Compiled on every supported target; contains no platform I/O.
+mod tray_view;
 #[cfg(windows)]
 mod win;
 
@@ -76,9 +84,16 @@ fn install_root() -> PathBuf {
 fn main() {
     #[cfg(windows)]
     windows_main();
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     linux_main();
 }
+
+/// 托盘只在 Windows 与 Linux 上构建。其他 Unix（macOS 等）目前不在本期范围：
+/// 这里给出明确编译错误，而不是悄悄编出一个空 `main`（`cfg(unix)` 会把
+/// macOS 错配到 Linux 的 ksni 路径上）。需要在别的平台跑时，直接用 `ccproxy`
+/// CLI 服务，不必带托盘。
+#[cfg(not(any(windows, target_os = "linux")))]
+compile_error!("ccproxy-tray 仅支持 Windows 与 Linux；其他平台请直接使用 ccproxy CLI 运行服务。");
 
 #[cfg(windows)]
 fn windows_main() {
@@ -618,9 +633,9 @@ fn fatal(log: &process::LogFile, message: &str) {
 
 /// Linux 入口：托盘经 zbus StatusNotifierItem（ksni）呈现，代理作为独立
 /// 服务由 CLI 启停（无 Job Object / 交接协议——Linux 服务化更标准）。
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn linux_main() {
-    use tray_api::{build_menu, TrayBackend, TrayStatus};
+    use tray_api::TrayBackend;
 
     let port = linux::settings::instance_port();
     // Arc：事件回调（'static 闭包）与主线程共享日志句柄。
@@ -641,32 +656,28 @@ fn linux_main() {
     };
     log.debug(&format!("[tray] 代理二进制：{}", proxy.display()));
 
-    // 初始状态：探测 /health（不主动拉起服务——菜单里启动）。
+    // 初始状态：探测 /health（不主动拉起服务——菜单里启动）。视图经
+    // TrayView::from_snapshot 统一构建（与 Windows 同一处）；Linux 无暂存
+    // 更新，staged_version 恒为 None，不在菜单里伪造更新动作。
     let running = health::port_serving(port, None);
-    let status = if running {
-        TrayStatus::Running
-    } else {
-        TrayStatus::Stopped
-    };
-    let state_word = if running { "running" } else { "stopped" };
-    let tooltip = format!(
-        "Commandcode Proxy — {state_word} (:{port}) v{}",
-        env!("CARGO_PKG_VERSION")
-    );
-    log.info(&format!("[tray] 端口 {port} 状态：{state_word}"));
-
-    // 顶部两行是真实计费统计（此前写死占位符，托盘永远显示「—」）。
-    let cache = linux_cache_lines();
-    let menu = build_menu(
+    log.info(&format!(
+        "[tray] 端口 {port} 状态：{}",
+        if running { "running" } else { "stopped" }
+    ));
+    let initial = tray_view::TraySnapshot {
         running,
-        linux::settings::autostart_enabled(),
-        linux::settings::image_compress_enabled(),
-        &cache,
-        env!("CARGO_PKG_VERSION"),
-    );
-    dump_menu_ids(&menu, &log);
+        autostart: linux::settings::autostart_enabled(),
+        image_compress: linux::settings::image_compress_enabled(),
+        cache: linux_cache_lines(),
+        staged_version: None,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        port,
+    };
+    let initial_view = tray_view::TrayView::from_snapshot(&initial);
+    dump_menu_ids(&initial_view.menu, &log);
 
-    let mut tray = linux::tray::LinuxTray::new(status, menu, tooltip);
+    let mut tray =
+        linux::tray::LinuxTray::new(initial_view.status, initial_view.menu, initial_view.tooltip);
     let log_cb = std::sync::Arc::clone(&log);
     // 菜单点击后立即刷新一次（人工动作要即时反馈），其余由后台轮询负责。
     let menu_token = tray.menu_token();
@@ -691,7 +702,7 @@ fn linux_main() {
 
 /// 菜单顶部两行缓存统计：读真实计费库（$HOME/.cc-proxy/billing.db，位置由
 /// CC_DATA_DIR / CC_TRAY_NS 决定），库缺失或窗口内无数据时给可读占位。
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn linux_cache_lines() -> (String, String) {
     tray_api::cache_lines(ccproxy::billing::daily_stats(
         &ccproxy::billing::billing_dir(),
@@ -703,7 +714,7 @@ fn linux_cache_lines() -> (String, String) {
 /// ksni 的 DBusMenu id 由扁平化位置决定（根 0，分隔符占下标），菜单结构一
 /// 变就整体漂移——按位置猜测点击过一次「停止代理」，把生产停了。这里落盘
 /// 一份权威映射，人工或脚本核对时读它，而不是猜。
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn dump_menu_ids(menu: &[tray_api::MenuItem], log: &linux::log::LogFile) {
     let map: Vec<String> = tray_api::menu_id_map(menu)
         .into_iter()
@@ -724,7 +735,7 @@ fn dump_menu_ids(menu: &[tray_api::MenuItem], log: &linux::log::LogFile) {
 ///
 /// 事件回调闭包析构时发送端被丢弃，recv_timeout 返回 Disconnected，轮询线程
 /// 随之退出，不留守护线程。
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn linux_refresh_loop(
     token: linux::tray::MenuToken,
     port: u16,
@@ -734,37 +745,37 @@ fn linux_refresh_loop(
     use std::time::{Duration, Instant};
     /// 轮询周期：让外部启停（CLI / systemd）在一两秒内反映到图标上。
     const REFRESH_INTERVAL: Duration = Duration::from_millis(1500);
-    /// 缓存行限频：它随每次请求跳动，跟生命周期同频推送会把日志刷成流水账，
-    /// 也让菜单在两秒内自我重排。计数类变化最多每 5 秒推一次。
-    const CACHE_INTERVAL: Duration = Duration::from_secs(5);
 
-    // (running, cache.0, cache.1, autostart, image_compress)
-    let mut last: Option<(bool, String, String, bool, bool)> = None;
+    use refresh::{RefreshClock, RefreshOutcome, RefreshState};
+
+    let mut last: Option<RefreshState> = None;
     let mut last_push: Option<Instant> = None;
+    // 上一次 recv_timeout 是否被人工菜单动作唤醒（决定下一轮 manual_wake）。
+    let mut woke = false;
     loop {
         let running = health::port_serving(port, None);
         let cache = linux_cache_lines();
         let autostart = linux::settings::autostart_enabled();
         let image_compress = linux::settings::image_compress_enabled();
-        let lifecycle = (running, autostart, image_compress);
-        let fingerprint = (
+        let current = RefreshState {
             running,
-            cache.0.clone(),
-            cache.1.clone(),
             autostart,
             image_compress,
-        );
-        if last.as_ref() != Some(&fingerprint) {
-            // 启停 / 勾选状态是人工动作，立刻反映；纯计数变化限频，
-            // 且只在真正推送时写日志（否则日志跟着请求流刷屏）。
-            let lifecycle_changed = last
-                .as_ref()
-                .is_none_or(|prev| (prev.0, prev.3, prev.4) != lifecycle);
-            let allowed =
-                lifecycle_changed || last_push.is_none_or(|t| t.elapsed() >= CACHE_INTERVAL);
-            if allowed {
+            cache: cache.clone(),
+        };
+        let now = Instant::now();
+        let clock = RefreshClock {
+            since_last_push: last_push.map(|t| now - t),
+            manual_wake: woke,
+            disconnected: false,
+        };
+        match refresh::decide(last.as_ref(), &current, clock) {
+            RefreshOutcome::Push => {
+                // 只在真正变化时写日志（否则日志跟着请求流刷屏）；首次探测
+                // 不在此打日志（启动时已打端口状态行）。生命周期变化记 info，
+                // 纯计数变化记 debug。
                 if let Some(prev) = last.as_ref() {
-                    if lifecycle_changed {
+                    if prev.lifecycle() != current.lifecycle() {
                         log.info(&format!(
                             "[tray] 状态刷新：{} / {} / 开机自启 {} / 图片压缩 {}",
                             if running { "running" } else { "stopped" },
@@ -772,43 +783,39 @@ fn linux_refresh_loop(
                             on_off(autostart),
                             on_off(image_compress)
                         ));
-                    } else {
+                    } else if prev.cache != current.cache {
                         log.debug(&format!("[tray] 缓存行刷新：{} / {}", cache.0, cache.1));
                     }
-                    let _ = prev;
                 }
-                let status = if running {
-                    tray_api::TrayStatus::Running
-                } else {
-                    tray_api::TrayStatus::Stopped
-                };
-                let state_word = if running { "running" } else { "stopped" };
-                let tooltip = format!(
-                    "Commandcode Proxy — {state_word} (:{port}) v{}",
-                    env!("CARGO_PKG_VERSION")
-                );
-                let menu = tray_api::build_menu(
+                let snapshot = tray_view::TraySnapshot {
                     running,
                     autostart,
                     image_compress,
-                    &cache,
-                    env!("CARGO_PKG_VERSION"),
-                );
-                token.update_state(status, menu, tooltip);
-                last = Some(fingerprint);
-                last_push = Some(Instant::now());
+                    cache,
+                    staged_version: None,
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    port,
+                };
+                let view = tray_view::TrayView::from_snapshot(&snapshot);
+                // 本线程持有自己的 MenuToken——Handle::update 内部是 block_on，
+                // 绝不能在 ksni 服务线程（菜单回调）里调用。
+                token.update_state(view.status, view.menu, view.tooltip);
+                last = Some(current);
+                last_push = Some(now);
             }
+            RefreshOutcome::Skip => {}
+            RefreshOutcome::Exit => break,
         }
-        match wake.recv_timeout(REFRESH_INTERVAL) {
-            Ok(()) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        woke = match wake.recv_timeout(REFRESH_INTERVAL) {
+            Ok(()) => true,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-        }
+        };
     }
 }
 
 /// 菜单里的开 / 关用词。
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 const fn on_off(v: bool) -> &'static str {
     if v {
         "开"
@@ -818,7 +825,7 @@ const fn on_off(v: bool) -> &'static str {
 }
 
 /// Linux 菜单事件分发。
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn linux_dispatch(
     event: tray_api::TrayEvent,
     proxy: &std::path::Path,
