@@ -163,10 +163,29 @@ fn run(args: &[String]) -> Result<()> {
             )?;
 
             if platform == "linux" {
-                let proxy = deb::proxy_control(&version);
-                let tray = deb::tray_control(&version);
-                println!("proxy control:\n{}", proxy.render());
-                println!("tray control:\n{}", tray.render());
+                // Stage the two Debian roots (FHS tree + DEBIAN/control + scripts).
+                // dpkg-deb --build runs on the Linux runner; we only lay out the root.
+                let dist = xtask::workspace_root().join("dist");
+                for (target_name, package) in [
+                    ("deb-proxy", "commandcode-proxy"),
+                    ("deb-tray", "commandcode-proxy-tray"),
+                ] {
+                    let root = dist.join("deb").join(package);
+                    let staged = stage::stage(&layout, target_name, &root)?;
+                    verify::stage(target_name, &staged)?;
+                    deb::finalize_deb_root(&root, package, &version, &xtask::workspace_root())?;
+                    println!("deb root: {} ({} files)", root.display(), staged.len());
+                }
+                // Stage the AppDir (FHS tree shared with linux-portable) plus
+                // AppRun and a top-level .desktop that appimagetool requires.
+                let appdir = dist.join("appimage").join("AppDir");
+                let _ = stage::stage(&layout, "appimage", &appdir)?;
+                std::fs::write(appdir.join("AppRun"), deb::APP_RUN.as_bytes())?;
+                std::fs::write(
+                    appdir.join("commandcode-proxy.desktop"),
+                    deb::APP_DESKTOP.as_bytes(),
+                )?;
+                println!("appdir: {}", appdir.display());
             }
             println!(
                 "dist OK: {} (manifest: {}, sums: {})",

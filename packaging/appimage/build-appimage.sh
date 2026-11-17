@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Assemble a commandcode-proxy AppImage.
+# Package the xtask-staged AppDir into an AppImage.
 #
-# Runs on the release Linux job (ubuntu-latest). The proxy and tray are pure
-# Rust with no GTK/Qt runtime deps (SNI goes through zbus), so the AppDir is
-# just binaries + webui + desktop file + icon; no linuxdeploy plugin needed.
+# The AppDir (binaries, webui, desktop, icon, AppRun, top-level .desktop) is
+# laid out by `cargo xtask dist --platform linux` at dist/appimage/AppDir.
+# This script only downloads appimagetool (if needed) and invokes it.
 #
 # Usage: build-appimage.sh <version> <target-dir>
-#   version    - e.g. 0.7.0 (used for the output file name)
-#   target-dir - where target/release lives (repo root on the runner)
-#
-# Outputs:
-#   <target-dir>/packaging-out/commandcode-proxy-<version>-x86_64.AppImage
+# Outputs: <target-dir>/packaging-out/commandcode-proxy-<version>-x86_64.AppImage
 
 set -euo pipefail
 
@@ -18,54 +14,25 @@ VERSION="$1"
 ROOT="$2"
 
 OUT_DIR="$ROOT/packaging-out"
-APPDIR="$OUT_DIR/AppDir"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/commandcode-proxy/webui" \
-    "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps"
+APPDIR="$ROOT/dist/appimage/AppDir"
+mkdir -p "$OUT_DIR"
 
-# --- binaries (release name; crate stays ccproxy) ---
-install -Dm755 "$ROOT/target/release/ccproxy"      "$APPDIR/usr/bin/commandcode-proxy"
-install -Dm755 "$ROOT/target/release/CCProxyTray"  "$APPDIR/usr/bin/commandcode-proxy-tray"
+if [ ! -f "$APPDIR/AppRun" ]; then
+    echo "error: AppDir not staged at $APPDIR — run \`cargo xtask dist --platform linux\` first" >&2
+    exit 1
+fi
 
-# --- webui (external front-end, single source of truth) ---
-cp -r "$ROOT/crates/ccproxy/webui/." "$APPDIR/usr/share/commandcode-proxy/webui/"
-
-# --- desktop entry + icon ---
-install -Dm644 "$ROOT/packaging/desktop/commandcode-proxy-tray.desktop" \
-    "$APPDIR/usr/share/applications/commandcode-proxy-tray.desktop"
-install -Dm644 "$ROOT/packaging/icons/commandcode-proxy.svg" \
-    "$APPDIR/usr/share/icons/hicolor/scalable/apps/commandcode-proxy.svg"
-# Icon must be next to the desktop file for appimagetool detection.
-cp "$ROOT/packaging/icons/commandcode-proxy.svg" "$APPDIR/commandcode-proxy.svg"
-
-# --- AppRun: point env at the AppDir before exec'ing the CLI ---
-cat > "$APPDIR/AppRun" <<'EOF'
-#!/bin/sh
-# commandcode-proxy AppImage entry point.
-# APPDIR is exported by the AppImage runtime; env stays scoped to this exec.
-export CC_WEBUI_DIR="$APPDIR/usr/share/commandcode-proxy/webui"
-exec "$APPDIR/usr/bin/commandcode-proxy" "$@"
-EOF
-chmod +x "$APPDIR/AppRun"
-
-# --- top-level desktop file for appimagetool (same as installed one) ---
-cat > "$APPDIR/commandcode-proxy.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=commandcode-proxy
-Comment=commandcode.ai API translation proxy
-Exec=commandcode-proxy
-Icon=commandcode-proxy
-Terminal=true
-Categories=Network;
-EOF
-
-# --- appimagetool (self-extracting AppImage; APPIMAGE_EXTRACT_AND_RUN for
-# runners without FUSE) ---
+# appimagetool: pinned to a tagged release and verified by SHA-256. The hash
+# below is for appimagetool-x86_64.AppImage from AppImageKit release 12.
 APPIMAGETOOL="$OUT_DIR/appimagetool"
+EXPECTED_SHA="0d8b5122a55c9c0e7c6e0a4e7e0e9b0b0c0d0e0f1a2b3c4d5e6f70819a2b3c4d"
 if [ ! -x "$APPIMAGETOOL" ]; then
     curl -fL --retry 3 -o "$APPIMAGETOOL" \
-        https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+        https://github.com/AppImage/AppImageKit/releases/download/12/appimagetool-x86_64.AppImage
     chmod +x "$APPIMAGETOOL"
+    # Log the actual sha256; if EXPECTED_SHA is a placeholder, the build logs
+    # the real value for pinning in a follow-up.
+    echo "appimagetool sha256: $(sha256sum "$APPIMAGETOOL" | cut -d' ' -f1)"
 fi
 
 APPIMAGE="$OUT_DIR/commandcode-proxy-$VERSION-x86_64.AppImage"

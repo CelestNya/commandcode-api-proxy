@@ -76,29 +76,52 @@ jobs:
         run: cargo test --locked
       - name: Build release binaries
         run: cargo build --release --locked
-      - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
+      - name: Stage tarball, deb roots and AppDir via xtask
+        # `cargo xtask dist --platform linux` reads packaging/layout.toml and
+        # produces: linux-portable tar.gz + manifest + SHA256SUMS, deb-proxy
+        # and deb-tray roots under dist/deb/<pkg>/ (with DEBIAN/control and
+        # maintainer scripts), and an AppDir under dist/appimage/AppDir/.
+        run: cargo xtask dist --platform linux --skip-build
+      - name: Compute proxy Depends via dpkg-shlibdeps
+        # cargo-deb is gone; dpkg-shlibdeps walks the proxy binary's NEEDED
+        # entries and emits the runtime library deps. We splice the result into
+        # the staged DEBIAN/control (tray already declares the same-version
+        # proxy dependency statically).
+        run: |
+          set -euo pipefail
+          DEB=dist/deb/commandcode-proxy
+          # Need a minimal debian/control for dpkg-shlibdeps -e to parse.
+          DEPS=$(dpkg-shlibdeps -O -e "$DEB/usr/bin/commandcode-proxy" 2>/dev/null \
+            | sed -n 's/^shlibs:Depends=//p')
+          # dpkg-shlibdeps emits "Depends:" line; insert before Description.
+          awk -v d="Depends: $DEPS" '/^Description:/ && !done { print d; done=1 } { print }' \
+            "$DEB/DEBIAN/control" > "$DEB/DEBIAN/control.new"
+          mv "$DEB/DEBIAN/control.new" "$DEB/DEBIAN/control"
+          cat "$DEB/DEBIAN/control"
       - name: Build .deb packages
-        # cargo-deb resolves built assets against the workspace root but
-        # static assets/maintainer-scripts against each crate dir, rejecting
-        # `..` segments — so stage everything under pkg/ first.
         run: |
-          mkdir -p crates/ccproxy/pkg/systemd crates/ccproxy/pkg/scripts
-          cp packaging/systemd/commandcode-proxy.service crates/ccproxy/pkg/systemd/
-          cp packaging/deb/env.example crates/ccproxy/pkg/
-          cp packaging/deb/scripts/preinst packaging/deb/scripts/postinst \
-             packaging/deb/scripts/prerm packaging/deb/scripts/postrm crates/ccproxy/pkg/scripts/
-          mkdir -p crates/ccproxy-tray/pkg
-          cp packaging/desktop/commandcode-proxy-tray.desktop crates/ccproxy-tray/pkg/
-          cp packaging/icons/commandcode-proxy.svg crates/ccproxy-tray/pkg/
-          # cargo-deb takes a single -p; one package per crate.
-          cargo deb -p ccproxy
-          cargo deb -p ccproxy-tray
+          set -euo pipefail
+          for pkg in commandcode-proxy commandcode-proxy-tray; do
+            dpkg-deb --build "dist/deb/$pkg" "dist/$pkg.deb"
+            dpkg-deb --info "dist/$pkg.deb" | head -20
+            dpkg-deb --contents "dist/$pkg.deb" | head -30
+          done
+      - name: Syntax-check maintainer scripts and systemd unit
+        run: |
+          set -euo pipefail
+          for s in preinst postinst prerm postrm; do
+            bash -n "dist/deb/commandcode-proxy/DEBIAN/$s"
+          done
+          if command -v systemd-analyze >/dev/null 2>&1; then
+            systemd-analyze verify dist/deb/commandcode-proxy/usr/lib/systemd/system/commandcode-proxy.service
+          else
+            echo "systemd-analyze unavailable; skipping (container has no systemd)"
+          fi
       - name: Build AppImage
-        run: |
-          VER=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          bash packaging/appimage/build-appimage.sh "$VER" "$GITHUB_WORKSPACE"
-      - name: Build AUR source tarball + render/verify PKGBUILD
+        # AppDir was staged by xtask; this script only adds appimagetool and
+        # packages it. No per-file binary/webui copies happen here.
+        run: bash packaging/appimage/build-appimage.sh "$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)" "$GITHUB_WORKSPACE"
+      - name: Render PKGBUILD and verify AUR
         run: |
           VER=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           bash packaging/aur/build-tarball.sh "$VER" "$GITHUB_WORKSPACE"
@@ -107,13 +130,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux
-          # only the real deliverables: pkg/ and *.pkg.tar.zst are makepkg
-          # intermediates owned by the container builder (640/700 perms the
-          # runner cannot read for zip creation)
+          # Only final deliverables: tar.gz, two .deb, AppImage, PKGBUILD,
+          # .SRCINFO. Never dist/deb roots, AppDir, stage/ or pkg/ intermediates.
           path: |
-            target/debian/*.deb
+            dist/commandcode-proxy-v*-linux-x86_64.tar.gz
+            dist/commandcode-proxy-v*-linux-x86_64.tar.gz.manifest.json
+            dist/commandcode-proxy-v*-linux-x86_64.tar.gz.SHA256SUMS
+            dist/commandcode-proxy.deb
+            dist/commandcode-proxy-tray.deb
             packaging-out/commandcode-proxy-*.AppImage
-            packaging-out/commandcode-proxy-*-linux-x86_64.tar.gz
             packaging-out/PKGBUILD
             packaging-out/.SRCINFO
           if-no-files-found: error
@@ -138,8 +163,11 @@ jobs:
           make_latest: true
           files: |
             dist/windows/commandcode-proxy-v*.zip
-            dist/linux/target/debian/*.deb
+            dist/linux/dist/commandcode-proxy-v*-linux-x86_64.tar.gz
+            dist/linux/dist/commandcode-proxy-v*-linux-x86_64.tar.gz.manifest.json
+            dist/linux/dist/commandcode-proxy-v*-linux-x86_64.tar.gz.SHA256SUMS
+            dist/linux/dist/commandcode-proxy.deb
+            dist/linux/dist/commandcode-proxy-tray.deb
             dist/linux/packaging-out/commandcode-proxy-*.AppImage
-            dist/linux/packaging-out/commandcode-proxy-*-linux-x86_64.tar.gz
             dist/linux/packaging-out/PKGBUILD
             dist/linux/packaging-out/.SRCINFO

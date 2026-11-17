@@ -283,83 +283,80 @@ fn the_release_workflow_publishes_both_platform_asset_names() {
         release.contains("linux-x86_64.tar.gz"),
         "release.yml no longer publishes the linux tar.gz asset name"
     );
-    // The two .deb packages are built one per crate.
+    // The two .deb packages are built by xtask staging + dpkg-deb --build.
     assert!(
-        release.contains("cargo deb -p ccproxy") && release.contains("cargo deb -p ccproxy-tray"),
+        release.contains("dpkg-deb --build")
+            && release.contains("commandcode-proxy.deb")
+            && release.contains("commandcode-proxy-tray.deb"),
         "release.yml must build both commandcode-proxy and commandcode-proxy-tray debs"
     );
 }
 
 #[test]
 fn the_linux_debs_split_into_proxy_and_tray_packages() {
-    let proxy_deb = read("crates/ccproxy/Cargo.toml");
-    let tray_deb = read("crates/ccproxy-tray/Cargo.toml");
+    // The split is now declared in packaging/layout.toml (deb-proxy vs deb-tray
+    // targets), not in per-crate Cargo.toml metadata.
+    let layout = read("packaging/layout.toml");
 
-    // Proxy package: the FHS proxy binary, the WebUI tree, the systemd unit
-    // and the env example — and nothing from the tray side.
+    // Proxy target: FHS proxy binary, WebUI tree, systemd unit, env.example.
     assert!(
-        proxy_deb.contains("name = \"commandcode-proxy\""),
-        "proxy deb package name must be commandcode-proxy"
+        layout.contains("deb-proxy"),
+        "layout must declare a deb-proxy target"
     );
     assert!(
-        proxy_deb.contains("usr/bin/commandcode-proxy"),
+        layout.contains("usr/bin/commandcode-proxy"),
         "proxy deb must ship /usr/bin/commandcode-proxy"
     );
     assert!(
-        proxy_deb.contains("usr/share/commandcode-proxy/webui"),
+        layout.contains("usr/share/commandcode-proxy/webui"),
         "proxy deb must ship the WebUI tree"
     );
     assert!(
-        proxy_deb.contains("lib/systemd/system"),
+        layout.contains("lib/systemd/system"),
         "proxy deb must ship the systemd unit"
     );
     assert!(
-        proxy_deb.contains("etc/commandcode-proxy"),
+        layout.contains("etc/commandcode-proxy"),
         "proxy deb must ship env.example"
     );
+    // The proxy target must not list tray-only files.
+    let deb_proxy_block: String = layout
+        .lines()
+        .filter(|l| l.contains("deb-proxy") && !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        !proxy_deb.contains(".desktop"),
-        "proxy deb must not ship the tray .desktop entry"
-    );
-    assert!(
-        !proxy_deb.contains("usr/bin/commandcode-proxy-tray"),
-        "proxy deb must not ship the tray binary"
+        !deb_proxy_block.contains("commandcode-proxy-tray") && !deb_proxy_block.contains(".desktop"),
+        "proxy deb must not ship the tray binary or .desktop entry"
     );
 
-    // Tray package: the tray binary, the .desktop file and the icon, and it
-    // must declare a dependency on the proxy package. It must not carry the
-    // proxy binary, WebUI, systemd unit or env file.
+    // Tray target: tray binary, .desktop, icon; depends on same-version proxy.
     assert!(
-        tray_deb.contains("name = \"commandcode-proxy-tray\""),
-        "tray deb package name must be commandcode-proxy-tray"
+        layout.contains("deb-tray"),
+        "layout must declare a deb-tray target"
     );
     assert!(
-        tray_deb.contains("depends = \"commandcode-proxy\""),
-        "tray deb must depend on the proxy package"
-    );
-    assert!(
-        tray_deb.contains("usr/bin/commandcode-proxy-tray"),
+        layout.contains("usr/bin/commandcode-proxy-tray"),
         "tray deb must ship /usr/bin/commandcode-proxy-tray"
     );
     assert!(
-        tray_deb.contains("usr/share/applications/"),
+        layout.contains("usr/share/applications/"),
         "tray deb must ship the .desktop entry"
     );
     assert!(
-        tray_deb.contains("usr/share/icons/"),
+        layout.contains("usr/share/icons/"),
         "tray deb must ship the icon"
     );
+    let deb_tray_block: String = layout
+        .lines()
+        .filter(|l| l.contains("deb-tray") && !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        !tray_deb.contains("webui"),
-        "tray deb must not ship the WebUI tree"
-    );
-    assert!(
-        !tray_deb.contains("systemd"),
-        "tray deb must not ship the systemd unit"
-    );
-    assert!(
-        !tray_deb.contains("env.example"),
-        "tray deb must not ship the env file"
+        !deb_tray_block.contains("webui")
+            && !deb_tray_block.contains("systemd")
+            && !deb_tray_block.contains("env.example"),
+        "tray deb must not ship WebUI, systemd unit or env file"
     );
 }
 
