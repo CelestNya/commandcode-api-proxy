@@ -1,0 +1,87 @@
+# Single declarative description of what files land in every product.
+#
+# One row per (source -> destination -> product). Version, target dir and repo
+# root are injected by xtask; they are not repeated here.
+#
+# Fields:
+#   source = { built = "ccproxy" | "CCProxyTray" }          a release binary
+#   source = { generated = "windows-package-json"           a metadata file xtask writes
+#                        | "windows-default-config" }
+#   source = { tree = "crates/ccproxy/webui" }             a whole directory (recursive)
+#   source = { file = "packaging/.../x" }                    a single static file
+#   dest   = relative forward-slash path inside the product
+#   mode   = optional Unix mode (decimal: 755=493, 644=420, 640=416)
+#   targets = which products ship this row
+#
+# Split contract: deb-proxy carries proxy + WebUI + systemd + env only; deb-tray
+# carries tray + desktop + icon only and depends on the proxy package.
+
+# ---- Windows portable ZIP ----
+
+[[entry]]
+source = { built = "CCProxyTray" }
+dest = "CCProxyTray.exe"
+targets = ["windows-portable"]
+
+[[entry]]
+source = { built = "ccproxy" }
+dest = "service/ccproxy.exe"
+targets = ["windows-portable"]
+
+[[entry]]
+source = { generated = "windows-package-json" }
+dest = "package.json"
+targets = ["windows-portable"]
+
+[[entry]]
+source = { generated = "windows-default-config" }
+dest = "service/ccproxy.json"
+targets = ["windows-portable"]
+
+[[entry]]
+source = { tree = "crates/ccproxy/webui" }
+dest = "service/webui"
+targets = ["windows-portable"]
+
+# ---- Shared Linux FHS entries ----
+
+[[entry]]
+source = { built = "ccproxy" }
+dest = "usr/bin/commandcode-proxy"
+mode = 493
+targets = ["linux-portable", "deb-proxy", "appimage"]
+
+[[entry]]
+source = { built = "CCProxyTray" }
+dest = "usr/bin/commandcode-proxy-tray"
+mode = 493
+targets = ["linux-portable", "deb-tray", "appimage"]
+
+[[entry]]
+source = { tree = "crates/ccproxy/webui" }
+dest = "usr/share/commandcode-proxy/webui"
+targets = ["linux-portable", "deb-proxy", "appimage"]
+
+[[entry]]
+source = { file = "packaging/systemd/commandcode-proxy.service" }
+dest = "lib/systemd/system/commandcode-proxy.service"
+mode = 420
+targets = ["linux-portable", "deb-proxy"]
+
+[[entry]]
+source = { file = "packaging/deb/env.example" }
+dest = "etc/commandcode-proxy/env.example"
+mode = 416
+targets = ["linux-portable", "deb-proxy"]
+
+[[entry]]
+source = { file = "packaging/desktop/commandcode-proxy-tray.desktop" }
+dest = "usr/share/applications/commandcode-proxy-tray.desktop"
+mode = 420
+targets = ["linux-portable", "deb-tray", "appimage"]
+
+[[entry]]
+source = { file = "packaging/icons/commandcode-proxy.svg" }
+dest = "usr/share/icons/hicolor/scalable/apps/commandcode-proxy.svg"
+mode = 420
+targets = ["linux-portable", "deb-tray", "appimage"]

@@ -1,0 +1,3 @@
+# `cargo xtask <cmd>` runs the workspace packaging entry point (xtask/).
+[alias]
+xtask = "run --package xtask --"

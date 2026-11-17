@@ -1,0 +1,25 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Declarative staging, archive, manifest and verify entry point for cc-proxy releases"
+
+# xtask is a development tool, never shipped in a release artifact. It links
+# the ccproxy library only to reuse `ccproxy::archive::read` (the updater's
+# own strict ZIP reader) and `ccproxy::webui_site::referenced_files` — never to
+# reimplement them.
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+ccproxy = { path = "../crates/ccproxy" }
+flate2 = "1.1"
+sha2 = "0.10"
+tar = "0.4"
+crc32fast = "1"

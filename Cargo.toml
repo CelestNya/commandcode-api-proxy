@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/ccproxy", "crates/ccproxy-tray"]
+members = ["crates/ccproxy", "crates/ccproxy-tray", "xtask"]
+# Ordinary `cargo build`/`cargo test` must not build the dev toolchain: it is a
+# packaging entry point invoked explicitly as `cargo xtask ...`.
+default-members = ["crates/ccproxy", "crates/ccproxy-tray"]
 
 [workspace.package]
 edition = "2021"
