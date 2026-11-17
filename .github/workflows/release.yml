@@ -244,11 +244,11 @@ jobs:
         run: |
           VER=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           bash packaging/aur/build-tarball.sh "$VER" "$GITHUB_WORKSPACE"
+          # verify-aur.sh runs makepkg in an archlinux container and emits both
+          # .SRCINFO and a non-dot SRCINFO copy inside the container (the host
+          # runner cannot create files in packaging-out afterwards: the container
+          # chowns /out to builder).
           bash packaging/aur/verify-aur.sh "$VER" "$GITHUB_WORKSPACE"
-          # softprops/action-gh-release and upload-artifact both skip dotfiles by
-          # default; ship a non-dot copy as the Release attachment. The canonical
-          # .SRCINFO stays in packaging-out for the human AUR push.
-          cp packaging-out/.SRCINFO packaging-out/SRCINFO
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -39,10 +39,19 @@ docker run --rm -v "$OUT_DIR:/out" archlinux:latest bash -euo pipefail -c '
         set -euo pipefail
         # verification build resolves the source to the local tarball
         cp PKGBUILD.verify PKGBUILD
+        # Note: archlinux:latest ships a fakerooot that prints
+        # 'libfakeroot internal error: payload not recognized!' on some
+        # runners; makepkg continues and produces a valid pkg.tar.zst.
+        # Treated as known noise, not a failure.
         makepkg -f
         # .SRCINFO must describe the REAL package (GitHub URL) for the AUR
         cp PKGBUILD.real PKGBUILD
         makepkg --printsrcinfo > .SRCINFO
+        # Also emit a non-dot copy: actions/upload-artifact and
+        # softprops/action-gh-release both skip dotfiles by default, and
+        # /out is chowned to builder inside this container so the host runner
+        # cannot create a sibling file afterwards.
+        cp .SRCINFO SRCINFO
     "
     # main pkg only (exclude the *-debug-* variant makepkg also emits);
     # no -q: grep must drain the pipe or tar dies with SIGPIPE (141)
@@ -51,6 +60,8 @@ docker run --rm -v "$OUT_DIR:/out" archlinux:latest bash -euo pipefail -c '
     # everything to builder; the host runner cannot rm them afterwards)
     rm -f PKGBUILD.real PKGBUILD.verify *-debug-*.pkg.tar.zst
     rm -rf pkg
+    test -s .SRCINFO && test -s SRCINFO
+    ls -la .SRCINFO SRCINFO PKGBUILD
     echo AUR-VERIFY-OK
 '
 
