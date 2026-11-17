@@ -1,16 +1,19 @@
-//! Safe staging: materialise one product target under `dist/stage/<target>`.
+//! Safe staging: materialise one product target under a tool directory.
 //!
-//! Safety rules (spec §5.2): the output directory is canonicalised and must
-//! sit inside the workspace `dist/` subtree — a passed-in repo root or drive
-//! root is refused. Copying and deletion use Rust fs APIs, never a shell. The
-//! staged tree contains only what the layout names: no logs, no billing
-//! database, no `selfcheck.log`, and default configs written fresh (never a
-//! copy of the developer's local `ccproxy.json`).
+//! Safety rules (spec §5.2): the output must be one of two workspace-internal
+//! trees — `<workspace>/dist/**` (CI archives) or `<workspace>/release/**`
+//! (build-rust.cmd hot-swap candidate). Any other destination — repo source
+//! dirs like `crates/`, `docs/`, `packaging/`, the workspace root, a drive
+//! root, a path outside the workspace, or one containing `..` — is refused
+//! before anything is deleted. Copying and deletion use Rust fs APIs, never a
+//! shell. The staged tree contains only what the layout names: no logs, no
+//! billing database, no `selfcheck.log`, and default configs written fresh
+//! (never a copy of the developer's local `ccproxy.json`).
 
 use std::path::{Path, PathBuf};
 
 use crate::layout::{dir_read_recursively, Entry, Layout, Source};
-use crate::{ensure_inside, workspace_root, DistError, Result};
+use crate::{workspace_root, DistError, Result};
 
 /// Stage one target into `out_dir` and return the list of staged relative
 /// files (forward-slash, sorted).
@@ -19,23 +22,19 @@ pub fn stage(layout: &Layout, target: &str, out_dir: &Path) -> Result<Vec<Staged
         return Err(DistError(format!("unknown target `{target}`")));
     }
     let root = workspace_root();
-    // The output must live somewhere inside the workspace: `dist/stage/<t>`
-    // for CI archives, or a tool directory like `release/CCProxyRust` for a
-    // local hot-swap build. We refuse the workspace root itself and anything
-    // outside it (repo root, drive root, a path that escapes via `..`); the
-    // check is done on canonicalised paths before we ever delete the target.
-    std::fs::create_dir_all(out_dir)?;
+    // Validate the destination on the path (no fs writes yet): it must be under
+    // <workspace>/dist/ or <workspace>/release/, never a source directory.
+    let candidate = ensure_tool_output(&root, out_dir)?;
+    // Only now create, canonicalise and wipe.
+    std::fs::create_dir_all(&candidate)?;
+    let canon_out = candidate
+        .canonicalize()
+        .map_err(|e| format!("cannot canonicalize output {}: {e}", candidate.display()))?;
     let canon_root = root
         .canonicalize()
         .map_err(|e| format!("cannot canonicalize workspace root {}: {e}", root.display()))?;
-    let canon_out = ensure_inside(&root, out_dir)?;
-    if canon_out == canon_root {
-        return Err(
-            "refusing to stage directly into the workspace root; choose a product subdirectory"
-                .into(),
-        );
-    }
-
+    // Symlink defense: re-check the canonical path still lives under a tool dir.
+    enforce_tool_prefix(&canon_root, &canon_out)?;
     // Wipe a previous staging run of this target, via fs APIs only.
     if canon_out.exists() {
         std::fs::remove_dir_all(&canon_out)?;
@@ -48,6 +47,69 @@ pub fn stage(layout: &Layout, target: &str, out_dir: &Path) -> Result<Vec<Staged
     }
     files.sort();
     Ok(files)
+}
+
+/// Resolve `out` against `root` (if relative) and confirm it is a permitted
+/// staging destination: `<root>/dist/**` or `<root>/release/**`. No filesystem
+/// writes; canonicalisation is deliberately deferred until after the check so
+/// a refused path never creates a stray directory.
+fn ensure_tool_output(root: &Path, out: &Path) -> Result<PathBuf> {
+    let joined = if out.is_absolute() {
+        out.to_path_buf()
+    } else {
+        root.join(out)
+    };
+    for comp in joined.components() {
+        if matches!(comp, std::path::Component::ParentDir) {
+            return Err(format!(
+                "staging path {} contains `..`; resolve it explicitly",
+                out.display()
+            )
+            .into());
+        }
+    }
+    enforce_tool_prefix(root, &joined)?;
+    Ok(joined)
+}
+
+/// Refuse any path that is not `<root>/dist/**` or `<root>/release/**`.
+/// Comparison is component-wise so the Windows verbatim (`\\?\`) prefix on a
+/// canonical root does not defeat an otherwise-correct relative path.
+fn enforce_tool_prefix(root: &Path, candidate: &Path) -> Result<()> {
+    let root_comps: Vec<_> = root.components().collect();
+    let cand_comps: Vec<_> = candidate.components().collect();
+    if cand_comps.len() < root_comps.len() + 1 {
+        return Err(format!(
+            "staging output {} is not under a tool directory of {}",
+            candidate.display(),
+            root.display()
+        )
+        .into());
+    }
+    // Match root components, tolerating a verbatim-vs-disk prefix difference.
+    for (i, rc) in root_comps.iter().enumerate() {
+        let cc = &cand_comps[i];
+        let same = match (rc, cc) {
+            (std::path::Component::Prefix(rp), std::path::Component::Prefix(cp)) => rp == cp,
+            (a, b) => a == b,
+        };
+        if !same {
+            return Err(format!(
+                "staging output {} is outside the workspace {} — refusing to touch it",
+                candidate.display(),
+                root.display()
+            )
+            .into());
+        }
+    }
+    match cand_comps[root_comps.len()] {
+        std::path::Component::Normal(name) if name == "dist" || name == "release" => Ok(()),
+        other => Err(format!(
+            "staging output {} must be under <workspace>/dist/ or <workspace>/release/ (next component is {other:?})",
+            candidate.display()
+        )
+        .into()),
+    }
 }
 
 /// One staged file: relative path (forward slashes), on-disk absolute path,
@@ -216,5 +278,82 @@ mod tests {
     #[test]
     fn zip_method_constant_is_deflate() {
         assert_eq!(DEFLATE_METHOD, 8);
+    }
+
+    /// Build a fake workspace in %TEMP% with dist/, release/, crates/, docs/.
+    fn fake_workspace(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("xtask-stage-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for sub in [
+            "dist",
+            "release",
+            "crates/ccproxy",
+            "docs",
+            "packaging",
+            "xtask",
+        ] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn allows_dist_and_release_subdirs_only() {
+        let root = fake_workspace("allow");
+        // Allowed.
+        for ok in [
+            "dist/stage/windows-portable",
+            "dist/stage/linux-portable",
+            "release/CCProxyRust",
+            "release/CCProxyRust-m2test",
+        ] {
+            assert!(
+                ensure_tool_output(&root, &PathBuf::from(ok)).is_ok(),
+                "{ok} should be allowed"
+            );
+        }
+        // Refused: source dirs, root, outside, `..`.
+        for bad in [
+            ".",
+            "crates/ccproxy",
+            "crates",
+            "docs",
+            "packaging",
+            "xtask",
+            "dist/../crates",
+        ] {
+            let r = ensure_tool_output(&root, &PathBuf::from(bad));
+            assert!(r.is_err(), "{bad} should be refused, got ok");
+        }
+        // Outside workspace.
+        let outside = std::env::temp_dir().join("xtask-escape-should-fail");
+        assert!(ensure_tool_output(&root, &outside).is_err());
+        // Drive root on Windows.
+        #[cfg(windows)]
+        {
+            assert!(ensure_tool_output(&root, &PathBuf::from("D:\\")).is_err());
+        }
+        // Refused paths must not have created anything.
+        assert!(root.join("crates/ccproxy").is_dir());
+        assert!(root.join("docs").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refused_target_does_not_create_directories() {
+        let root = fake_workspace("nocreate");
+        let before = root
+            .join("crates/ccproxy")
+            .metadata()
+            .unwrap()
+            .modified()
+            .unwrap();
+        let _ = ensure_tool_output(&root, &PathBuf::from("crates/ccproxy"));
+        // The source dir must still exist, untouched.
+        assert!(root.join("crates/ccproxy").is_dir());
+        // No stray staging dir created.
+        assert!(!root.join("crates/ccproxy/stage").exists());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = before;
     }
 }

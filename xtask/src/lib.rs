@@ -152,26 +152,6 @@ pub fn release_binary(name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Canonicalize `dir` and confirm it (or a required parent) sits inside
-/// `expected_root`. Used before deleting or writing an output directory so a
-/// passed-in path can never escape the workspace.
-pub fn ensure_inside(root: &Path, dir: &Path) -> Result<PathBuf> {
-    let canon_root = root
-        .canonicalize()
-        .map_err(|e| format!("cannot canonicalize workspace root {}: {e}", root.display()))?;
-    let canon_dir = dir
-        .canonicalize()
-        .map_err(|e| format!("cannot canonicalize output {}: {e}", dir.display()))?;
-    if !canon_dir.starts_with(&canon_root) {
-        return Err(DistError(format!(
-            "output {} is outside the workspace {} — refusing to touch it",
-            dir.display(),
-            canon_root.display()
-        )));
-    }
-    Ok(canon_dir)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

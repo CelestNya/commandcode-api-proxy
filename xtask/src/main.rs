@@ -6,7 +6,7 @@
 //! cargo xtask layout --check
 //! cargo xtask stage --platform <windows|linux> --target <t> --out <dir>
 //! cargo xtask archive --platform <windows|linux> --input <dir> --out <file>
-//! cargo xtask manifest --input <dir> --out <file>
+//! cargo xtask manifest --platform <w|l> --input <dir> --artifact <file> --out <file.json>
 //! cargo xtask verify --platform <windows|linux> --target <t> --input <dir> [--artifact <file>]
 //! cargo xtask dist --platform <windows|linux> [--skip-build]
 //! ```
@@ -66,11 +66,18 @@ fn run(args: &[String]) -> Result<()> {
             let input = PathBuf::from(opts.required("input")?);
             let out = PathBuf::from(opts.required("out")?);
             let platform = opts.required("platform")?;
+            let artifact_path = opts
+                .value("artifact")
+                .map(PathBuf::from)
+                .ok_or_else(|| DistError("missing required --artifact <path>".to_string()))?;
             let version = xtask::workspace_version()?;
             let files = list_staged(&input)?;
-            let bytes = manifest::write(&files, &version, &platform, "x86_64", &input)?;
-            std::fs::write(&out, bytes)?;
-            println!("wrote {}", out.display());
+            let artifact = manifest::ArtifactInfo::from_file(&artifact_path)?;
+            let sums = sums_for_manifest(&out);
+            manifest::write(
+                &files, &version, &platform, "x86_64", &artifact, &out, &sums,
+            )?;
+            println!("wrote {} (and {})", out.display(), sums.display());
             Ok(())
         }
         "verify" => {
@@ -82,8 +89,17 @@ fn run(args: &[String]) -> Result<()> {
             let files = list_staged(&input)?;
             verify::stage(&target, &files)?;
             if platform == "windows" {
-                if let Some(zip) = artifact {
-                    verify::windows_zip(&zip, &files)?;
+                if let Some(zip) = &artifact {
+                    verify::windows_zip(zip, &files)?;
+                }
+            }
+            if let Some(zip) = &artifact {
+                let sidecar = sidecar_for(zip, "manifest.json");
+                if sidecar.is_file() {
+                    let m = manifest::Manifest::read(&sidecar)?;
+                    verify::against_manifest(&files, &m, Some(zip))?;
+                } else {
+                    println!("warn: no sidecar manifest at {}", sidecar.display());
                 }
             }
             println!("verify OK for {target}");
@@ -123,25 +139,41 @@ fn run(args: &[String]) -> Result<()> {
             };
             std::fs::write(&artifact_path, bytes)?;
 
+            // Per-artifact manifest + sums (no shared SHA256SUMS between platforms).
+            let artifact = manifest::ArtifactInfo::from_file(&artifact_path)?;
+            let manifest_json = sidecar_for(&artifact_path, "manifest.json");
+            let sums = sidecar_for(&artifact_path, "SHA256SUMS");
             manifest::write(
                 &files,
                 &version,
                 &platform,
                 "x86_64",
-                &xtask::workspace_root().join("dist"),
+                &artifact,
+                &manifest_json,
+                &sums,
             )?;
 
             if platform == "windows" {
                 verify::windows_zip(&artifact_path, &files)?;
             }
-            // Also emit the debian control stanzas for the Linux split.
+            verify::against_manifest(
+                &files,
+                &manifest::Manifest::read(&manifest_json)?,
+                Some(&artifact_path),
+            )?;
+
             if platform == "linux" {
                 let proxy = deb::proxy_control(&version);
                 let tray = deb::tray_control(&version);
                 println!("proxy control:\n{}", proxy.render());
                 println!("tray control:\n{}", tray.render());
             }
-            println!("dist OK: {}", artifact_path.display());
+            println!(
+                "dist OK: {} (manifest: {}, sums: {})",
+                artifact_path.display(),
+                manifest_json.display(),
+                sums.display()
+            );
             Ok(())
         }
         other => Err(format!(
@@ -228,4 +260,23 @@ fn build_release() -> Result<()> {
         return Err("cargo build --release failed".into());
     }
     Ok(())
+}
+
+/// `<path>.<suffix>` — appended to the *full* file name, so
+/// `x.tar.gz` becomes `x.tar.gz.manifest.json` (not `x.tar.manifest.json`).
+fn sidecar_for(path: &std::path::Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{}", path.display(), suffix))
+}
+
+/// Given a manifest output path `<base>.manifest.json`, return the matching
+/// sums file `<base>.SHA256SUMS`.
+fn sums_for_manifest(manifest_out: &std::path::Path) -> PathBuf {
+    let name = manifest_out
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let base = name.strip_suffix(".manifest.json").unwrap_or(&name);
+    let mut p = manifest_out.to_path_buf();
+    p.set_file_name(format!("{base}.SHA256SUMS"));
+    p
 }
