@@ -1,55 +1,80 @@
 name: CI
 
+# Runs on push/PR to main/dev and can be triggered manually from the Actions
+# tab (workflow_dispatch) so feature branches can be gated without opening a
+# PR. Release packaging lives in release.yml; this file only proves the tree
+# builds, tests and lints on every supported OS.
+
 on:
   push:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  workflow_dispatch:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    # Ubuntu 22.04 pinned: matches the release glibc baseline (2.35) so a
+    # warning that only shows up on newer toolchains doesn't slip through.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p ccproxy
-      - run: cargo test --locked -p ccproxy
-      - run: cargo clippy --all-targets --all-features --locked -p ccproxy -- -D warnings
-      # Linux 编译实证：tray 的 zbus/ksni 后端只能在 ubuntu runner 验证
-      #（本机 Windows 无 Linux 交叉编译链）。
-      - name: Tray build (Linux compile proof)
-        run: cargo build --release --locked -p ccproxy-tray
-      - name: Tray tests (contract suite + linux units)
-        run: cargo test --locked -p ccproxy-tray
-      - name: Tray clippy
-        run: cargo clippy --all-targets --all-features --locked -p ccproxy-tray -- -D warnings
-      - run: cargo fmt --check
-      - name: Doc build (rustdoc, warnings as errors)
-        run: cargo doc --no-deps --locked -p ccproxy
+      - name: cargo fmt --check
+        run: cargo fmt --check
+      - name: cargo clippy (workspace, all targets, all features)
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: cargo test (workspace)
+        run: cargo test --workspace --locked
+      - name: cargo doc (warnings as errors)
+        run: cargo doc --workspace --no-deps --locked
         env:
           RUSTDOCFLAGS: "-D warnings"
+      - name: packaging/layout.toml --check
+        # The declarative layout is the contract for every product; validate
+        # it on every push so a malformed entry fails here, not in release.
+        run: cargo xtask layout --check
 
-  windows:
-    runs-on: windows-latest
+  native-test:
+    # Matrix: one job per OS. Builds and tests the whole workspace natively on
+    # each platform. This is where Linux-only code paths (zbus/ksni tray,
+    # unix process primitives) and Windows-only paths (Win32 tray, named mutex)
+    # actually get exercised.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build both binaries
-        run: cargo build --release --locked
-      - name: Run the full suite (proxy + tray)
-        run: cargo test --locked
+        # Cache is keyed by runner OS automatically; Windows and Linux targets
+        # never share a CARGO_TARGET_DIR.
+      - name: cargo build --release (workspace)
+        run: cargo build --release --locked --workspace
+      - name: cargo test (workspace)
+        run: cargo test --locked --workspace
 
   linux-sni-smoke:
-    # SNI 运行时契约：起私有 session bus + 伪造 StatusNotifierWatcher
-    # （扮演 Plasma 面板侧），运行真实 LinuxTray，在 DBus 上验证面板接入
-    # 托盘的完整契约——注册、属性、菜单布局、以及通过 DBusMenu 点击
-    # 「启动代理」「退出」驱动事件回调。裸 runner 上该测试自动跳过；
-    # 面板渲染本身仍需真机 KDE 目视确认。
-    runs-on: ubuntu-latest
+    # SNI runtime contract: spin up a private session bus with a fake
+    # StatusNotifierWatcher (standing in for the Plasma/GNOME panel) and run
+    # the real LinuxTray against DBus. Verifies registration, properties, menu
+    # layout and DBusMenu-driven "start proxy"/"quit" callbacks. The bare
+    # runner skips gracefully if no session bus is available; visual panel
+    # rendering still needs a real KDE session.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

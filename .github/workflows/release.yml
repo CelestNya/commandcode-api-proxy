@@ -57,8 +57,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows
-          # Only the final ZIP; dist/stage/ is an intermediate tree, never a release.
-          path: dist/commandcode-proxy-v*-windows-x86_64.zip
+          # Final ZIP plus its per-artifact manifest and SHA256SUMS. dist/stage/
+          # is an intermediate tree and must never be uploaded.
+          path: |
+            dist/commandcode-proxy-v*-windows-x86_64.zip
+            dist/commandcode-proxy-v*-windows-x86_64.zip.manifest.json
+            dist/commandcode-proxy-v*-windows-x86_64.zip.SHA256SUMS
           if-no-files-found: error
 
   linux:
@@ -204,6 +208,8 @@ jobs:
           make_latest: true
           files: |
             dist/windows/commandcode-proxy-v*.zip
+            dist/windows/commandcode-proxy-v*.zip.manifest.json
+            dist/windows/commandcode-proxy-v*.zip.SHA256SUMS
             dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz
             dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz.manifest.json
             dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz.SHA256SUMS
