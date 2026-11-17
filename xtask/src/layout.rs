@@ -61,9 +61,31 @@ impl Source {
     }
 }
 
+/// Debian package metadata declared under `[deb.<pkg>]` in layout.toml.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DebMeta {
+    pub package: String,
+    pub maintainer: String,
+    pub section: String,
+    pub priority: String,
+    pub architecture: String,
+    pub revision: String,
+    pub description: String,
+    #[serde(default)]
+    pub depends: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct LayoutFile {
     entry: Vec<Entry>,
+    #[serde(default)]
+    deb: Option<DebSection>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DebSection {
+    proxy: Option<DebMeta>,
+    tray: Option<DebMeta>,
 }
 
 /// A validated layout plus the workspace root its relative sources resolve
@@ -71,6 +93,8 @@ struct LayoutFile {
 pub struct Layout {
     pub entries: Vec<Entry>,
     pub root: PathBuf,
+    pub deb_proxy: Option<DebMeta>,
+    pub deb_tray: Option<DebMeta>,
 }
 
 impl Layout {
@@ -81,9 +105,12 @@ impl Layout {
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let parsed: LayoutFile = toml::from_str(&text)
             .map_err(|e| format!("{} is not valid TOML: {e}", path.display()))?;
+        let deb = parsed.deb.unwrap_or_default();
         let layout = Self {
             entries: parsed.entry,
             root: root.to_path_buf(),
+            deb_proxy: deb.proxy,
+            deb_tray: deb.tray,
         };
         layout.validate()?;
         Ok(layout)

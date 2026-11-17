@@ -272,23 +272,64 @@ fn the_windows_asset_name_and_picker_contract_hold() {
 #[test]
 fn the_release_workflow_publishes_both_platform_asset_names() {
     // Cross-platform anchor: whatever the build OS, the release must publish
-    // the exact names the updater matches on. Pinning the workflow text keeps
-    // a rename of either name from slipping through.
+    // the exact names the updater matches on and that existing GitHub Releases
+    // (v0.7.9–v0.7.11) already ship. These are pinned against the live assets:
+    //   Windows ZIP:  commandcode-proxy-v<ver>-windows-x86_64.zip
+    //   Linux tarball: commandcode-proxy-<ver>-linux-x86_64.tar.gz   (no `v`)
+    //   Debian pkgs:   commandcode-proxy_<ver>-1_amd64.deb
+    //                  commandcode-proxy-tray_<ver>-1_amd64.deb
+    // Renaming any of these 404s the updater and AUR PKGBUILD.
     let release = read(".github/workflows/release.yml");
     assert!(
         release.contains("windows-x86_64.zip"),
         "release.yml no longer publishes the windows .zip asset name"
     );
+    // The Linux tarball asset name must NOT contain "v<ver>": it is
+    // `commandcode-proxy-<ver>-linux-x86_64.tar.gz` (see the actual v0.7.11
+    // release). The Windows ZIP keeps its `v` prefix; do not "unify" them.
     assert!(
         release.contains("linux-x86_64.tar.gz"),
         "release.yml no longer publishes the linux tar.gz asset name"
     );
-    // The two .deb packages are built by xtask staging + dpkg-deb --build.
+    assert!(
+        !release.contains("commandcode-proxy-v*-linux-x86_64.tar.gz"),
+        "linux tarball asset name must not include a `v` prefix (matches published Releases)"
+    );
+    // Debian packages follow <pkg>_<ver>-1_amd64.deb (Debian policy, no `v`).
     assert!(
         release.contains("dpkg-deb --build")
-            && release.contains("commandcode-proxy.deb")
-            && release.contains("commandcode-proxy-tray.deb"),
-        "release.yml must build both commandcode-proxy and commandcode-proxy-tray debs"
+            && release.contains("_amd64.deb")
+            && release.contains("commandcode-proxy_")
+            && release.contains("commandcode-proxy-tray_"),
+        "release.yml must build both commandcode-proxy_*_amd64.deb and \
+         commandcode-proxy-tray_*_amd64.deb"
+    );
+}
+
+#[test]
+fn systemd_dest_is_consistent_across_layout_pkgbuild_and_workflow() {
+    // layout.toml ships the unit at `lib/systemd/system/...` (relative to the
+    // staged root). The AUR PKGBUILD and release.yml's systemd-analyze verify
+    // must reference that same relative path — not `usr/lib/systemd/system/...`
+    // which would only be true after install on a merged-/usr system.
+    let layout = read("packaging/layout.toml");
+    let pkgbuild = read("packaging/aur/PKGBUILD.template");
+    let release = read(".github/workflows/release.yml");
+
+    assert!(
+        layout.contains("lib/systemd/system/commandcode-proxy.service"),
+        "layout.toml must ship the systemd unit at lib/systemd/system/..."
+    );
+    // The PKGBUILD now uses `cp -a usr lib etc` so it does not hardcode the
+    // systemd path; but it must NOT reintroduce a usr/lib/systemd path.
+    assert!(
+        !pkgbuild.contains("usr/lib/systemd"),
+        "PKGBUILD must not hardcode usr/lib/systemd (layout ships lib/systemd)"
+    );
+    // The workflow's systemd-analyze verify must point at the staged root path.
+    assert!(
+        release.contains("dist/deb/commandcode-proxy/lib/systemd/system/commandcode-proxy.service"),
+        "release.yml systemd-analyze verify must use the layout's lib/systemd/system path"
     );
 }
 
@@ -326,7 +367,8 @@ fn the_linux_debs_split_into_proxy_and_tray_packages() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        !deb_proxy_block.contains("commandcode-proxy-tray") && !deb_proxy_block.contains(".desktop"),
+        !deb_proxy_block.contains("commandcode-proxy-tray")
+            && !deb_proxy_block.contains(".desktop"),
         "proxy deb must not ship the tray binary or .desktop entry"
     );
 

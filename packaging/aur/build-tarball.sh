@@ -14,7 +14,7 @@ ROOT="$2"
 OUT_DIR="$ROOT/packaging-out"
 mkdir -p "$OUT_DIR"
 
-SRC="$ROOT/dist/commandcode-proxy-v${VERSION}-linux-x86_64.tar.gz"
+SRC="$ROOT/dist/commandcode-proxy-${VERSION}-linux-x86_64.tar.gz"
 DST="$OUT_DIR/commandcode-proxy-${VERSION}-linux-x86_64.tar.gz"
 
 if [ ! -f "$SRC" ]; then

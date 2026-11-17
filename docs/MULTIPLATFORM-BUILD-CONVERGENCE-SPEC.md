@@ -77,8 +77,8 @@
 
 #### Linux
 
-- 通用 tarball 保持资产名 `commandcode-proxy-v<version>-linux-x86_64.tar.gz`。
-- 两个 deb 仍分为 `commandcode-proxy` 与 `commandcode-proxy-tray`，tray 依赖 proxy。
+- 通用 tarball 资产名为 `commandcode-proxy-<version>-linux-x86_64.tar.gz`（**没有 `v` 前缀**——此处在 §2.3 初稿误写为 `v<version>`，经核对 GitHub Releases v0.7.9/v0.7.10/v0.7.11 实际资产后修正；AUR PKGBUILD 与用户脚本按此名字拉取，不能再加 `v`）。
+- 两个 deb 仍分为 `commandcode-proxy_<version>-1_amd64.deb` 与 `commandcode-proxy-tray_<version>-1_amd64.deb`（Debian 命名 `pkg_ver-rev_arch.deb`，不带 `v`），tray 的 `Depends` 为 `commandcode-proxy (= <version>-1)`。
 - systemd unit 的 `User/Group`、目录、环境变量、重启与沙箱策略不变；maintainer scripts 的 install/remove/purge 语义不变。
 - AppImage 继续通过 `CC_WEBUI_DIR` 指向 AppDir 内 WebUI；无需 GTK/Qt。
 - AUR 继续只提供 `commandcode-proxy-bin` 预编译包，并由真实 `makepkg` 验证。

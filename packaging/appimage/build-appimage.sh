@@ -22,18 +22,25 @@ if [ ! -f "$APPDIR/AppRun" ]; then
     exit 1
 fi
 
-# appimagetool: pinned to a tagged release and verified by SHA-256. The hash
-# below is for appimagetool-x86_64.AppImage from AppImageKit release 12.
+# appimagetool: pinned to AppImageKit release 12 and verified by SHA-256.
+# The hash below is for appimagetool-x86_64.AppImage v12 (1,974,248 bytes,
+# pinned from a real download). A mismatch fails the build non-zero — we do
+# not silently re-vendor a different toolchain.
 APPIMAGETOOL="$OUT_DIR/appimagetool"
-EXPECTED_SHA="0d8b5122a55c9c0e7c6e0a4e7e0e9b0b0c0d0e0f1a2b3c4d5e6f70819a2b3c4d"
+EXPECTED_SHA="d918b4df547b388ef253f3c9e7f6529ca81a885395c31f619d9aaf7030499a13"
 if [ ! -x "$APPIMAGETOOL" ]; then
     curl -fL --retry 3 -o "$APPIMAGETOOL" \
         https://github.com/AppImage/AppImageKit/releases/download/12/appimagetool-x86_64.AppImage
     chmod +x "$APPIMAGETOOL"
-    # Log the actual sha256; if EXPECTED_SHA is a placeholder, the build logs
-    # the real value for pinning in a follow-up.
-    echo "appimagetool sha256: $(sha256sum "$APPIMAGETOOL" | cut -d' ' -f1)"
 fi
+ACTUAL_SHA="$(sha256sum "$APPIMAGETOOL" | cut -d' ' -f1)"
+if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+    echo "error: appimagetool sha256 mismatch" >&2
+    echo "  expected: $EXPECTED_SHA" >&2
+    echo "  actual:   $ACTUAL_SHA" >&2
+    exit 1
+fi
+echo "appimagetool sha256 OK: $ACTUAL_SHA"
 
 APPIMAGE="$OUT_DIR/commandcode-proxy-$VERSION-x86_64.AppImage"
 APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGETOOL" --no-appstream "$APPDIR" "$APPIMAGE"

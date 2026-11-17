@@ -16,6 +16,29 @@
 # Split contract: deb-proxy carries proxy + WebUI + systemd + env only; deb-tray
 # carries tray + desktop + icon only and depends on the proxy package.
 
+# ---- Debian package metadata (single source for DEBIAN/control rendering) ----
+# Version comes from workspace Cargo.toml [workspace.package]; revision is the
+# Debian epoch-like suffix appended by `dpkg-deb --build`.
+
+[deb.proxy]
+package = "commandcode-proxy"
+maintainer = "CelestNya <celestnya@users.noreply.github.com>"
+section = "net"
+priority = "optional"
+architecture = "amd64"
+revision = "1"
+description = "API translation proxy for commandcode.ai"
+
+[deb.tray]
+package = "commandcode-proxy-tray"
+maintainer = "CelestNya <celestnya@users.noreply.github.com>"
+section = "net"
+priority = "optional"
+architecture = "amd64"
+revision = "1"
+description = "System tray companion for commandcode-proxy"
+depends = "commandcode-proxy"
+
 # ---- Windows portable ZIP ----
 
 [[entry]]

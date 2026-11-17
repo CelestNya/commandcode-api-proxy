@@ -23,6 +23,29 @@ fn main() {
     }
 }
 
+/// Published artifact names.
+///
+/// These strings are the public contract: the updater (ccproxy::archive /
+/// update::asset_suffix) matches on the Windows ZIP suffix, AUR PKGBUILD and
+/// user scripts fetch the Linux tarball by name, and GitHub Releases already
+/// ship these exact filenames for v0.7.9–v0.7.11. Changing any of them 404s
+/// existing updaters. The names are derived here (and pinned by
+/// `crates/ccproxy/tests/dist_contract.rs`) so they cannot drift between
+/// xtask, CI and the AUR template.
+///
+/// Rules (verified against published Releases):
+///
+/// * Windows ZIP: `commandcode-proxy-v<ver>-windows-x86_64.zip`
+/// * Linux tarball: `commandcode-proxy-<ver>-linux-x86_64.tar.gz` (no `v`)
+/// * Debian packages: `<pkg>_<ver>-1_amd64.deb` (Debian policy, no `v`)
+/// * AppImage: `commandcode-proxy-<ver>-x86_64.AppImage`
+fn windows_zip_name(version: &str) -> String {
+    format!("commandcode-proxy-v{version}-windows-x86_64.zip")
+}
+fn linux_tarball_name(version: &str) -> String {
+    format!("commandcode-proxy-{version}-linux-x86_64.tar.gz")
+}
+
 fn run(args: &[String]) -> Result<()> {
     let cmd = args.first().map(String::as_str).unwrap_or("");
     match cmd {
@@ -115,14 +138,8 @@ fn run(args: &[String]) -> Result<()> {
                 build_release()?;
             }
             let (target, artifact_name) = match platform.as_str() {
-                "windows" => (
-                    "windows-portable",
-                    format!("commandcode-proxy-v{version}-windows-x86_64.zip"),
-                ),
-                "linux" => (
-                    "linux-portable",
-                    format!("commandcode-proxy-v{version}-linux-x86_64.tar.gz"),
-                ),
+                "windows" => ("windows-portable", windows_zip_name(&version)),
+                "linux" => ("linux-portable", linux_tarball_name(&version)),
                 other => return Err(DistError(format!("unknown platform `{other}`"))),
             };
             let out_dir = xtask::workspace_root()
@@ -173,8 +190,27 @@ fn run(args: &[String]) -> Result<()> {
                     let root = dist.join("deb").join(package);
                     let staged = stage::stage(&layout, target_name, &root)?;
                     verify::stage(target_name, &staged)?;
-                    deb::finalize_deb_root(&root, package, &version, &xtask::workspace_root())?;
-                    println!("deb root: {} ({} files)", root.display(), staged.len());
+                    deb::finalize_deb_root(
+                        &root,
+                        package,
+                        &version,
+                        &xtask::workspace_root(),
+                        layout.deb_proxy.as_ref(),
+                        layout.deb_tray.as_ref(),
+                    )?;
+                    let filename = if package == "commandcode-proxy" {
+                        layout.deb_proxy.as_ref()
+                    } else {
+                        layout.deb_tray.as_ref()
+                    }
+                    .map(|m| deb::deb_filename(m, &version))
+                    .unwrap_or_else(|| format!("{package}.deb"));
+                    println!(
+                        "deb root: {} ({} files; published as {})",
+                        root.display(),
+                        staged.len(),
+                        filename
+                    );
                 }
                 // Stage the AppDir (FHS tree shared with linux-portable) plus
                 // AppRun and a top-level .desktop that appimagetool requires.

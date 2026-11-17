@@ -1,15 +1,18 @@
 //! Debian package root assembly (spec §6.3).
 //!
 //! xtask stages the FHS tree from `packaging/layout.toml` (deb-proxy / deb-tray
-//! targets), writes `DEBIAN/control`, and copies maintainer scripts from
-//! `packaging/deb/scripts/`. The actual `dpkg-deb --build` runs on the Linux
-//! runner; this crate does not invoke dpkg. The split is fixed by the layout:
-//! `deb-proxy` carries proxy + WebUI + systemd + env, and `deb-tray` carries
-//! tray + desktop + icon and depends on the same-version proxy package.
+//! targets), writes `DEBIAN/control` from the `[deb.*]` metadata table, and
+//! copies maintainer scripts from `packaging/deb/scripts/`. The actual
+//! `dpkg-deb --build` runs on the Linux runner; this crate does not invoke
+//! dpkg. The split is fixed by the layout:
+//!
+//! * `deb-proxy` carries proxy + WebUI + systemd + env.
+//! * `deb-tray` carries tray + desktop + icon and depends on the
+//!   same-version-proxy package.
 
 use std::path::Path;
 
-use crate::{DistError, Result};
+use crate::{layout::DebMeta, DistError, Result};
 
 /// Metadata for a `DEBIAN/control` file.
 #[derive(Debug, Clone)]
@@ -42,35 +45,34 @@ impl Control {
     }
 }
 
-/// The control file for the proxy package. Depends is left for the CI step to
-/// fill via `dpkg-shlibdeps`; on Windows we just write a placeholder.
-pub fn proxy_control(version: &str) -> Control {
+/// Build a `Control` from layout metadata. The Debian version is
+/// `<upstream>-<revision>` (e.g. `0.7.11-1`); the tray's static dependency
+/// is expanded to `<depends> (= <deb-version>)`.
+pub fn control_from_meta(meta: &DebMeta, upstream_version: &str) -> Control {
+    let deb_version = format!("{upstream_version}-{}", meta.revision);
+    let depends = meta
+        .depends
+        .as_ref()
+        .map(|pkg| format!("{pkg} (= {deb_version})"));
     Control {
-        package: "commandcode-proxy".to_string(),
-        version: version.to_string(),
-        architecture: "amd64".to_string(),
-        maintainer: "CelestNya <celestnya@users.noreply.github.com>".to_string(),
-        section: "net".to_string(),
-        priority: "optional".to_string(),
-        // CI runs `dpkg-shlibdeps -O -e usr/bin/commandcode-proxy` and writes
-        // the resulting Depends: line into DEBIAN/control. Empty here.
-        depends: None,
-        description: "API translation proxy for commandcode.ai".to_string(),
+        package: meta.package.clone(),
+        version: deb_version,
+        architecture: meta.architecture.clone(),
+        maintainer: meta.maintainer.clone(),
+        section: meta.section.clone(),
+        priority: meta.priority.clone(),
+        depends,
+        description: meta.description.clone(),
     }
 }
 
-/// The control file for the tray package, depending on the same-version proxy.
-pub fn tray_control(version: &str) -> Control {
-    Control {
-        package: "commandcode-proxy-tray".to_string(),
-        version: version.to_string(),
-        architecture: "amd64".to_string(),
-        maintainer: "CelestNya <celestnya@users.noreply.github.com>".to_string(),
-        section: "net".to_string(),
-        priority: "optional".to_string(),
-        depends: Some(format!("commandcode-proxy (= {version})")),
-        description: "System tray companion for commandcode-proxy".to_string(),
-    }
+/// The published Debian binary name: `<pkg>_<deb-version>_<arch>.deb`.
+/// (Debian policy: no `v` prefix on the upstream part inside the filename.)
+pub fn deb_filename(meta: &DebMeta, upstream_version: &str) -> String {
+    format!(
+        "{}_{}-{}_{}.deb",
+        meta.package, upstream_version, meta.revision, meta.architecture
+    )
 }
 
 /// Write `DEBIAN/control` into the staged deb root, and copy maintainer scripts
@@ -79,17 +81,22 @@ pub fn tray_control(version: &str) -> Control {
 pub fn finalize_deb_root(
     root: &Path,
     package: &str,
-    version: &str,
+    upstream_version: &str,
     workspace: &Path,
+    deb_proxy: Option<&DebMeta>,
+    deb_tray: Option<&DebMeta>,
 ) -> Result<()> {
-    let debian = root.join("DEBIAN");
-    std::fs::create_dir_all(&debian)?;
-
-    let control = match package {
-        "commandcode-proxy" => proxy_control(version),
-        "commandcode-proxy-tray" => tray_control(version),
+    let meta = match package {
+        "commandcode-proxy" => deb_proxy
+            .ok_or_else(|| DistError("layout.toml is missing [deb.proxy] metadata".to_string()))?,
+        "commandcode-proxy-tray" => deb_tray
+            .ok_or_else(|| DistError("layout.toml is missing [deb.tray] metadata".to_string()))?,
         other => return Err(DistError(format!("unknown deb package `{other}`"))),
     };
+    let control = control_from_meta(meta, upstream_version);
+
+    let debian = root.join("DEBIAN");
+    std::fs::create_dir_all(&debian)?;
     std::fs::write(debian.join("control"), control.render().as_bytes())?;
 
     // Copy maintainer scripts verbatim; chmod 755 (dpkg requires them executable).
@@ -157,20 +164,56 @@ pub const APP_DESKTOP: &str = "[Desktop Entry]\nType=Application\nName=commandco
 mod tests {
     use super::*;
 
+    fn proxy_meta() -> DebMeta {
+        DebMeta {
+            package: "commandcode-proxy".into(),
+            maintainer: "CelestNya <c@e>".into(),
+            section: "net".into(),
+            priority: "optional".into(),
+            architecture: "amd64".into(),
+            revision: "1".into(),
+            description: "API translation proxy for commandcode.ai".into(),
+            depends: None,
+        }
+    }
+    fn tray_meta() -> DebMeta {
+        DebMeta {
+            package: "commandcode-proxy-tray".into(),
+            maintainer: "CelestNya <c@e>".into(),
+            section: "net".into(),
+            priority: "optional".into(),
+            architecture: "amd64".into(),
+            revision: "1".into(),
+            description: "System tray companion".into(),
+            depends: Some("commandcode-proxy".into()),
+        }
+    }
+
     #[test]
-    fn control_renders_required_fields() {
-        let c = tray_control("0.7.11");
+    fn control_renders_with_revision() {
+        let c = control_from_meta(&proxy_meta(), "0.7.11");
         let text = c.render();
-        assert!(text.contains("Package: commandcode-proxy-tray"));
-        assert!(text.contains("Version: 0.7.11"));
-        assert!(text.contains("Depends: commandcode-proxy (= 0.7.11)"));
+        assert!(text.contains("Package: commandcode-proxy"));
+        assert!(text.contains("Version: 0.7.11-1"));
         assert!(text.contains("Architecture: amd64"));
         assert!(!text.contains("\n\n"));
     }
 
     #[test]
-    fn proxy_control_has_no_tray_dependency() {
-        let c = proxy_control("0.7.11");
-        assert!(!c.render().contains("tray"));
+    fn tray_depends_on_same_debian_version() {
+        let c = control_from_meta(&tray_meta(), "0.7.11");
+        assert!(c.depends.as_deref() == Some("commandcode-proxy (= 0.7.11-1)"));
+    }
+
+    #[test]
+    fn deb_filename_follows_debian_policy() {
+        assert_eq!(
+            deb_filename(&proxy_meta(), "0.7.11"),
+            "commandcode-proxy_0.7.11-1_amd64.deb"
+        );
+        assert_eq!(
+            deb_filename(&tray_meta(), "0.7.11"),
+            "commandcode-proxy-tray_0.7.11-1_amd64.deb"
+        );
     }
 }

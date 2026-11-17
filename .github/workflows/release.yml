@@ -13,8 +13,10 @@ name: Release
 # split), so a style/script edit is picked up by a reload without a rebuild.
 #
 # Linux artifacts (see docs/LINUX-PORT-PLAN.md §5 T3.x):
-#   - .deb x2: commandcode-proxy (+ systemd unit, webui, env) and
-#     commandcode-proxy-tray (depends on the proxy)
+#   - .deb x2: commandcode-proxy_<ver>-1_amd64.deb (+ systemd unit, webui, env)
+#     and commandcode-proxy-tray_<ver>-1_amd64.deb (depends on the proxy)
+#   - Linux tarball: commandcode-proxy-<ver>-linux-x86_64.tar.gz (no `v` in the
+#     asset name, matching what existing Releases publish and AUR fetches)
 #   - AppImage: commandcode-proxy-<ver>-x86_64.AppImage
 #   - AUR source tarball + rendered PKGBUILD + .SRCINFO for
 #     commandcode-proxy-bin (precompiled)
@@ -84,27 +86,64 @@ jobs:
         run: cargo xtask dist --platform linux --skip-build
       - name: Compute proxy Depends via dpkg-shlibdeps
         # cargo-deb is gone; dpkg-shlibdeps walks the proxy binary's NEEDED
-        # entries and emits the runtime library deps. We splice the result into
-        # the staged DEBIAN/control (tray already declares the same-version
-        # proxy dependency statically).
+        # entries and emits the runtime library deps. It requires a debian/control
+        # in cwd, so we build a minimal one in a temp dir, cd there, and run it
+        # with stderr visible (the previous `2>/dev/null` hid real failures).
+        # The result is spliced into the staged DEBIAN/control (tray already
+        # declares the same-version proxy dependency statically).
         run: |
           set -euo pipefail
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
           DEB=dist/deb/commandcode-proxy
-          # Need a minimal debian/control for dpkg-shlibdeps -e to parse.
-          DEPS=$(dpkg-shlibdeps -O -e "$DEB/usr/bin/commandcode-proxy" 2>/dev/null \
-            | sed -n 's/^shlibs:Depends=//p')
-          # dpkg-shlibdeps emits "Depends:" line; insert before Description.
+          TMP="$(mktemp -d)"
+          mkdir -p "$TMP/debian"
+          cat > "$TMP/debian/control" <<EOF
+          Source: commandcode-proxy
+          Package: commandcode-proxy
+          Architecture: amd64
+          Description: dpkg-shlibdeps probe
+          EOF
+          DEPS_RAW="$(cd "$TMP" && dpkg-shlibdeps -O -e "$GITHUB_WORKSPACE/$DEB/usr/bin/commandcode-proxy")"
+          # The shlibs output must be exactly one "shlibs:Depends=..." line.
+          DEP_LINES="$(printf '%s\n' "$DEPS_RAW" | grep -c '^shlibs:Depends=' || true)"
+          test "$DEP_LINES" = "1" || { echo "expected 1 shlibs:Depends line, got $DEP_LINES" >&2; printf '%s\n' "$DEPS_RAW" >&2; exit 1; }
+          DEPS="$(printf '%s\n' "$DEPS_RAW" | sed -n 's/^shlibs:Depends=//p')"
+          test -n "$DEPS"
           awk -v d="Depends: $DEPS" '/^Description:/ && !done { print d; done=1 } { print }' \
             "$DEB/DEBIAN/control" > "$DEB/DEBIAN/control.new"
           mv "$DEB/DEBIAN/control.new" "$DEB/DEBIAN/control"
           cat "$DEB/DEBIAN/control"
+          rm -rf "$TMP"
       - name: Build .deb packages
+        # Filenames follow Debian policy: <pkg>_<ver>-1_amd64.deb (no `v`).
         run: |
           set -euo pipefail
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
           for pkg in commandcode-proxy commandcode-proxy-tray; do
-            dpkg-deb --build "dist/deb/$pkg" "dist/$pkg.deb"
-            dpkg-deb --info "dist/$pkg.deb" | head -20
-            dpkg-deb --contents "dist/$pkg.deb" | head -30
+            out="dist/${pkg}_${VER}-1_amd64.deb"
+            dpkg-deb --build "dist/deb/$pkg" "$out"
+            # Assert Package/Version/Architecture match expectations (not just head -20).
+            dpkg-deb --info "$out" | grep -q "^Package: $pkg$"
+            dpkg-deb --info "$out" | grep -q "^Version: ${VER}-1$"
+            dpkg-deb --info "$out" | grep -q "^Architecture: amd64$"
+            if [ "$pkg" = "commandcode-proxy-tray" ]; then
+              dpkg-deb --info "$out" | grep -q "^Depends: commandcode-proxy (= ${VER}-1)$"
+            fi
+            # Assert the layout's anchor files are actually inside the .deb.
+            case "$pkg" in
+              commandcode-proxy)
+                dpkg-deb --contents "$out" | grep -q "./usr/bin/commandcode-proxy$"
+                dpkg-deb --contents "$out" | grep -q "./lib/systemd/system/commandcode-proxy.service$"
+                dpkg-deb --contents "$out" | grep -q "./etc/commandcode-proxy/env.example$"
+                ;;
+              commandcode-proxy-tray)
+                dpkg-deb --contents "$out" | grep -q "./usr/bin/commandcode-proxy-tray$"
+                dpkg-deb --contents "$out" | grep -q "./usr/share/applications/commandcode-proxy-tray.desktop$"
+                ;;
+            esac
+            echo "built $out"
           done
       - name: Syntax-check maintainer scripts and systemd unit
         run: |
@@ -113,7 +152,8 @@ jobs:
             bash -n "dist/deb/commandcode-proxy/DEBIAN/$s"
           done
           if command -v systemd-analyze >/dev/null 2>&1; then
-            systemd-analyze verify dist/deb/commandcode-proxy/usr/lib/systemd/system/commandcode-proxy.service
+            # Path matches layout.toml's dest: lib/systemd/system/... (not usr/lib).
+            systemd-analyze verify dist/deb/commandcode-proxy/lib/systemd/system/commandcode-proxy.service
           else
             echo "systemd-analyze unavailable; skipping (container has no systemd)"
           fi
@@ -132,12 +172,13 @@ jobs:
           name: linux
           # Only final deliverables: tar.gz, two .deb, AppImage, PKGBUILD,
           # .SRCINFO. Never dist/deb roots, AppDir, stage/ or pkg/ intermediates.
+          # Linux tarball has no `v` in the asset filename (matches published
+          # Releases); debs follow <pkg>_<ver>-1_amd64.deb.
           path: |
-            dist/commandcode-proxy-v*-linux-x86_64.tar.gz
-            dist/commandcode-proxy-v*-linux-x86_64.tar.gz.manifest.json
-            dist/commandcode-proxy-v*-linux-x86_64.tar.gz.SHA256SUMS
-            dist/commandcode-proxy.deb
-            dist/commandcode-proxy-tray.deb
+            dist/commandcode-proxy-*-linux-x86_64.tar.gz
+            dist/commandcode-proxy-*-linux-x86_64.tar.gz.manifest.json
+            dist/commandcode-proxy-*-linux-x86_64.tar.gz.SHA256SUMS
+            dist/commandcode-proxy_*_amd64.deb
             packaging-out/commandcode-proxy-*.AppImage
             packaging-out/PKGBUILD
             packaging-out/.SRCINFO
@@ -163,11 +204,10 @@ jobs:
           make_latest: true
           files: |
             dist/windows/commandcode-proxy-v*.zip
-            dist/linux/dist/commandcode-proxy-v*-linux-x86_64.tar.gz
-            dist/linux/dist/commandcode-proxy-v*-linux-x86_64.tar.gz.manifest.json
-            dist/linux/dist/commandcode-proxy-v*-linux-x86_64.tar.gz.SHA256SUMS
-            dist/linux/dist/commandcode-proxy.deb
-            dist/linux/dist/commandcode-proxy-tray.deb
+            dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz
+            dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz.manifest.json
+            dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz.SHA256SUMS
+            dist/linux/dist/commandcode-proxy_*_amd64.deb
             dist/linux/packaging-out/commandcode-proxy-*.AppImage
             dist/linux/packaging-out/PKGBUILD
             dist/linux/packaging-out/.SRCINFO
