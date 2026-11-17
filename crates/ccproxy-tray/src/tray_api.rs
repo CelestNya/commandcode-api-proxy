@@ -118,6 +118,66 @@ impl TrayEvent {
     }
 }
 
+/// 菜单顶部两行只读缓存统计的格式化（跨平台唯一来源）。
+///
+/// Windows 每次展开菜单时现读；Linux 由后台轮询线程定期读取后刷新菜单。
+/// 库缺失 / 读失败（`None`）或统计窗口内没有请求时给可读占位，而不是留空
+/// ——「托盘读不到数据」正是这两行长期停在占位符上。
+#[must_use]
+pub fn cache_lines(stats: Option<ccproxy::billing::DailyStats>) -> (String, String) {
+    let Some(stats) = stats else {
+        return ("24h 缓存率：无数据".into(), " ".into());
+    };
+    if stats.rows == 0 {
+        return ("24h 缓存率：无数据".into(), " ".into());
+    }
+    let rate = stats
+        .cache_rate_percent()
+        .map_or_else(|| "—".to_string(), |r| format!("{r}%"));
+    (
+        format!("24h 缓存率：{rate}（{} 次）", stats.rows),
+        format!(
+            "缓存 {} / {} tokens · 输出 {}",
+            fmt_tokens(stats.cached_tokens),
+            fmt_tokens(stats.prompt_tokens),
+            fmt_tokens(stats.completion_tokens)
+        ),
+    )
+}
+
+/// 菜单里的紧凑 token 计数（`12.3k`、`1.1M`）。
+#[must_use]
+pub fn fmt_tokens(v: u64) -> String {
+    if v >= 1_000_000 {
+        format!("{:.1}M", v as f64 / 1_000_000.0)
+    } else if v >= 1000 {
+        format!("{:.1}k", v as f64 / 1000.0)
+    } else {
+        v.to_string()
+    }
+}
+
+/// 菜单条目在 DBusMenu 里的 id 清单（`id = 下标 + 1`），供日志与自动化
+/// 消费。
+///
+/// ksni 按扁平化位置分配 id（根节点 0，分隔符也占一个下标），且只有菜单
+/// **结构**变化时才会整体漂移；本文件构建的菜单形状固定，因此启动时把这份
+/// 映射写进托盘日志，自动化据此取 id，而不是猜位置——按猜测点击曾把
+/// 「停止代理」当成「打开 WebUI」。
+#[must_use]
+pub fn menu_id_map(menu: &[MenuItem]) -> Vec<(i32, String)> {
+    menu.iter()
+        .enumerate()
+        .filter_map(|(pos, item)| match item {
+            MenuItem::Entry(e) => Some((
+                i32::try_from(pos).map_or(0, |p| p.saturating_add(1)),
+                e.label.clone(),
+            )),
+            MenuItem::Separator => None,
+        })
+        .collect()
+}
+
 /// 菜单模型构建：跨平台唯一来源。
 ///
 /// 与 Windows `tray::menu_entries` 同构——条目集合与置灰规则保持一致：
@@ -473,6 +533,59 @@ mod tests {
         tray.start(Box::new(move |ev| sink.lock().unwrap().push(ev)))
             .unwrap();
         assert_eq!(*received.lock().unwrap(), vec![TrayEvent::Quit]);
+    }
+
+    #[test]
+    fn cache_lines_are_readable_without_data() {
+        // 无库 / 窗口内无请求：给可读占位，而不是空行。
+        assert_eq!(cache_lines(None).0, "24h 缓存率：无数据");
+        let empty = ccproxy::billing::DailyStats {
+            rows: 0,
+            prompt_tokens: 0,
+            cached_tokens: 0,
+            completion_tokens: 0,
+        };
+        assert_eq!(cache_lines(Some(empty)).0, "24h 缓存率：无数据");
+    }
+
+    #[test]
+    fn cache_lines_report_real_numbers() {
+        let stats = ccproxy::billing::DailyStats {
+            rows: 42,
+            prompt_tokens: 2_000_000,
+            cached_tokens: 1_800_000,
+            completion_tokens: 12_300,
+        };
+        let (rate, detail) = cache_lines(Some(stats));
+        assert_eq!(rate, "24h 缓存率：90%（42 次）");
+        assert_eq!(detail, "缓存 1.8M / 2.0M tokens · 输出 12.3k");
+    }
+
+    #[test]
+    fn menu_ids_match_dbus_menu_positions() {
+        // DBusMenu id = 扁平化下标 + 1，分隔符同样占位——契约测试与自动化
+        // 都读这份映射，避免再按「第几项」猜 id 点错条目。
+        let items = build_menu(
+            true,
+            false,
+            false,
+            &("24h 缓存率：—".into(), " ".into()),
+            "0.7.11",
+        );
+        let map = menu_id_map(&items);
+        let id_of = |label: &str| {
+            map.iter()
+                .find(|(_, l)| l == label)
+                .map(|(id, _)| *id)
+                .unwrap_or_default()
+        };
+        assert_eq!(id_of("启动代理"), 4);
+        assert_eq!(id_of("停止代理"), 5);
+        assert_eq!(id_of("打开 WebUI"), 7);
+        assert_eq!(id_of("图片压缩"), 11);
+        assert_eq!(id_of("退出（同时停止代理）"), 13);
+        // 版本行不带动作，但仍占一个下标。
+        assert_eq!(id_of("版本：0.7.11"), 15);
     }
 
     #[test]
