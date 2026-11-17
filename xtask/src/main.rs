@@ -183,6 +183,7 @@ fn run(args: &[String]) -> Result<()> {
                 // Stage the two Debian roots (FHS tree + DEBIAN/control + scripts).
                 // dpkg-deb --build runs on the Linux runner; we only lay out the root.
                 let dist = xtask::workspace_root().join("dist");
+                let mut deb_names: Vec<String> = Vec::new();
                 for (target_name, package) in [
                     ("deb-proxy", "commandcode-proxy"),
                     ("deb-tray", "commandcode-proxy-tray"),
@@ -205,6 +206,7 @@ fn run(args: &[String]) -> Result<()> {
                     }
                     .map(|m| deb::deb_filename(m, &version))
                     .unwrap_or_else(|| format!("{package}.deb"));
+                    deb_names.push(filename.clone());
                     println!(
                         "deb root: {} ({} files; published as {})",
                         root.display(),
@@ -212,6 +214,10 @@ fn run(args: &[String]) -> Result<()> {
                         filename
                     );
                 }
+                // Emit the canonical deb filenames so the release workflow does not
+                // re-derive them (and never reads the version from the git ref).
+                std::fs::write(dist.join("deb-names.txt"), deb_names.join("\n").as_bytes())?;
+                println!("wrote dist/deb-names.txt");
                 // Stage the AppDir (FHS tree shared with linux-portable) plus
                 // AppRun and a top-level .desktop that appimagetool requires.
                 let appdir = dist.join("appimage").join("AppDir");

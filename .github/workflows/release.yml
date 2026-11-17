@@ -95,10 +95,17 @@ jobs:
         # with stderr visible (the previous `2>/dev/null` hid real failures).
         # The result is spliced into the staged DEBIAN/control (tray already
         # declares the same-version proxy dependency statically).
+        #
+        # Version comes from the workspace Cargo.toml (the single source), not
+        # from github.ref_name — a dry-run on a feature branch would otherwise
+        # produce `commandcode-proxy_feat/multidist-1_amd64.deb`.
         run: |
           set -euo pipefail
-          VER="${{ github.ref_name }}"
-          VER="${VER#v}"
+          VER="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          echo "workspace version: $VER"
+          # Semver shape: MAJOR.MINOR.PATCH, optional -rcN / -betaN pre-release.
+          echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$' \
+            || { echo "error: workspace version '$VER' is not semver" >&2; exit 1; }
           DEB=dist/deb/commandcode-proxy
           TMP="$(mktemp -d)"
           mkdir -p "$TMP/debian"
@@ -108,6 +115,10 @@ jobs:
           Architecture: amd64
           Description: dpkg-shlibdeps probe
           EOF
+          # Note: dpkg-shlibdeps prints "binaries to analyze should already be
+          # installed in their package's directory" as an informational warning
+          # when invoked against an unpacked tree; it does not affect the
+          # shlibs:Depends line we splice in.
           DEPS_RAW="$(cd "$TMP" && dpkg-shlibdeps -O -e "$GITHUB_WORKSPACE/$DEB/usr/bin/commandcode-proxy")"
           # The shlibs output must be exactly one "shlibs:Depends=..." line.
           DEP_LINES="$(printf '%s\n' "$DEPS_RAW" | grep -c '^shlibs:Depends=' || true)"
@@ -120,13 +131,26 @@ jobs:
           cat "$DEB/DEBIAN/control"
           rm -rf "$TMP"
       - name: Build .deb packages
-        # Filenames follow Debian policy: <pkg>_<ver>-1_amd64.deb (no `v`).
+        # Filenames are canonicalized by `cargo xtask dist --platform linux` and
+        # written to dist/deb-names.txt (one per line). We consume that file
+        # rather than re-deriving the names here; the assertion below guarantees
+        # the workflow's expected shape matches what xtask emitted.
         run: |
           set -euo pipefail
-          VER="${{ github.ref_name }}"
-          VER="${VER#v}"
-          for pkg in commandcode-proxy commandcode-proxy-tray; do
-            out="dist/${pkg}_${VER}-1_amd64.deb"
+          VER="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$' \
+            || { echo "error: workspace version '$VER' is not semver" >&2; exit 1; }
+          test -f dist/deb-names.txt || { echo "dist/deb-names.txt missing — run xtask dist first" >&2; exit 1; }
+          # Expected filenames derived from the workspace version.
+          EXPECT_PROXY="commandcode-proxy_${VER}-1_amd64.deb"
+          EXPECT_TRAY="commandcode-proxy-tray_${VER}-1_amd64.deb"
+          GOT_PROXY="$(sed -n '1p' dist/deb-names.txt)"
+          GOT_TRAY="$(sed -n '2p' dist/deb-names.txt)"
+          test "$GOT_PROXY" = "$EXPECT_PROXY" || { echo "expected $EXPECT_PROXY, xtask reported $GOT_PROXY" >&2; exit 1; }
+          test "$GOT_TRAY" = "$EXPECT_TRAY" || { echo "expected $EXPECT_TRAY, xtask reported $GOT_TRAY" >&2; exit 1; }
+          for pair in "commandcode-proxy:$GOT_PROXY" "commandcode-proxy-tray:$GOT_TRAY"; do
+            pkg="${pair%%:*}"
+            out="dist/${pair#*:}"
             dpkg-deb --build "dist/deb/$pkg" "$out"
             # Assert Package/Version/Architecture match expectations (not just head -20).
             dpkg-deb --info "$out" | grep -q "^Package: $pkg$"
