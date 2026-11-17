@@ -51,7 +51,7 @@
 
 | 验证项 | 结果 |
 |---|---|
-| fmt / clippy / test / doc | ci.yml `quality`（ubuntu-22.04，`--locked`，`-D warnings`）+ `native-test` 双 job 全绿；Release dry-run（run `44140879436`）的 windows/linux job 也各自跑了 `cargo test --locked`。最终 ci.yml run **44143176162**（HEAD `6081917`）四个 job 全 success；本机同一 HEAD 另跑 `cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --locked --workspace`、`RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps --locked`、`cargo xtask layout --check`，均 exit 0 |
+| fmt / clippy / test / doc | ci.yml `quality`（ubuntu-22.04，`--locked`，`-D warnings`）+ `native-test` 双 job 全绿；Release dry-run（run `44140879436`）的 windows/linux job 也各自跑了 `cargo test --locked`。ci.yml 在 `6081917`（run **44143176162**）与 `06c85f8`（run **44144214122**）上各自四个 job 全 success；**代码在两处完全相同，差异只有本报告的文字**。本机同一 HEAD 另跑 `cargo fmt --check`、`cargo clippy --workspace --all-targets --all-features -- -D warnings`、`cargo test --locked --workspace`、`RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps --locked`、`cargo xtask layout --check`，均 exit 0 |
 | Windows ZIP 解包 + `ccproxy::archive::read` | xtask 在打包时回读 ZIP 并逐 entry 比对 manifest 哈希（CI 内） |
 | Windows 隔离 health/WebUI/selfcheck | **本机隔离端口 18788 实跑通过**：26 entries、顶层仅 `CCProxyTray.exe`/`package.json`/`service`、无 BOM、webui refs=21；`/health` 200（version 0.7.11）、`/webui/` 200（18096 B）、静态资源 200；tray `--selfcheck` 报 `port=18788`/`SELFCHECK_OK`；停进程后无残留；生产 8787 只读探测仍 200、未被触碰 |
 | Linux tarball 隔离 health/WebUI | **未做**：本机复检是 python 静态解包（28 entries、webui refs=21、两个二进制 0755），未在 Linux 上真正跑 proxy |
