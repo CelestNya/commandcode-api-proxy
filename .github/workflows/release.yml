@@ -202,31 +202,37 @@ jobs:
             echo "built $out"
           done
       - name: Syntax-check maintainer scripts and systemd unit
-        # bash -n on maintainer scripts, then a hermetic systemd-analyze verify
-        # against a temp root that contains ONLY our staged files. Running
-        # systemd-analyze against the runner's root makes it chase the host's
-        # netplan/snapd units and complain that /usr/bin/commandcode-proxy does
-        # not exist on the runner — neither of which is our unit's problem.
+        # bash -n on maintainer scripts, then `systemd-analyze verify` on the
+        # unit. ubuntu-22.04 ships systemd 249, where `--root` is only supported
+        # for cat-config (not verify), so we cannot sandbox resolution against
+        # a temp root. Instead: install the staged binary to /usr/bin where
+        # ExecStart points, run verify, then remove it via a trap.
+        #
+        # verify still scans the runner's own units and may emit warnings about
+        # them (e.g. snapd.service uses RestartMode, unknown to systemd 249).
+        # We filter the output for lines prefixed with our unit name
+        # (`commandcode-proxy.service:`); only those fail the step. Host noise
+        # is noted in a comment and allowed through.
         run: |
           set -euo pipefail
           for s in preinst postinst prerm postrm; do
             bash -n "dist/deb/commandcode-proxy/DEBIAN/$s"
           done
           if command -v systemd-analyze >/dev/null 2>&1; then
-            ROOT="$(mktemp -d)"
-            mkdir -p "$ROOT/usr/bin" "$ROOT/lib/systemd/system" "$ROOT/etc/commandcode-proxy"
-            install -m755 dist/deb/commandcode-proxy/usr/bin/commandcode-proxy "$ROOT/usr/bin/"
-            install -m644 dist/deb/commandcode-proxy/lib/systemd/system/commandcode-proxy.service \
-              "$ROOT/lib/systemd/system/"
-            install -m640 dist/deb/commandcode-proxy/etc/commandcode-proxy/env.example \
-              "$ROOT/etc/commandcode-proxy/"
-            # The unit argument is the path *inside* the temp root, not the
-            # host path. --root tells systemd-analyze to resolve ExecStart etc.
-            # against ROOT only, so host units are never consulted.
-            echo "--- systemd-analyze --root=$ROOT verify ---"
-            systemd-analyze --root="$ROOT" verify /lib/systemd/system/commandcode-proxy.service
-            echo "--- verify OK ---"
-            rm -rf "$ROOT"
+            sudo install -D -m755 dist/deb/commandcode-proxy/usr/bin/commandcode-proxy \
+              /usr/bin/commandcode-proxy
+            trap 'sudo rm -f /usr/bin/commandcode-proxy' EXIT
+            echo "--- systemd-analyze verify ---"
+            OUT="$(systemd-analyze verify \
+              dist/deb/commandcode-proxy/lib/systemd/system/commandcode-proxy.service 2>&1 || true)"
+            printf '%s\n' "$OUT"
+            # Anything about OUR unit is a real failure. Host-unit warnings
+            # (netplan, snapd, etc.) are ignored by design.
+            if printf '%s\n' "$OUT" | grep -E '^commandcode-proxy\.service:'; then
+              echo "error: systemd-analyze flagged our unit" >&2
+              exit 1
+            fi
+            echo "--- verify OK (host unit warnings ignored) ---"
           else
             echo "systemd-analyze unavailable; skipping (container has no systemd)"
           fi
