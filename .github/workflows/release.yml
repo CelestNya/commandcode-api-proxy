@@ -245,22 +245,31 @@ jobs:
           VER=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           bash packaging/aur/build-tarball.sh "$VER" "$GITHUB_WORKSPACE"
           bash packaging/aur/verify-aur.sh "$VER" "$GITHUB_WORKSPACE"
+          # softprops/action-gh-release and upload-artifact both skip dotfiles by
+          # default; ship a non-dot copy as the Release attachment. The canonical
+          # .SRCINFO stays in packaging-out for the human AUR push.
+          cp packaging-out/.SRCINFO packaging-out/SRCINFO
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux
           # Only final deliverables: tar.gz, two .deb, AppImage, PKGBUILD,
-          # .SRCINFO. Never dist/deb roots, AppDir, stage/ or pkg/ intermediates.
-          # Linux tarball has no `v` in the asset filename (matches published
-          # Releases); debs follow <pkg>_<ver>-1_amd64.deb.
+          # SRCINFO (non-dot copy). Never dist/deb roots, AppDir, stage/ or
+          # pkg/ intermediates. Linux tarball has no `v` in the asset filename
+          # (matches published Releases); debs follow <pkg>_<ver>-1_amd64.deb.
+          # The two debs are listed explicitly: `commandcode-proxy_*` does NOT
+          # match `commandcode-proxy-tray_*` (underscore is not a wildcard for
+          # the trailing `-tray` segment).
           path: |
             dist/commandcode-proxy-*-linux-x86_64.tar.gz
             dist/commandcode-proxy-*-linux-x86_64.tar.gz.manifest.json
             dist/commandcode-proxy-*-linux-x86_64.tar.gz.SHA256SUMS
             dist/commandcode-proxy_*_amd64.deb
+            dist/commandcode-proxy-tray_*_amd64.deb
             packaging-out/commandcode-proxy-*.AppImage
             packaging-out/PKGBUILD
-            packaging-out/.SRCINFO
+            packaging-out/SRCINFO
+          include-hidden-files: true
           if-no-files-found: error
 
   publish:
@@ -289,6 +298,7 @@ jobs:
             dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz.manifest.json
             dist/linux/dist/commandcode-proxy-*-linux-x86_64.tar.gz.SHA256SUMS
             dist/linux/dist/commandcode-proxy_*_amd64.deb
+            dist/linux/dist/commandcode-proxy-tray_*_amd64.deb
             dist/linux/packaging-out/commandcode-proxy-*.AppImage
             dist/linux/packaging-out/PKGBUILD
-            dist/linux/packaging-out/.SRCINFO
+            dist/linux/packaging-out/SRCINFO
