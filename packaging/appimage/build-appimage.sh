@@ -63,24 +63,44 @@ if [ "$SIZE" -lt 2000000 ]; then
     exit 1
 fi
 
-# List the squashfs contents. Prefer --appimage-list on the runtime; fall back
-# to unsquashfs -l; if neither is available, extract to a mktemp dir and list
-# the tree. Clean up in all branches.
+# List the squashfs contents. AppImage = ELF runtime prefix + squashfs at an
+# offset, so `unsquashfs -l <file>` without `-o <offset>` fails with "Can't
+# find a valid SQUASHFS superblock". We try, in order, and use the first one
+# that produces a non-empty listing:
+#   1. runtime --appimage-list
+#   2. unsquashfs -o "$(runtime --appimage-offset)" -l
+#   3. runtime --appimage-extract into a mktemp dir, then `find . -type f`
+# "command exists" is NOT sufficient — a command can exist and still fail
+# (e.g. unsquashfs without offset). Each branch checks its own output.
 LIST_TMP="$(mktemp)"
-if "$APPIMAGE" --appimage-list > "$LIST_TMP" 2>/dev/null; then
-    : # runtime list worked
-elif command -v unsquashfs >/dev/null 2>&1; then
-    unsquashfs -l "$APPIMAGE" > "$LIST_TMP"
+rm -f "$LIST_TMP"
+LIST_METHOD=""
+
+if "$APPIMAGE" --appimage-list > "$LIST_TMP" 2>/dev/null && [ -s "$LIST_TMP" ]; then
+    LIST_METHOD="--appimage-list"
+elif command -v unsquashfs >/dev/null 2>&1 \
+    && OFFSET="$(APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --appimage-offset 2>/dev/null)" \
+    && [ -n "$OFFSET" ] \
+    && unsquashfs -o "$OFFSET" -l "$APPIMAGE" > "$LIST_TMP" 2>/dev/null \
+    && [ -s "$LIST_TMP" ]; then
+    LIST_METHOD="unsquashfs -o $OFFSET -l"
 else
     EXTRACT_DIR="$(mktemp -d)"
-    APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --appimage-extract > /dev/null 2>&1 || true
-    # appimageruntime extracts to ./squashfs-root relative to cwd; move it.
-    if [ -d squashfs-root ]; then
-        mv squashfs-root "$EXTRACT_DIR/"
+    (cd "$EXTRACT_DIR" \
+        && APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --appimage-extract > /dev/null 2>&1) || true
+    if [ -d "$EXTRACT_DIR/squashfs-root" ]; then
+        (cd "$EXTRACT_DIR/squashfs-root" && find . -type f | sort) > "$LIST_TMP"
+        LIST_METHOD="--appimage-extract"
     fi
-    (cd "$EXTRACT_DIR" && find . -type f | sort) > "$LIST_TMP"
     rm -rf "$EXTRACT_DIR"
 fi
+
+if [ -z "$LIST_METHOD" ] || [ ! -s "$LIST_TMP" ]; then
+    echo "error: could not list AppImage contents via any method" >&2
+    rm -f "$LIST_TMP"
+    exit 1
+fi
+echo "listing method: $LIST_METHOD"
 
 need_anchor() {
     needle="$1"
