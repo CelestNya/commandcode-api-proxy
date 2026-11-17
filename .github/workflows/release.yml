@@ -202,14 +202,31 @@ jobs:
             echo "built $out"
           done
       - name: Syntax-check maintainer scripts and systemd unit
+        # bash -n on maintainer scripts, then a hermetic systemd-analyze verify
+        # against a temp root that contains ONLY our staged files. Running
+        # systemd-analyze against the runner's root makes it chase the host's
+        # netplan/snapd units and complain that /usr/bin/commandcode-proxy does
+        # not exist on the runner — neither of which is our unit's problem.
         run: |
           set -euo pipefail
           for s in preinst postinst prerm postrm; do
             bash -n "dist/deb/commandcode-proxy/DEBIAN/$s"
           done
           if command -v systemd-analyze >/dev/null 2>&1; then
-            # Path matches layout.toml's dest: lib/systemd/system/... (not usr/lib).
-            systemd-analyze verify dist/deb/commandcode-proxy/lib/systemd/system/commandcode-proxy.service
+            ROOT="$(mktemp -d)"
+            mkdir -p "$ROOT/usr/bin" "$ROOT/lib/systemd/system" "$ROOT/etc/commandcode-proxy"
+            install -m755 dist/deb/commandcode-proxy/usr/bin/commandcode-proxy "$ROOT/usr/bin/"
+            install -m644 dist/deb/commandcode-proxy/lib/systemd/system/commandcode-proxy.service \
+              "$ROOT/lib/systemd/system/"
+            install -m640 dist/deb/commandcode-proxy/etc/commandcode-proxy/env.example \
+              "$ROOT/etc/commandcode-proxy/"
+            # The unit argument is the path *inside* the temp root, not the
+            # host path. --root tells systemd-analyze to resolve ExecStart etc.
+            # against ROOT only, so host units are never consulted.
+            echo "--- systemd-analyze --root=$ROOT verify ---"
+            systemd-analyze --root="$ROOT" verify /lib/systemd/system/commandcode-proxy.service
+            echo "--- verify OK ---"
+            rm -rf "$ROOT"
           else
             echo "systemd-analyze unavailable; skipping (container has no systemd)"
           fi
