@@ -765,7 +765,10 @@ fn linux_refresh_loop(
         };
         let now = Instant::now();
         let clock = RefreshClock {
-            since_last_push: last_push.map(|t| now - t),
+            // `saturating_duration_since` avoids a panic if `t` is later than
+            // `now` (monotonic clock going backwards across suspend/resume);
+            // clippy::arithmetic_side_effects also flags bare `Instant - Instant`.
+            since_last_push: last_push.map(|t| now.saturating_duration_since(t)),
             manual_wake: woke,
             disconnected: false,
         };

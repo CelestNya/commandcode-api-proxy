@@ -233,27 +233,46 @@ fn a_windows_zip_with_a_forbidden_shape_is_rejected() {
 }
 
 #[test]
-fn the_windows_asset_name_and_picker_contract_hold() {
-    // The updater's picker is compiled for this OS; on Windows it must look
-    // for the `.zip` suffix. The published file is
-    // `commandcode-proxy-v<version>-windows-x86_64.zip`.
+fn the_asset_name_and_picker_contract_hold_on_this_platform() {
+    // The updater's picker is compiled per-OS. On Windows it looks for the
+    // `.zip` suffix; on Linux it looks for the `.tar.gz` suffix. The expected
+    // filename also differs (the Windows asset carries a `v` prefix, the Linux
+    // tarball does not — see the published v0.7.11 Release).
+    let version = ccproxy::proxy_version();
+    let (expected_suffix, expected_asset): (&str, String) = if cfg!(windows) {
+        (
+            "windows-x86_64.zip",
+            format!("commandcode-proxy-v{version}-windows-x86_64.zip"),
+        )
+    } else {
+        (
+            "linux-x86_64.tar.gz",
+            format!("commandcode-proxy-{version}-linux-x86_64.tar.gz"),
+        )
+    };
     assert_eq!(
         ccproxy::update::asset_suffix(),
-        "windows-x86_64.zip",
-        "this build is Windows; asset_suffix() must name the .zip"
+        expected_suffix,
+        "asset_suffix() must match the current platform"
     );
-    let version = ccproxy::proxy_version();
-    let expected = format!("commandcode-proxy-v{version}-windows-x86_64.zip");
 
+    // Build an asset list whose first entry matches *this* platform; the other
+    // two are the cross-platform distractors. The picker must select the one
+    // whose name ends with `expected_suffix`.
     let assets = vec![
         (
-            expected.clone(),
-            "https://example.invalid/win.zip".to_string(),
+            expected_asset.clone(),
+            "https://example.invalid/primary".to_string(),
             1,
         ),
         (
-            format!("commandcode-proxy-v{version}-linux-x86_64.tar.gz"),
-            "https://example.invalid/linux.tar.gz".to_string(),
+            // The other platform's asset — must not be picked.
+            if cfg!(windows) {
+                format!("commandcode-proxy-{version}-linux-x86_64.tar.gz")
+            } else {
+                format!("commandcode-proxy-v{version}-windows-x86_64.zip")
+            },
+            "https://example.invalid/other".to_string(),
             2,
         ),
         (
@@ -262,10 +281,10 @@ fn the_windows_asset_name_and_picker_contract_hold() {
             3,
         ),
     ];
-    let picked = ccproxy::update::pick_asset(&assets).expect("the windows asset must be picked");
+    let picked = ccproxy::update::pick_asset(&assets).expect("the matching asset must be picked");
     assert_eq!(
-        picked.0, expected,
-        "pick_asset must select the windows asset"
+        picked.0, expected_asset,
+        "pick_asset must select the asset whose suffix matches this platform"
     );
 }
 
