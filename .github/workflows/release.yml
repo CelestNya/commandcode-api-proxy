@@ -152,25 +152,53 @@ jobs:
             pkg="${pair%%:*}"
             out="dist/${pair#*:}"
             dpkg-deb --build "dist/deb/$pkg" "$out"
-            # Assert Package/Version/Architecture match expectations (not just head -20).
-            dpkg-deb --info "$out" | grep -q "^Package: $pkg$"
-            dpkg-deb --info "$out" | grep -q "^Version: ${VER}-1$"
-            dpkg-deb --info "$out" | grep -q "^Architecture: amd64$"
+
+            # Field assertions: use `dpkg-deb --field` to read the value directly
+            # (no regex, no pipe). `--info` emits indented lines that a "^Package:"
+            # grep would miss, and `grep -q` on a pipe under pipefail turns
+            # SIGPIPE (141) into a non-zero exit.
+            expect_field() {
+              got="$(dpkg-deb --field "$out" "$1")"
+              want="$2"
+              if [ "$got" != "$want" ]; then
+                echo "error: $out field $1: got='$got' expected='$want'" >&2
+                exit 1
+              fi
+            }
+            expect_field Package "$pkg"
+            expect_field Version "${VER}-1"
+            expect_field Architecture "amd64"
             if [ "$pkg" = "commandcode-proxy-tray" ]; then
-              dpkg-deb --info "$out" | grep -q "^Depends: commandcode-proxy (= ${VER}-1)$"
+              expect_field Depends "commandcode-proxy (= ${VER}-1)"
             fi
-            # Assert the layout's anchor files are actually inside the .deb.
+
+            # File-list assertions: dump --contents to a temp file first so grep
+            # reads the whole file (no SIGPIPE under pipefail). Then grep -c
+            # against the anchor paths.
+            contents="$(mktemp)"
+            dpkg-deb --contents "$out" > "$contents"
+            expect_file_in_contents() {
+              needle="$1"
+              count="$(grep -c -F "$needle" "$contents" || true)"
+              if [ "$count" != "1" ]; then
+                echo "error: $out expected exactly 1 match for '$needle', got $count" >&2
+                echo "--- contents ---" >&2
+                cat "$contents" >&2
+                exit 1
+              fi
+            }
             case "$pkg" in
               commandcode-proxy)
-                dpkg-deb --contents "$out" | grep -q "./usr/bin/commandcode-proxy$"
-                dpkg-deb --contents "$out" | grep -q "./lib/systemd/system/commandcode-proxy.service$"
-                dpkg-deb --contents "$out" | grep -q "./etc/commandcode-proxy/env.example$"
+                expect_file_in_contents "./usr/bin/commandcode-proxy"
+                expect_file_in_contents "./lib/systemd/system/commandcode-proxy.service"
+                expect_file_in_contents "./etc/commandcode-proxy/env.example"
                 ;;
               commandcode-proxy-tray)
-                dpkg-deb --contents "$out" | grep -q "./usr/bin/commandcode-proxy-tray$"
-                dpkg-deb --contents "$out" | grep -q "./usr/share/applications/commandcode-proxy-tray.desktop$"
+                expect_file_in_contents "./usr/bin/commandcode-proxy-tray"
+                expect_file_in_contents "./usr/share/applications/commandcode-proxy-tray.desktop"
                 ;;
             esac
+            rm -f "$contents"
             echo "built $out"
           done
       - name: Syntax-check maintainer scripts and systemd unit
