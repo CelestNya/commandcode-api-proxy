@@ -51,7 +51,7 @@
 
 | 验证项 | 结果 |
 |---|---|
-| fmt / clippy / test / doc | CI `quality`（ubuntu-22.04，`--locked`，`-D warnings`）+ `native-test` 双 job 全绿（dry-run run 44140879436） |
+| fmt / clippy / test / doc | ci.yml `quality`（ubuntu-22.04，`--locked`，`-D warnings`）+ `native-test` 双 job；Release dry-run（run `44140879436`）的 windows/linux job 也各自跑了 `cargo test --locked`。最终 ci.yml 在 `77423ea` 上的 run id 见 commit 后的 workflow_dispatch run（待补）。 |
 | Windows ZIP 解包 + `ccproxy::archive::read` | xtask 在打包时回读 ZIP 并逐 entry 比对 manifest 哈希（CI 内） |
 | Windows 隔离 health/WebUI/selfcheck | **本机隔离端口 18788 实跑通过**：26 entries、顶层仅 `CCProxyTray.exe`/`package.json`/`service`、无 BOM、webui refs=21；`/health` 200（version 0.7.11）、`/webui/` 200（18096 B）、静态资源 200；tray `--selfcheck` 报 `port=18788`/`SELFCHECK_OK`；停进程后无残留；生产 8787 只读探测仍 200、未被触碰 |
 | Linux tarball 隔离 health/WebUI | **未做**：本机复检是 python 静态解包（28 entries、webui refs=21、两个二进制 0755），未在 Linux 上真正跑 proxy |
@@ -65,11 +65,11 @@
 
 | artifact | 大小 | SHA-256 / 备注 |
 |---|---|---|
-| `commandcode-proxy-v0.7.11-windows-x86_64.zip` | —（windows artifact 2,988,449 B 含 zip + `.manifest.json` + `.SHA256SUMS`） | 与 `.manifest.json`/`.SHA256SUMS` 同包上传 |
+| `commandcode-proxy-v0.7.11-windows-x86_64.zip` | 2,987,417 B | `29a62cdd0845277f2603d8d87fabd5217698763714352be77470a2ac8b463032`（与该 zip `.manifest.json` 的 `artifact.sha256` 逐字一致，编排者用 Get-FileHash 复核） |
 | `commandcode-proxy-0.7.11-linux-x86_64.tar.gz` | 3,560,074 B | `adf64f33c800f9ba55969e16479dfece306d6dc5a686fc31bb9dbe9b7cff92e7`（与 manifest `artifact.sha256`、PKGBUILD/`.SRCINFO` `sha256sums` 三者一致） |
 | `commandcode-proxy_0.7.11-1_amd64.deb` | — | `Depends` 由 `dpkg-shlibdeps` 生成 |
 | `commandcode-proxy-tray_0.7.11-1_amd64.deb` | — | `Depends: commandcode-proxy (= 0.7.11-1)` |
-| `commandcode-proxy-0.7.11-x86_64.AppImage` | 约 3.7 MB | `--appimage-extract-and-run=1` 构建 |
+| `commandcode-proxy-0.7.11-x86_64.AppImage` | 3,776,488 B | `3faac24085f77475626afd01d701320b5d00998f69edc2fcca281406677a8a5c`（AppImage 无 manifest sidecar，此值由编排者对 run `44140879436` 的 artifact 直接计算） |
 | `PKGBUILD` / `SRCINFO` | — | `commandcode-proxy-bin`（非 dot `SRCINFO` 随包上传） |
 
 linux artifact 总体积 10,355,490 B。
