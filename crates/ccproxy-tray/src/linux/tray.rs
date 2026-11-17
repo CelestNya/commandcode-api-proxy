@@ -193,17 +193,22 @@ pub struct MenuToken {
 }
 
 impl MenuToken {
-    /// 用新菜单替换当前菜单并触发 SNI 刷新。
-    pub fn update_menu(&self, items: Vec<MenuItem>) {
+    /// 一次性替换状态快照（菜单 / 图标语义 / 提示）并触发 SNI 刷新。
+    ///
+    /// 必须在 **ksni 服务线程之外** 调用：ksni 的 `Handle::update` 内部是
+    /// `block_on`，在服务线程（即菜单 activate 回调）里调用会 panic。后台
+    /// 轮询线程与事件循环线程都可以安全调用。
+    pub fn update_state(&self, status: TrayStatus, items: Vec<MenuItem>, tooltip: String) {
         if let Ok(mut s) = self.state.lock() {
+            s.status = status;
             s.menu = items;
+            s.tooltip = tooltip;
         }
         let handle_guard = match self.handle.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
         if let Some(handle) = handle_guard.as_ref() {
-            // update 触发通知；闭包只读共享状态（状态已在上层更新）。
             let _ = handle.update(|_tray: &mut Snitray| {});
         }
     }
@@ -393,11 +398,11 @@ mod sni_contract_tests {
     /// 单，因此第 n 个条目的 id 就是 n+1——由 build_menu 的输出直接算出，
     /// 与 DBus 返回值交叉验证。
     fn flat_id(menu: &[crate::tray_api::MenuItem], label: &str) -> i32 {
-        let pos = menu
-            .iter()
-            .position(|m| matches!(m, crate::tray_api::MenuItem::Entry(e) if e.label == label))
-            .unwrap_or_else(|| panic!("菜单中找不到「{label}」"));
-        (pos + 1) as i32
+        crate::tray_api::menu_id_map(menu)
+            .into_iter()
+            .find(|(_, l)| l == label)
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| panic!("菜单中找不到「{label}」"))
     }
 
     #[test]

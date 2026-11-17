@@ -268,26 +268,10 @@ impl UiState {
         self.record(action_from_id(chosen));
     }
 
-    /// The two read-only lines at the top of the menu.
+    /// The two read-only lines at the top of the menu (shared formatting in
+    /// `tray_api::cache_lines`, so Windows and Linux cannot drift apart).
     fn cache_lines(&self) -> (String, String) {
-        let Some(stats) = (self.stats)() else {
-            return ("24h 缓存率：无数据".into(), " ".into());
-        };
-        if stats.rows == 0 {
-            return ("24h 缓存率：无数据".into(), " ".into());
-        }
-        let rate = stats
-            .cache_rate_percent()
-            .map_or_else(|| "—".to_string(), |r| format!("{r}%"));
-        (
-            format!("24h 缓存率：{rate}（{} 次）", stats.rows),
-            format!(
-                "缓存 {} / {} tokens · 输出 {}",
-                fmt_tokens(stats.cached_tokens),
-                fmt_tokens(stats.prompt_tokens),
-                fmt_tokens(stats.completion_tokens)
-            ),
-        )
+        crate::tray_api::cache_lines((self.stats)())
     }
 }
 
@@ -400,19 +384,7 @@ pub fn menu_entries(
     ]
 }
 
-/// Compact token counts for the menu (`12.3k`, `1.1M`).
-#[must_use]
-pub fn fmt_tokens(v: u64) -> String {
-    if v >= 1_000_000 {
-        format!("{:.1}M", v as f64 / 1_000_000.0)
-    } else if v >= 1000 {
-        format!("{:.1}k", v as f64 / 1000.0)
-    } else {
-        v.to_string()
-    }
-}
-
-/// The two coloured dots, built once from GDI objects.
+/// The two logomark bitmaps, built once from GDI objects.
 ///
 /// Drawing rather than shipping a `.ico` keeps the package to a single file and
 /// means the colour cannot go stale against the code that picks it.
@@ -572,9 +544,9 @@ mod tests {
 
     #[test]
     fn token_counts_are_abbreviated() {
-        assert_eq!(fmt_tokens(999), "999");
-        assert_eq!(fmt_tokens(1500), "1.5k");
-        assert_eq!(fmt_tokens(2_400_000), "2.4M");
+        assert_eq!(crate::tray_api::fmt_tokens(999), "999");
+        assert_eq!(crate::tray_api::fmt_tokens(1500), "1.5k");
+        assert_eq!(crate::tray_api::fmt_tokens(2_400_000), "2.4M");
     }
 
     #[test]

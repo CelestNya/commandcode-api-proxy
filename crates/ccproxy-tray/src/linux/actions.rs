@@ -102,12 +102,52 @@ pub fn toggle_image_compress(proxy: &Path, port: u16, log: &LogFile) {
     start_proxy(proxy, port, log);
 }
 
-/// 用 `xdg-open` 打开 URL 或文件路径。
+/// 依次尝试的打开器：先桌面默认（xdg-open 会按 DE 分派到 kde-open /
+/// gio），失败再直接走 KDE / GLib 的实现。
+///
+/// 注意 `gio open` 会阻塞到应用接管，只在兜底位置出现，且放在后台线程等待。
+const OPENERS: [&str; 3] = ["xdg-open", "kde-open", "gio"];
+
+/// 用系统默认应用打开 URL 或文件路径。
+///
+/// 之前只 `spawn()` 就返回、成功与否不看：子进程立刻以非零码退出（无
+/// DBus 会话、launcher 不存在、MIME 无关联）时，日志里一片安静，用户只看到
+/// 「点了没反应」。现在逐个尝试并在后台线程等待退出码，把真实结果（用了
+/// 哪个打开器、退出码）写进托盘日志，且失败时才回退到下一个。
 pub fn xdg_open(target: &str, log: &LogFile) {
-    match Command::new("xdg-open").arg(target).spawn() {
-        Ok(_) => {}
-        Err(e) => log.warn(&format!("[tray] xdg-open 失败（{target}）：{e}")),
+    for opener in OPENERS {
+        let mut cmd = Command::new(opener);
+        if opener == "gio" {
+            cmd.arg("open");
+        }
+        cmd.arg(target);
+        match cmd.spawn() {
+            Ok(mut child) => {
+                log.debug(&format!(
+                    "[tray] 打开 {target} → {opener}（pid {}）",
+                    child.id()
+                ));
+                let target = target.to_string();
+                let log = log.clone();
+                std::thread::spawn(move || match child.wait() {
+                    Ok(status) if status.success() => {
+                        log.info(&format!("[tray] 已用 {opener} 打开 {target}"));
+                    }
+                    Ok(status) => {
+                        log.warn(&format!("[tray] {opener} 打开 {target} 失败（{status}）"));
+                    }
+                    Err(e) => log.warn(&format!("[tray] 等待 {opener} 退出失败（{target}）：{e}")),
+                });
+                return;
+            }
+            Err(e) => {
+                log.warn(&format!("[tray] 无法执行 {opener}（{target}）：{e}"));
+            }
+        }
     }
+    log.error(&format!(
+        "[tray] 所有打开器都不可用，未能打开 {target}（菜单「打开 WebUI」需要桌面会话）"
+    ));
 }
 
 /// 打开代理日志（文件不存在则先创建，与 Windows 行为一致）。
