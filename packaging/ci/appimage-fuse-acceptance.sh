@@ -44,6 +44,10 @@ fail() {
 }
 ok() { echo "STEP ok: $1"; }
 
+# set -e 下任何未处理的非零退出都会让日志停在上一行；ERR trap 保证失败始终
+# 带一个可定位的行号锚点。
+trap 'rc=$?; echo "STEP fail: uncaught-error (rc=$rc at line ${BASH_LINENO[0]})" >&2' ERR
+
 [ -f "$APPIMAGE" ] || fail "appimage-exists" "no file at $APPIMAGE"
 # artifact 下载可能丢失可执行位；补上但记录原始模式，避免掩盖打包问题。
 ORIG_MODE="$(stat -c '%a' "$APPIMAGE")"
@@ -127,7 +131,11 @@ ok "appimage-mount ($MOUNT_POINT)"
 # 别处再执行，这一条会失败。
 test -x "$MOUNT_POINT/usr/bin/commandcode-proxy" \
     || fail "bundled-binary" "$MOUNT_POINT/usr/bin/commandcode-proxy not executable"
-ok "bundled-binary"
+# AppRun 由 xtask 写入 AppDir 根：它必须带执行位，否则 runtime 会以
+# `execv error: Permission denied` 启动失败（这条只有真跑 AppImage 才暴露）。
+[ -x "$MOUNT_POINT/AppRun" ] \
+    || fail "bundled-binary" "$MOUNT_POINT/AppRun is not executable (xtask must chmod it 0755)"
+ok "bundled-binary (proxy + AppRun executable)"
 
 # ---- 3. 服务可用性 ----
 wait_http() {

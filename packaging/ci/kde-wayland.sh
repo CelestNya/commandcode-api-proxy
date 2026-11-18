@@ -60,8 +60,8 @@ cleanup() {
     for pid in ${PIDS[@]:-}; do
         kill -9 "$pid" 2>/dev/null || true
     done
-    # 兜底：按命令行匹配本会话拉起的残留（限定我们的 socket 名）。
-    pkill -f "kwin_wayland.*${WAYLAND_SOCKET_NAME:-wayland-cc}" 2>/dev/null || true
+    # 兜底：按命令行匹配本会话拉起的残留（虚拟后端是唯一身份特征）。
+    pkill -f 'kwin_wayland --virtual' 2>/dev/null || true
     pkill -f 'plasmashell' 2>/dev/null || true
     pkill -f 'kded[56]?' 2>/dev/null || true
 }
@@ -177,26 +177,40 @@ chmod 0700 "$XDG_RUNTIME_DIR"
 # 否则无 GPU 的 runner 上 kwin 起不来。
 export LIBGL_ALWAYS_SOFTWARE=1
 
-# --virtual：无头虚拟输出；--no-lockscreen：避免锁屏挡住托盘区；
-# --socket 接收的是 socket **名**（文件落在 $XDG_RUNTIME_DIR 下），传绝对路径
-# 会让 KWin 在 XDG_RUNTIME_DIR 里再造一层同名目录，socket 断言必然失败。
+# --virtual：无头虚拟输出；--no-lockscreen：避免锁屏挡住托盘区。
+# 不传 --socket：KWin 会用默认名（wayland-0）监听，同名 socket 已存在时自己
+# 顺延；与其猜名字，不如起完之后从 $XDG_RUNTIME_DIR 里发现它真实创建的
+# socket（首跑按名字断言就在这里误判成失败，而 kwin 其实已经在跑）。
 # 注意：不给 kwin_wayland 设 QT_QPA_PLATFORM——compositor 自己决定平台，
 # 该变量只在后面给 plasmashell/spectacle/托盘等客户端用。
-WAYLAND_SOCKET_NAME="wayland-cc"
 kwin_wayland --virtual --no-lockscreen \
-    --socket "$WAYLAND_SOCKET_NAME" \
     >"$SHOTS_DIR/kwin.log" 2>&1 &
 KWIN_PID=$!
 PIDS+=("$KWIN_PID")
 
-# 断言：Wayland socket 文件真实出现。hosted runner 可能没有 /dev/dri，
-# 渲染后端崩溃会在这里超时——如实失败并留下 kwin.log，绝不改判通过。
-if ! wait_for "kwin-socket" 30 0.5 -- test -S "$XDG_RUNTIME_DIR/$WAYLAND_SOCKET_NAME"; then
-    fail "kwin-socket" "kwin_wayland 30s 内未创建 $XDG_RUNTIME_DIR/$WAYLAND_SOCKET_NAME；见 kwin.log"
+# 断言：出现一个由 KWin 创建的真实 Wayland socket。hosted runner 可能没有
+# /dev/dri，渲染后端崩溃会在这里超时——如实失败并留下 kwin.log，绝不改判通过。
+WAYLAND_DISPLAY_NAME=""
+for ((i = 0; i < 120; i++)); do
+    for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+        if [ -S "$sock" ]; then
+            WAYLAND_DISPLAY_NAME="${sock##*/}"
+            break 2
+        fi
+    done
+    if ! kill -0 "$KWIN_PID" 2>/dev/null; then
+        ls -l "$XDG_RUNTIME_DIR" >"$SHOTS_DIR/runtime-dir.txt" 2>&1 || true
+        fail "kwin-socket" "kwin_wayland 已退出，未创建任何 wayland socket；见 kwin.log"
+    fi
+    sleep 0.5
+done
+if [ -z "$WAYLAND_DISPLAY_NAME" ]; then
+    ls -l "$XDG_RUNTIME_DIR" >"$SHOTS_DIR/runtime-dir.txt" 2>&1 || true
+    fail "kwin-socket" "60s 内 $XDG_RUNTIME_DIR 下没有 wayland-* socket；见 runtime-dir.txt 与 kwin.log"
 fi
-echo "STEP ok: kwin-socket"
+ok "kwin-socket ($WAYLAND_DISPLAY_NAME)"
 
-export WAYLAND_DISPLAY="$WAYLAND_SOCKET_NAME"
+export WAYLAND_DISPLAY="$WAYLAND_DISPLAY_NAME"
 # 客户端（plasmashell / spectacle / 托盘）走 wayland 平台插件。
 export QT_QPA_PLATFORM=wayland
 

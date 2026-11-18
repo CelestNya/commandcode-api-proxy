@@ -45,6 +45,11 @@ fail() {
 
 ok() { echo "STEP ok: $1"; }
 
+# 兜底：脚本用 set -e，任何未显式处理的非零退出都会直接终止，日志里只剩上一
+# 个 STEP ok（首跑就是这样在 MainPID 段落静默死掉的）。ERR trap 把失败行号
+# 打出来，保证「失败」永远带一个可定位的锚点。
+trap 'rc=$?; echo "STEP fail: uncaught-error (rc=$rc at line ${BASH_LINENO[0]})" >&2' ERR
+
 # ---- 0. 环境自证：这是不是完整 VM ----
 # hosted runner 是 VM（PID 1 = systemd）；容器不是。没有这一条，后面所有
 # systemctl 断言都会退化成「命令返回 0 但其实没启动任何东西」。
@@ -140,13 +145,15 @@ wait_http "http://127.0.0.1:$PORT/health" 200 45 "start-health"
 wait_http "http://127.0.0.1:$PORT/webui/" 200 15 "start-webui"
 wait_http "http://127.0.0.1:$PORT/webui/css/tokens.css" 200 15 "start-static"
 
-MAIN_PID="$($SUDO systemctl show -p MainPID --value commandcode-proxy)"
+MAIN_PID="$($SUDO systemctl show -p MainPID --value commandcode-proxy)" \
+    || fail "systemd-owns-process" "systemctl show -p MainPID exited non-zero"
+echo "  MainPID=$MAIN_PID"
 test "$MAIN_PID" != "0" || fail "systemd-owns-process" "MainPID=0"
 test -d "/proc/$MAIN_PID" || fail "systemd-owns-process" "MainPID=$MAIN_PID is not alive"
-EXE="$(readlink -f "/proc/$MAIN_PID/exe")"
+EXE="$(readlink -f "/proc/$MAIN_PID/exe" 2>/dev/null || echo "<none>")"
 test "$EXE" = "/usr/bin/commandcode-proxy" \
     || fail "systemd-owns-process" "MainPID exe=$EXE, expected /usr/bin/commandcode-proxy"
-RUN_AS="$(ps -o user= -p "$MAIN_PID" | tr -d ' ')"
+RUN_AS="$(ps -o user= -p "$MAIN_PID" 2>/dev/null | tr -d ' ' || true)"
 test "$RUN_AS" = "commandcode-proxy" \
     || fail "systemd-owns-process" "service runs as '$RUN_AS', unit says commandcode-proxy"
 ok "systemd-owns-process (pid=$MAIN_PID exe=$EXE user=$RUN_AS)"

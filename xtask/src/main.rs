@@ -223,6 +223,12 @@ fn run(args: &[String]) -> Result<()> {
                 let appdir = dist.join("appimage").join("AppDir");
                 let _ = stage::stage(&layout, "appimage", &appdir)?;
                 std::fs::write(appdir.join("AppRun"), deb::APP_RUN.as_bytes())?;
+                // The AppImage runtime execs AppRun straight out of the mounted
+                // squashfs. Written by `fs::write` it would land at mode 0644 and
+                // every launch fails with `execv error: Permission denied` — a
+                // real-run-only failure that no static check catches (found by
+                // the FUSE acceptance job). Mirror the deb maintainer scripts.
+                deb::set_executable(&appdir.join("AppRun"))?;
                 std::fs::write(
                     appdir.join("commandcode-proxy.desktop"),
                     deb::APP_DESKTOP.as_bytes(),

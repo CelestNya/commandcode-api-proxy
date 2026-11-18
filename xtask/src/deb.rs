@@ -126,7 +126,7 @@ pub fn finalize_deb_root(
 }
 
 #[cfg(unix)]
-fn set_executable(p: &Path) -> Result<()> {
+pub fn set_executable(p: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mut perm = std::fs::metadata(p)?.permissions();
     perm.set_mode(0o755);
@@ -144,7 +144,7 @@ fn set_mode_644(p: &Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn set_executable(_p: &Path) -> Result<()> {
+pub fn set_executable(_p: &Path) -> Result<()> {
     Ok(())
 }
 
