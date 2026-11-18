@@ -513,7 +513,7 @@ b_ok=0
 
 # a 或 b 任一成立即通过；日志写明哪条成立与各自原始数字。
 if [ "$a_ok" -eq 0 ] && [ "$b_ok" -eq 0 ]; then
-    echo "STEP fail: tray-menu" >&2
+    echo "STEP fail: tray-menu-popup" >&2
     echo "window: before=$before_count after=$after_count new=${#NEW_IDS[@]} new_viewable=$new_viewable" >&2
     echo "diff: changed_pixels=$changed_pixels (threshold 2000)" >&2
     dump_evidence "tray-menu"
@@ -521,7 +521,7 @@ if [ "$a_ok" -eq 0 ] && [ "$b_ok" -eq 0 ]; then
     exit 1
 fi
 
-echo "STEP ok: tray-menu | a(new_viewable=$new_viewable, before=$before_count after=$after_count) b(changed=$changed_pixels/2000) | a_ok=$a_ok b_ok=$b_ok"
+echo "STEP ok: tray-menu-popup | a(new_viewable=$new_viewable, before=$before_count after=$after_count) b(changed=$changed_pixels/2000) | a_ok=$a_ok b_ok=$b_ok"
 
 # ---------------------------------------------------------------------------
 # 10. 清理由顶部注册的 trap 负责（见 cleanup）。

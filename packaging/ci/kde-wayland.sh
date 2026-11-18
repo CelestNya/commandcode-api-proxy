@@ -428,7 +428,11 @@ sleep 4
 # ---------------------------------------------------------------------------
 # spectacle（Ubuntu 24.04 包名 kde-spectacle，可执行名仍是 spectacle）：
 # 二进制缺失直接 fail；版本号落盘便于首跑定位版本差异。
-if [ -e /dev/dri ]; then
+HAVE_RENDER_NODE=0
+for node in /dev/dri/renderD*; do
+    if [ -e "$node" ]; then HAVE_RENDER_NODE=1; break; fi
+done
+if [ "$HAVE_RENDER_NODE" -eq 1 ]; then
     command -v spectacle >/dev/null 2>&1 \
         || fail "spectacle-binary" "未找到 spectacle（安装 kde-spectacle）"
     spectacle --version >"$SHOTS_DIR/spectacle-version.log" 2>&1 || true
@@ -458,7 +462,7 @@ if [ -e /dev/dri ]; then
     fi
     echo "STEP ok: tray-pixels"
 else
-    echo "STEP skip: screenshot (no /dev/dri; KWin virtual backend 在无 render node 时截图会段错误/黑洞，KDE Bug 527906)"
+    echo "STEP skip: screenshot (no /dev/dri/renderD*; KWin virtual backend 在无 render node 时截图会段错误/黑洞，KDE Bug 527906)"
     printf '%s\n' "skip: no /dev/dri; KWin ScreenShot2 requires a render node (KDE Bug 527906)" >"$SHOTS_DIR/screenshot-unavailable.txt"
 fi
 

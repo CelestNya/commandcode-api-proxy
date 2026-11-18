@@ -210,11 +210,15 @@ jobs:
         # 约 800 KB/s，是同一批包的可达镜像。
         run: |
           set -euo pipefail
-          if [ -f /etc/apt/apt-mirrors.txt ]; then
-            sudo sed -i -E 's#http(s)?://[^ ]*archive\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
-            echo '--- apt mirror after rewrite ---'
-            cat /etc/apt/apt-mirrors.txt
-          fi
+          # 24.04 的 cloud image 用 /etc/apt/apt-mirrors.txt；普通镜像也可能只有
+          # sources.list / .sources。逐个尝试，只替换 Ubuntu 官方 archive，
+          # 不动任何 PPA。
+          for f in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] || continue
+            sudo sed -i -E 's#http(s)?://[^ ]*(archive|security)\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' "$f"
+          done
+          echo '--- apt mirror after rewrite ---'
+          grep -RhoE 'http(s)?://[^ ]*ubuntu\.com/ubuntu' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null | sort -u || true
       - name: Install Plasma Wayland stack
         # kwin-wayland-backend-virtual 是 KWin 的「虚拟后端」：不需要 /dev/dri
         # 也能起真实 compositor，这正是 hosted runner 上唯一诚实可行的路径。
@@ -314,11 +318,15 @@ jobs:
         # 约 800 KB/s，是同一批包的可达镜像。
         run: |
           set -euo pipefail
-          if [ -f /etc/apt/apt-mirrors.txt ]; then
-            sudo sed -i -E 's#http(s)?://[^ ]*archive\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
-            echo '--- apt mirror after rewrite ---'
-            cat /etc/apt/apt-mirrors.txt
-          fi
+          # 24.04 的 cloud image 用 /etc/apt/apt-mirrors.txt；普通镜像也可能只有
+          # sources.list / .sources。逐个尝试，只替换 Ubuntu 官方 archive，
+          # 不动任何 PPA。
+          for f in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] || continue
+            sudo sed -i -E 's#http(s)?://[^ ]*(archive|security)\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' "$f"
+          done
+          echo '--- apt mirror after rewrite ---'
+          grep -RhoE 'http(s)?://[^ ]*ubuntu\.com/ubuntu' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null | sort -u || true
       - name: Install Plasma X11 stack + screenshot/input tooling
         env:
           DEBIAN_FRONTEND: noninteractive
