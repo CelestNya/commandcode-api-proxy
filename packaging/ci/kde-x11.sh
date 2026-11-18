@@ -172,15 +172,28 @@ Xvfb :99 -screen 0 1920x1080x24 -ac -nolisten tcp >"$SHOTS_DIR/xvfb.log" 2>&1 &
 XVFB_PID=$!
 PIDS+=("$XVFB_PID")
 
-# 断言：xdpyinfo 能连上 :99——X 服务真实起来了，而不是脚本假设显示可用。
-# xdpyinfo 的输出必须落盘：首跑失败时只看到「20s 内不可用」这一个信息，
-# 真正的报错（socket 权限 / 连接被拒）被 /dev/null 吃掉了。
-xvfb_ready() { DISPLAY=:99 xdpyinfo >"$SHOTS_DIR/xdpyinfo.log" 2>&1; }
-if ! wait_for "xvfb" 30 0.5 -- xvfb_ready; then
-    ls -l /tmp/.X11-unix >"$SHOTS_DIR/x11-sockets.txt" 2>&1 || true
-    fail "xvfb" "Xvfb :99 30s 内不可用；见 xdpyinfo.log / xvfb.log / x11-sockets.txt"
+# 断言：X 服务真实可连，而不是脚本假设显示可用。首跑时 xdpyinfo 的输出被
+# /dev/null 吃掉，只剩「30s 内不可用」这一句，无法判断是工具缺失还是连接被拒；
+# 现在探针落到 xwininfo-probe.log，失败时再把关键诊断直接抓下来。
+x11_probe() { DISPLAY=:99 xwininfo -root >"$SHOTS_DIR/xwininfo-probe.log" 2>&1; }
+if ! wait_for "xvfb" 30 0.5 -- x11_probe; then
+    {
+        echo "--- tools ---"
+        for t in xwininfo xdpyinfo xset xdotool Xvfb; do
+            printf '%s: %s\n' "$t" "$(command -v "$t" || echo "(missing)")"
+        done
+        echo "--- xwininfo -root ---"
+        DISPLAY=:99 xwininfo -root 2>&1 || echo "rc=$?"
+        echo "--- xdpyinfo (head) ---"
+        DISPLAY=:99 xdpyinfo 2>&1 | head -6 || echo "rc=$?"
+        echo "--- /tmp/.X11-unix ---"
+        ls -l /tmp/.X11-unix 2>&1 || true
+        echo "--- xvfb.log (tail) ---"
+        tail -20 "$SHOTS_DIR/xvfb.log" 2>/dev/null || true
+    } >"$SHOTS_DIR/xvfb-diagnostics.txt" 2>&1 || true
+    fail "xvfb" "Xvfb :99 30s 内不可用；见 xvfb-diagnostics.txt"
 fi
-echo "STEP ok: xvfb"
+echo "STEP ok: xvfb ($(grep -m1 dimensions "$SHOTS_DIR/xwininfo-probe.log" 2>/dev/null | tr -s ' ' || echo 'geometry unknown'))"
 
 # X11 会话：不保留任何 Wayland 相关环境，避免托盘误走 wayland 平台插件。
 unset WAYLAND_DISPLAY || true
@@ -209,6 +222,15 @@ echo "STEP ok: kded-started ($KDED_BIN)"
 # ---------------------------------------------------------------------------
 # 5. startplasma-x11：完整 Plasma X11 面板
 # ---------------------------------------------------------------------------
+# startplasma-x11 的 ksmserver 通常自己拉起 kactivitymanagerd，但 hosted
+# runner 上先起它更稳：plasmashell 5.27 在活动管理器缺席时会直接 abort shell
+# load（Wayland 侧已实测到这条）。
+command -v kactivitymanagerd >/dev/null 2>&1 \
+    || fail "kactivitymanagerd-binary" "未找到 kactivitymanagerd（kde-plasma-desktop 只把它列为 Recommends，--no-install-recommends 会漏装）"
+kactivitymanagerd >"$SHOTS_DIR/kactivitymanagerd.log" 2>&1 &
+KAMD_PID=$!
+PIDS+=("$KAMD_PID")
+
 startplasma-x11 >"$SHOTS_DIR/plasma-x11.log" 2>&1 &
 PLASMA_PID=$!
 PIDS+=("$PLASMA_PID")
@@ -221,8 +243,24 @@ plasma_x11_ready() {
     return 0
 }
 
-if ! wait_for "plasma-x11" 60 0.5 -- plasma_x11_ready; then
-    fail "plasma-x11" "60s 内 watcher/plasmashell 窗口未就绪；见 plasma-x11.log"
+if ! wait_for "plasma-x11" 90 0.5 -- plasma_x11_ready; then
+    {
+        echo "--- kservices5 statusnotifier* ---"
+        ls -1 /usr/share/kservices5/ 2>/dev/null | grep -i statusnotifier || echo "(none)"
+        echo "--- kded plugin dir ---"
+        ls -1 /usr/lib/x86_64-linux-gnu/qt5/plugins/kf5/kded/ 2>/dev/null || echo "(missing)"
+        echo "--- plasmashell windows (xdotool class) ---"
+        xdotool search --class plasmashell 2>&1 || true
+        echo "--- X window tree ---"
+        xwininfo -root -tree 2>&1 | head -40 || true
+        echo "--- plasma-x11.log (tail) ---"
+        tail -40 "$SHOTS_DIR/plasma-x11.log" 2>/dev/null || true
+        echo "--- kactivitymanagerd.log (tail) ---"
+        tail -20 "$SHOTS_DIR/kactivitymanagerd.log" 2>/dev/null || true
+        echo "--- kded.log ---"
+        cat "$SHOTS_DIR/kded.log" 2>/dev/null || true
+    } >"$SHOTS_DIR/plasma-x11-diagnostics.txt" 2>&1 || true
+    fail "plasma-x11" "90s 内 watcher/plasmashell 窗口未就绪；见 plasma-x11-diagnostics.txt"
 fi
 echo "STEP ok: plasma-x11"
 

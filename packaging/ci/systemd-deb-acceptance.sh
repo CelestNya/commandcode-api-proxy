@@ -36,6 +36,15 @@ fail() {
     echo "STEP fail: $1" >&2
     shift
     for line in "$@"; do echo "  $line" >&2; done
+    echo "--- unit (as installed) ---" >&2
+    $SUDO systemctl cat commandcode-proxy 2>&1 || true
+    echo "--- effective environment ---" >&2
+    $SUDO systemctl show commandcode-proxy -p Environment -p EnvironmentFiles \
+        -p ProtectSystem -p ReadWritePaths -p ProtectHome 2>&1 || true
+    echo "--- /var/log/commandcode-proxy ---" >&2
+    $SUDO ls -la /var/log/commandcode-proxy 2>&1 || true
+    echo "--- /var/lib/commandcode-proxy ---" >&2
+    $SUDO ls -la /var/lib/commandcode-proxy 2>&1 || true
     echo "--- journal (last 200) ---" >&2
     $SUDO journalctl -u commandcode-proxy --no-pager -n 200 2>&1 || true
     echo "--- env file ---" >&2

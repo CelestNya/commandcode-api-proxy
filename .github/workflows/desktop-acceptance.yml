@@ -229,9 +229,10 @@ jobs:
             -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
             kde-plasma-desktop plasma-workspace-wayland \
             kwin-wayland-backend-virtual kde-spectacle dbus-x11 python3-pil \
-            libgl1-mesa-dri qtwayland5 kded5
+            libgl1-mesa-dri qtwayland5 kded5 kactivitymanagerd
           # 安装结果落盘：后续若引用包名/版本出错，证据在 artifact 里。
-          dpkg -l kde-plasma-desktop plasma-workspace-wayland kde-spectacle kded5 2>/dev/null \
+          dpkg -l kde-plasma-desktop plasma-workspace-wayland kde-spectacle kded5 \
+            kactivitymanagerd 2>/dev/null \
             | awk '$1 == "ii" {print $2, $3}'
       - name: Start kwin_wayland --virtual + plasmashell, run tray, screenshot, scan pixels
         env:
@@ -284,8 +285,8 @@ jobs:
             -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
             -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
             kde-plasma-desktop xvfb xdotool x11-utils imagemagick \
-            dbus-x11 python3-pil libgl1-mesa-dri kded5
-          dpkg -l kde-plasma-desktop xvfb kded5 2>/dev/null \
+            dbus-x11 python3-pil libgl1-mesa-dri kded5 kactivitymanagerd
+          dpkg -l kde-plasma-desktop xvfb kded5 kactivitymanagerd 2>/dev/null \
             | awk '$1 == "ii" {print $2, $3}'
       - name: Xvfb + startplasma-x11, run tray, screenshot, right-click menu proof
         env:

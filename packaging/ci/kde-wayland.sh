@@ -234,15 +234,45 @@ echo "STEP ok: kded-started ($KDED_BIN)"
 # ---------------------------------------------------------------------------
 # 5. plasmashell：真实面板（watcher 由上面的 kded 插件提供）
 # ---------------------------------------------------------------------------
+# plasmashell 5.27 起 shell 前要求 kactivitymanagerd 在线，否则直接
+# "Aborting shell load: The activity manager daemon (kactivitymanagerd) is not
+# running" 然后退出——面板根本不会出现（首跑就是这样，而 watcher 也随之
+# 缺失）。hosted runner 没有 graphical-session.target 触发激活，显式起它。
+command -v kactivitymanagerd >/dev/null 2>&1 \
+    || fail "kactivitymanagerd-binary" "未找到 kactivitymanagerd（kde-plasma-desktop 只把它列为 Recommends，--no-install-recommends 会漏装）"
+kactivitymanagerd >"$SHOTS_DIR/kactivitymanagerd.log" 2>&1 &
+KAMD_PID=$!
+PIDS+=("$KAMD_PID")
+if ! wait_for "activity-manager" 30 0.5 -- dbus_has_name '^org\.kde\.ActivityManager$'; then
+    fail "activity-manager" "30s 内未出现 org.kde.ActivityManager；见 kactivitymanagerd.log"
+fi
+echo "STEP ok: activity-manager"
+
 plasmashell >"$SHOTS_DIR/plasmashell.log" 2>&1 &
 PLASMA_PID=$!
 PIDS+=("$PLASMA_PID")
 
+# watcher 断言失败时要能回答「模块没装」还是「模块没加载」：把插件清单、
+# kservices5 里的 autoload 描述文件和两个进程日志一起落盘。
+watcher_diagnostics() {
+    {
+        echo "--- kservices5 statusnotifier* ---"
+        ls -1 /usr/share/kservices5/ 2>/dev/null | grep -i statusnotifier || echo "(none)"
+        echo "--- kded plugin dir ---"
+        ls -1 /usr/lib/x86_64-linux-gnu/qt5/plugins/kf5/kded/ 2>/dev/null || echo "(missing)"
+        echo "--- kded.log ---"
+        cat "$SHOTS_DIR/kded.log" 2>/dev/null || echo "(none)"
+        echo "--- plasmashell.log ---"
+        cat "$SHOTS_DIR/plasmashell.log" 2>/dev/null || echo "(none)"
+    } >"$SHOTS_DIR/watcher-diagnostics.txt" 2>&1 || true
+}
+
 # 断言：会话总线上出现 org.kde.StatusNotifierWatcher。这是面板愿意接收
 # SNI 注册的标志；watcher 不出现，托盘注册得再正确也没有面板可显示。
-if ! wait_for "status-notifier-watcher" 60 0.5 -- \
+if ! wait_for "status-notifier-watcher" 90 0.5 -- \
     dbus_has_name '^org\.kde\.StatusNotifierWatcher$'; then
-    fail "status-notifier-watcher" "60s 内未出现 StatusNotifierWatcher；见 plasmashell.log"
+    watcher_diagnostics
+    fail "status-notifier-watcher" "90s 内未出现 StatusNotifierWatcher；见 watcher-diagnostics.txt"
 fi
 echo "STEP ok: status-notifier-watcher"
 
