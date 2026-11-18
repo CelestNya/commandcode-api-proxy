@@ -1,0 +1,286 @@
+name: Desktop acceptance
+
+# Linux 桌面 / 服务验收：一次构建，多个受控环境分别消费同一份 artifact。
+#
+# 设计要点：
+#   - build-linux 只编译一次，产出 tarball + 2 个 deb + AppImage；下游 job
+#     全部 download-artifact，不重复编译，因此失败点能直接归因到「环境」而不是
+#     「构建」。
+#   - 每个 job 都是完整的运行证据：systemd 真实启停、FUSE 真实挂载、Plasma
+#     真实面板像素。静态检查（systemd-analyze verify）在 ci.yml/release.yml
+#     已经覆盖，这里不重复。
+#   - 运行器固定版本（ubuntu-24.04 / ubuntu-22.04）。不用 ubuntu-latest：桌面
+#     包名与 systemd 行为随镜像变化，验收必须可复现。
+#   - systemd/FUSE job 不加 container：容器里没有 PID 1 systemd、也没有
+#     /dev/fuse，加了就等于把要验的东西抽掉。
+#
+# DBus 菜单语义仍由 ci.yml 的 linux-sni-smoke 覆盖；这里只证明「视觉 + 点击」。
+
+on:
+  workflow_dispatch:
+    inputs:
+      self_hosted:
+        description: 'Run the self-hosted KDE lab job (needs a linux-kde-lab runner; unverified this round)'
+        type: boolean
+        default: false
+  push:
+    branches:
+      - feat/desktop-acceptance
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Build Linux artifacts (once)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binaries
+        # glibc 基线由构建机决定：22.04（glibc 2.35）产出的二进制才能在
+        # Debian 12 / Ubuntu 22.04 上启动。24.04 构建会产出 2.39 依赖。
+        # 不带 --workspace：与 release.yml 一致，只构建默认成员；xtask 由
+        # `cargo xtask` 按需构建。
+        run: cargo build --release --locked
+      - name: Package tarball + 2 deb + AppImage (shared script)
+        # 与本地手工打包同一条命令；脚本内含 deb 字段/清单、tool 脚本语法、
+        # squashfs 锚点断言，任何一项不过都非零退出。
+        run: bash packaging/ci/build-linux-artifacts.sh --skip-build
+      - name: Show artifact manifest
+        run: |
+          set -euo pipefail
+          cat dist/desktop-acceptance/artifacts.txt
+          cat dist/desktop-acceptance/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop
+          # 只上传摊平目录：下游拿到的就是 4 个产物 + 清单，接口只有文件名。
+          path: dist/desktop-acceptance/
+          if-no-files-found: error
+          retention-days: 14
+
+  systemd-deb:
+    name: systemd · real deb install/start/stop
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-desktop
+          path: artifacts
+      - name: Assert host is a systemd VM before touching the unit
+        # 提前把「不是 VM」的情况与「unit 有问题」分开报错，避免误判。
+        run: test -d /run/systemd/system && systemctl --version | head -1
+      - name: deb install → enable/start → probe → stop/start/stop → disable → purge
+        env:
+          DEB_DIR: ${{ github.workspace }}/artifacts
+          PORT: '18789'
+          EVIDENCE_DIR: ${{ runner.temp }}/systemd-evidence
+        run: bash packaging/ci/systemd-deb-acceptance.sh
+      - name: Upload systemd evidence (journal, env, ids)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: systemd-evidence
+          path: ${{ runner.temp }}/systemd-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  appimage-fuse:
+    name: AppImage · real FUSE mount
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-desktop
+          path: artifacts
+      - name: Run AppImage through FUSE (no --appimage-extract-and-run)
+        env:
+          PORT: '18790'
+          WORK_DIR: ${{ runner.temp }}/appimage-work
+          EVIDENCE_DIR: ${{ runner.temp }}/appimage-evidence
+        run: |
+          set -euo pipefail
+          APPIMAGE="$(ls "$GITHUB_WORKSPACE"/artifacts/*.AppImage)"
+          echo "appimage: $APPIMAGE"
+          APPIMAGE="$APPIMAGE" bash packaging/ci/appimage-fuse-acceptance.sh
+      - name: Upload FUSE evidence (mount table, process, health)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage-evidence
+          path: ${{ runner.temp }}/appimage-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  service-smoke:
+    name: tarball · isolated service smoke
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-desktop
+          path: artifacts
+      - name: Unpack and run proxy with isolated PORT/CC_DATA_DIR/CC_WEBUI_DIR
+        env:
+          PORT: '18791'
+          WORK_DIR: ${{ runner.temp }}/service-smoke-work
+          EVIDENCE_DIR: ${{ runner.temp }}/service-smoke-evidence
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls "$GITHUB_WORKSPACE"/artifacts/*.tar.gz)"
+          TARBALL="$TARBALL" bash packaging/ci/service-smoke.sh
+      - name: Upload service smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-smoke-evidence
+          path: ${{ runner.temp }}/service-smoke-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  kde-wayland:
+    name: KDE Plasma Wayland · panel pixel proof
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-desktop
+          path: artifacts
+      - name: Install Plasma Wayland stack
+        # kwin-wayland-backend-virtual 是 KWin 的「虚拟后端」：不需要 /dev/dri
+        # 也能起真实 compositor，这正是 hosted runner 上唯一诚实可行的路径。
+        # 注意包名：24.04 上截图工具的包叫 kde-spectacle（可执行名仍是
+        # spectacle），写 `spectacle` 会 apt 失败。
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            kde-plasma-desktop plasma-workspace-wayland \
+            kwin-wayland-backend-virtual kde-spectacle dbus-x11 python3-pil \
+            libgl1-mesa-dri qtwayland5 kded5
+      - name: Start kwin_wayland --virtual + plasmashell, run tray, screenshot, scan pixels
+        env:
+          PORT: '18792'
+          WORK_DIR: ${{ runner.temp }}/kde-wayland-work
+          SHOTS_DIR: ${{ runner.temp }}/kde-wayland-shots
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls "$GITHUB_WORKSPACE"/artifacts/*.tar.gz)"
+          TARBALL="$TARBALL" bash packaging/ci/kde-wayland.sh
+      - name: Upload Wayland screenshots + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kde-wayland-evidence
+          path: ${{ runner.temp }}/kde-wayland-shots
+          if-no-files-found: warn
+          retention-days: 14
+
+  kde-x11:
+    name: KDE Plasma X11 · panel pixel + click proof
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-desktop
+          path: artifacts
+      - name: Install Plasma X11 stack + screenshot/input tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            kde-plasma-desktop xvfb xdotool x11-utils imagemagick \
+            dbus-x11 python3-pil libgl1-mesa-dri kded5
+      - name: Xvfb + startplasma-x11, run tray, screenshot, right-click menu proof
+        env:
+          PORT: '18793'
+          WORK_DIR: ${{ runner.temp }}/kde-x11-work
+          SHOTS_DIR: ${{ runner.temp }}/kde-x11-shots
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls "$GITHUB_WORKSPACE"/artifacts/*.tar.gz)"
+          TARBALL="$TARBALL" bash packaging/ci/kde-x11.sh
+      - name: Upload X11 screenshots + logs (before/after menu)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kde-x11-evidence
+          path: ${{ runner.temp }}/kde-x11-shots
+          if-no-files-found: warn
+          retention-days: 14
+
+  self-hosted-kde-lab:
+    # 无头自托管 VM（VKMS / render node / 真实 systemd+FUSE）的显式入口。
+    # 本轮没有该 runner，因此该 job 默认不运行；它不是「已验」状态，见
+    # docs/DESKTOP-ACCEPTANCE-CI.md 的配置步骤与能力边界。
+    # 它复用与 hosted job 完全相同的脚本，避免两套逻辑漂移。
+    name: self-hosted KDE lab (unverified path)
+    if: github.event_name == 'workflow_dispatch' && inputs.self_hosted
+    needs: build-linux
+    runs-on: [self-hosted, linux, x64, linux-kde-lab]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-desktop
+          path: artifacts
+      - name: Report render nodes (evidence for VKMS/render-node availability)
+        run: |
+          set -euo pipefail
+          ls -l /dev/dri 2>&1 || echo "no /dev/dri"
+          lsmod | grep -E 'vkms|vgem' || echo "no vkms/vgem module loaded"
+      - name: systemd deb acceptance
+        env:
+          DEB_DIR: ${{ github.workspace }}/artifacts
+          PORT: '18789'
+          EVIDENCE_DIR: ${{ runner.temp }}/systemd-evidence
+        run: bash packaging/ci/systemd-deb-acceptance.sh
+      - name: Wayland visual acceptance (uses VKMS/render node when present)
+        env:
+          PORT: '18792'
+          WORK_DIR: ${{ runner.temp }}/kde-wayland-work
+          SHOTS_DIR: ${{ runner.temp }}/kde-wayland-shots
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls "$GITHUB_WORKSPACE"/artifacts/*.tar.gz)"
+          TARBALL="$TARBALL" bash packaging/ci/kde-wayland.sh
+      - name: Upload lab evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-hosted-lab-evidence
+          path: |
+            ${{ runner.temp }}/kde-wayland-shots
+            ${{ runner.temp }}/systemd-evidence
+          if-no-files-found: warn
+          retention-days: 14

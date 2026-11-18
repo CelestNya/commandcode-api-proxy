@@ -1,0 +1,10 @@
+# actionlint 配置：声明自托管运行器的自定义 label。
+#
+# desktop-acceptance.yml 留了一条 workflow_dispatch 专用的无头 KDE 实验室
+# 路径（label `linux-kde-lab`）。actionlint 只认识 GitHub 托管的镜像 label，
+# 不认识自托管的自定义 label，因此在这里登记它，否则静态校验会误报。
+#
+# 这不是「该 runner 已存在」的声明——本轮没有该 runner，该 job 默认不运行。
+self-hosted-runner:
+  labels:
+    - linux-kde-lab
