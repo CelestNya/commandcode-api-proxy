@@ -191,6 +191,12 @@ jobs:
     runs-on: ubuntu-24.04
     # 安装阶段有 4 次×10 分钟的尝试预算，脚本本身另有 15 分钟硬上限。
     timeout-minutes: 75
+    # 两个桌面 job 共用一台镜像，并行 apt 会互相抢带宽（实测同时跑时两条都
+    # 卡在 exit 124）。串行化安装，不引入 job 依赖（Wayland 失败不该连带
+    # 取消 X11）。
+    concurrency:
+      group: desktop-acceptance-kde-apt
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -247,12 +253,13 @@ jobs:
             return "$rc"
           }
           install_retry \
-            kde-plasma-desktop plasma-workspace-wayland \
-            kwin-wayland-backend-virtual kde-spectacle dbus-x11 python3-pil \
-            libgl1-mesa-dri qtwayland5 kded5 kactivitymanagerd
+            plasma-workspace plasma-workspace-wayland plasma-desktop \
+            kwin-wayland kwin-wayland-backend-virtual kde-spectacle \
+            dbus-x11 python3-pil libgl1-mesa-dri qtwayland5 kded5 \
+            kactivitymanagerd
           # 安装结果落盘：后续若引用包名/版本出错，证据在 artifact 里。
-          dpkg -l kde-plasma-desktop plasma-workspace-wayland kde-spectacle kded5 \
-            kactivitymanagerd 2>/dev/null \
+          dpkg -l plasma-workspace plasma-desktop kwin-wayland kde-spectacle \
+            kded5 kactivitymanagerd 2>/dev/null \
             | awk '$1 == "ii" {print $2, $3}'
       - name: Start kwin_wayland --virtual + plasmashell, run tray, screenshot, scan pixels
         env:
@@ -279,6 +286,9 @@ jobs:
     needs: build-linux
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    concurrency:
+      group: desktop-acceptance-kde-apt
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -321,9 +331,11 @@ jobs:
             return "$rc"
           }
           install_retry \
-            kde-plasma-desktop xvfb xdotool x11-utils imagemagick \
-            dbus-x11 python3-pil libgl1-mesa-dri kded5 kactivitymanagerd
-          dpkg -l kde-plasma-desktop xvfb kded5 kactivitymanagerd 2>/dev/null \
+            plasma-workspace plasma-desktop kwin-x11 xvfb xdotool x11-utils \
+            imagemagick dbus-x11 python3-pil libgl1-mesa-dri kded5 \
+            kactivitymanagerd
+          dpkg -l plasma-workspace plasma-desktop kwin-x11 xvfb kded5 \
+            kactivitymanagerd 2>/dev/null \
             | awk '$1 == "ii" {print $2, $3}'
       - name: Xvfb + startplasma-x11, run tray, screenshot, right-click menu proof
         env:
