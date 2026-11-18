@@ -63,8 +63,8 @@
 
 ## 本轮 Linux 桌面/服务验收（desktop-acceptance workflow）
 
-> 分支 `feat/desktop-acceptance`，HEAD `81eb487`；workflow `.github/workflows/desktop-acceptance.yml`，验收脚本 `packaging/ci/`。运行说明与证据读法见 [`DESKTOP-ACCEPTANCE-CI.md`](DESKTOP-ACCEPTANCE-CI.md)。
-> 最后一次全绿 run：<https://github.com/CelestNya/commandcode-api-proxy/actions/runs/44303232436>（`81eb487`，七个 job 六个真绿、`self-hosted-kde-lab` skipped）。
+> 分支 `feat/desktop-acceptance`，HEAD `265a181`；workflow `.github/workflows/desktop-acceptance.yml`，验收脚本 `packaging/ci/`。运行说明与证据读法见 [`DESKTOP-ACCEPTANCE-CI.md`](DESKTOP-ACCEPTANCE-CI.md)。
+> 最后一次全绿 run：<https://github.com/CelestNya/commandcode-api-proxy/actions/runs/44304996948>（`265a181`，六个可执行 job 真绿、`self-hosted-kde-lab` skipped）；首次全绿的最终代码 run 是 <https://github.com/CelestNya/commandcode-api-proxy/actions/runs/44303232436>（`81eb487`，验收行为与之相同）。
 
 ### 新增与收敛
 
@@ -157,11 +157,10 @@ linux artifact 总体积 10,355,490 B。
 
 | 项 | 状态 |
 |---|---|
-| KDE 真实桌面 | 部分推进：hosted Wayland/X11 两个 job 本轮红（脚本 `wait_for` 缺陷 + 区域镜像超时，修复未推送，见上节）；SNI 图标像素、右键菜单/启停视觉与点击尚未由 CI 证明；无头 `sni_contract` 已过 |
+| KDE 真实桌面（X11） | **已由 CI 真绿**（run `44303232436`，文档复跑 `44304996948` 同结论）：Xvfb 1080p 下 kwin_x11 + plasmashell 面板真实出图、268 个 `#2ECC71` 托盘像素、右键点击开出真实菜单 |
+| KDE 真实桌面（Wayland） | **链路已由 CI 真绿**（run `44303232436`，复跑 `44304996948` 同结论）：kwin virtual 后端 + plasmashell 面板 + watcher/host/托盘/DBusMenu；**像素视觉未覆盖**——无 `renderD*`，截图按 KDE Bug 527906 诚实 skip 并落 `screenshot-unavailable.txt` |
 | systemd 真实启停 | **已由 CI 真绿**：hosted ubuntu-24.04 VM 上 deb 真实安装 + `enable/start/stop/restart/disable/purge` + journal/隔离端口/日志目录校验（见上节） |
 | AppImage 真实桌面 | FUSE 真实挂载运行已真绿；真实桌面点按/视觉仍随 KDE job 与 self-hosted lab |
-| KDE 真实桌面（X11） | **已由 CI 真绿**（run `44303232436`）：Xvfb 1080p 下 kwin_x11 + plasmashell 面板真实出图、SNI 图标绿色像素扫描、右键点击开出真实菜单 |
-| KDE 真实桌面（Wayland） | **已由 CI 真绿**（run `44303232436`）：kwin virtual 后端 + plasmashell 面板 + watcher/host/托盘/DBusMenu 全链路；**像素截图按无 render node 诚实跳过**，Wayland 视觉像素仍属未证明项 |
 | Linux proxy 真实运行 | **已由 CI 真绿**：tarball 在隔离 `PORT`/`CC_DATA_DIR`/`CC_LOG_DIR`/`CC_WEBUI_DIR` 下真跑 health/WebUI/静态资源/目录契约 |
 | self-hosted render node | 未验：本轮无 `linux-kde-lab` runner，VKMS/`/dev/dri` 路径未执行 |
 | AUR 真实发布 | 未做：`git push` 到 aur.archlinux.org 需要 Arch 账号；容器 `makepkg` 已过 |

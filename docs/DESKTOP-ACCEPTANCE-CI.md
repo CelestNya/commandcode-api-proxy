@@ -228,6 +228,8 @@ run：<https://github.com/CelestNya/commandcode-api-proxy/actions/runs/443032324
 
 **X11 截图上 CJK 显示为方框**：hosted 镜像没装中文字体，属渲染字体缺失，不影响断言——菜单文本由 DBusMenu 的 `GetLayout` 逐字校验（`启动代理` / `停止代理` / `打开 WebUI` / `退出`），像素只用于证明「菜单真的弹出且占了屏幕」。
 
+**最终记录**：本文档更新后 commit `265a181` 的 run `44304996948`（<https://github.com/CelestNya/commandcode-api-proxy/actions/runs/44304996948>）同样 `completed / success`，六个可执行 job 全绿、`self-hosted-kde-lab` skipped。该 commit 只改文档与 `kde-x11.sh` 的一处失败证据命名，验收行为与 `81eb487` 完全相同，因此上表数值可直接沿用。仓库内不存截图二进制，证据以这两个 run 的 artifact 为准。
+
 ## 9. 能力声明
 
 **必须由本 workflow（或 self-hosted lab）证明：**

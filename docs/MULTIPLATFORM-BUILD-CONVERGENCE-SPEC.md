@@ -648,7 +648,7 @@ cargo doc --workspace --no-deps --locked
 
 **与初稿的偏差（已按 §0.8 记录证据）**：① Linux tarball 资产名无 `v` 前缀（§2.3 已修正）；② deb 未保留 cargo-deb，采用 §6.3 优先方案——xtask 铺 Debian root，runner 上 `dpkg-shlibdeps` + `dpkg-deb --build`；③ 实施顺序上托盘共享（M5）先于 CI 收敛（M4）落地，里程碑内容不变；④ 真实发布包的形态比 §6 初稿多了一组防呆断言（AppDir 根图标、squashfs 锚点、dotfile 上传、精确行匹配），均由 dry-run 实跑暴露后补上。
 
-### 14.1 desktop-acceptance 轮次（`feat/desktop-acceptance`，HEAD `81eb487`，全绿 run `44303232436`）
+### 14.1 desktop-acceptance 轮次（`feat/desktop-acceptance`，HEAD `265a181`；最终代码 `81eb487` 的 run `44303232436` 全绿，文档复跑 `44304996948` 同结论）
 
 在上述 dry-run 之后，新增 Linux 桌面/服务验收 workflow `.github/workflows/desktop-acceptance.yml` 与 `packaging/ci/` 下 7 个脚本（`build-linux-artifacts.sh`、`systemd-deb-acceptance.sh`、`appimage-fuse-acceptance.sh`、`service-smoke.sh`、`kde-wayland.sh`、`kde-x11.sh`、`scan-tray-pixels.py`），并新增 `.github/actionlint.yaml` 登记自托管 label `linux-kde-lab`。打包逻辑收敛到 `packaging/ci/build-linux-artifacts.sh`：`build-linux`（ubuntu-22.04）一次构建产两个 deb + AppImage + linux tarball + `SHA256SUMS`/`artifacts.txt`，下游 job 只下载 `linux-desktop` artifact。`release.yml` 本轮未改，未接入该共享脚本。
 
@@ -667,7 +667,7 @@ cargo doc --workspace --no-deps --locked
 
 ### 14.2 仍未覆盖的实机验收项（不关闭）
 
-- KDE Plasma（X11 + Wayland）真实桌面：SNI 图标出现、右键菜单条目与启停视觉/点击——hosted 两个 KDE job 本轮红（根因与未推送修复见 §14.1），L1/L3 实机仍未验；无头 SNI 契约由 `ci.yml` `linux-sni-smoke` 保持通过。
+- KDE Plasma（X11 + Wayland）真实桌面：SNI 图标出现、右键菜单条目与启停视觉/点击——**X11 与 Wayland 均由 run `44303232436`（`81eb487`）真绿，文档复跑 `44304996948`（`265a181`）同结论**：X11 侧截图 + 绿色像素 + 右键弹窗已验；Wayland 侧 watcher / `StatusNotifierHost` / SNI 注册 / DBusMenu 四标签已验，**像素视觉因无 render node 未覆盖**（`STEP skip: screenshot`，KDE Bug 527906）；self-hosted `linux-kde-lab` 实机仍未验。无头 SNI 契约由 `ci.yml` `linux-sni-smoke` 保持通过。
 - systemd 真实 `systemctl start/stop/enable` 启停与 journal 日志——**已由 `systemd-deb` job 在 hosted 24.04 完整 VM 上真绿**（含 stop/start 循环、disable、purge）；剩余仅 self-hosted lab 环境复跑。
 - AppImage 在**真实桌面**运行——FUSE 真实挂载运行已由 `appimage-fuse` job 真绿；桌面点按/视觉仍随 KDE job 与 self-hosted lab。
 - Linux 侧以独立 `PORT`/`CC_DATA_DIR`/`CC_WEBUI_DIR` **真正运行** Linux proxy——**已由 `service-smoke` job 真绿**。
