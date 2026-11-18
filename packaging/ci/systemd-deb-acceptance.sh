@@ -186,11 +186,14 @@ ok "journal (listening line present)"
 LOG_FILE="$($SUDO find /var/log/commandcode-proxy -maxdepth 2 -name 'proxy.log' -type f | head -1 || true)"
 test -n "$LOG_FILE" || fail "log-dir" "no proxy.log under /var/log/commandcode-proxy" \
     "listing: $($SUDO ls -l /var/log/commandcode-proxy 2>&1 | tr '\n' ' ')"
+# 注意：目录是 0750 root-ish（owner commandcode-proxy），runner 用户不能穿过它，
+# 所以 `[ -s "$LOG_FILE" ]` 在 runner 侧永远为假（stat 被 EACCES 拒），首跑因此
+# 把 379 字节的日志误报成「20s 后仍空」。所有探测都必须带 $SUDO。
 for ((i = 0; i < 20; i++)); do
-    [ -s "$LOG_FILE" ] && break
+    $SUDO test -s "$LOG_FILE" && break
     sleep 1
 done
-test -s "$LOG_FILE" || fail "log-dir" "$LOG_FILE still empty after 20s" \
+$SUDO test -s "$LOG_FILE" || fail "log-dir" "$LOG_FILE still empty after 20s" \
     "listing: $($SUDO ls -l /var/log/commandcode-proxy 2>&1 | tr '\n' ' ')"
 ok "log-dir ($LOG_FILE, $($SUDO stat -c%s "$LOG_FILE") bytes)"
 

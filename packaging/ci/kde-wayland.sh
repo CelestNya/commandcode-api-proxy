@@ -238,9 +238,18 @@ echo "STEP ok: kded-started ($KDED_BIN)"
 # "Aborting shell load: The activity manager daemon (kactivitymanagerd) is not
 # running" 然后退出——面板根本不会出现（首跑就是这样，而 watcher 也随之
 # 缺失）。hosted runner 没有 graphical-session.target 触发激活，显式起它。
-command -v kactivitymanagerd >/dev/null 2>&1 \
-    || fail "kactivitymanagerd-binary" "未找到 kactivitymanagerd（kde-plasma-desktop 只把它列为 Recommends，--no-install-recommends 会漏装）"
-kactivitymanagerd >"$SHOTS_DIR/kactivitymanagerd.log" 2>&1 &
+# KDE 的守护进程装在 libexec 里而不是 PATH：包确实装了（dpkg -l 有记录），
+# 但 `command -v kactivitymanagerd` 会落空，首跑就因此误报「未安装」。
+KAMD_BIN=""
+for candidate in kactivitymanagerd /usr/lib/*/libexec/kactivitymanagerd; do
+    if [ -x "$candidate" ]; then
+        KAMD_BIN="$candidate"
+        break
+    fi
+done
+[ -n "$KAMD_BIN" ] || fail "kactivitymanagerd-binary" \
+    "未找到 kactivitymanagerd（libexec: $(ls /usr/lib/*/libexec 2>/dev/null | grep -i activity || echo none)）"
+"$KAMD_BIN" >"$SHOTS_DIR/kactivitymanagerd.log" 2>&1 &
 KAMD_PID=$!
 PIDS+=("$KAMD_PID")
 if ! wait_for "activity-manager" 30 0.5 -- dbus_has_name '^org\.kde\.ActivityManager$'; then

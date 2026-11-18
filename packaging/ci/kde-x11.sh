@@ -172,11 +172,12 @@ Xvfb :99 -screen 0 1920x1080x24 -ac -nolisten tcp >"$SHOTS_DIR/xvfb.log" 2>&1 &
 XVFB_PID=$!
 PIDS+=("$XVFB_PID")
 
-# 断言：X 服务真实可连，而不是脚本假设显示可用。首跑时 xdpyinfo 的输出被
-# /dev/null 吃掉，只剩「30s 内不可用」这一句，无法判断是工具缺失还是连接被拒；
-# 现在探针落到 xwininfo-probe.log，失败时再把关键诊断直接抓下来。
-x11_probe() { DISPLAY=:99 xwininfo -root >"$SHOTS_DIR/xwininfo-probe.log" 2>&1; }
-if ! wait_for "xvfb" 30 0.5 -- x11_probe; then
+# 断言：X 服务真实可连，而不是脚本假设显示可用。首跑失败时只看到「30s 内不可用」，
+# 而失败瞬间手工跑同一条命令立即成功——真因是 Xvfb 会先建 socket 再初始化，
+# 连上去的客户端在服务端就绪前会**阻塞**，第一次探测就把整个等待窗口吃掉了。
+# 所以每次探测必须自带 timeout，让循环能真正重试。
+x11_probe() { timeout 5 xwininfo -root >"$SHOTS_DIR/xwininfo-probe.log" 2>&1; }
+if ! wait_for "xvfb" 90 1 -- x11_probe; then
     {
         echo "--- tools ---"
         for t in xwininfo xdpyinfo xset xdotool Xvfb; do
@@ -225,9 +226,18 @@ echo "STEP ok: kded-started ($KDED_BIN)"
 # startplasma-x11 的 ksmserver 通常自己拉起 kactivitymanagerd，但 hosted
 # runner 上先起它更稳：plasmashell 5.27 在活动管理器缺席时会直接 abort shell
 # load（Wayland 侧已实测到这条）。
-command -v kactivitymanagerd >/dev/null 2>&1 \
-    || fail "kactivitymanagerd-binary" "未找到 kactivitymanagerd（kde-plasma-desktop 只把它列为 Recommends，--no-install-recommends 会漏装）"
-kactivitymanagerd >"$SHOTS_DIR/kactivitymanagerd.log" 2>&1 &
+# KDE 的守护进程装在 libexec 里而不是 PATH：包确实装了，但
+# `command -v kactivitymanagerd` 会落空。
+KAMD_BIN=""
+for candidate in kactivitymanagerd /usr/lib/*/libexec/kactivitymanagerd; do
+    if [ -x "$candidate" ]; then
+        KAMD_BIN="$candidate"
+        break
+    fi
+done
+[ -n "$KAMD_BIN" ] || fail "kactivitymanagerd-binary" \
+    "未找到 kactivitymanagerd（libexec: $(ls /usr/lib/*/libexec 2>/dev/null | grep -i activity || echo none)）"
+"$KAMD_BIN" >"$SHOTS_DIR/kactivitymanagerd.log" 2>&1 &
 KAMD_PID=$!
 PIDS+=("$KAMD_PID")
 
