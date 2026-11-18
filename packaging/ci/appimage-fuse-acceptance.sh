@@ -106,11 +106,13 @@ LAUNCH_PID=$!
 ok "launched (pid=$LAUNCH_PID)"
 
 MOUNT_POINT=""
+APPIMAGE_NAME="$(basename "$APPIMAGE")"
 for ((i = 0; i < 25; i++)); do
     # 只认「SOURCE 是本 AppImage 的 fuse 挂载」——别的 fuse 挂载（容器 overlay
-    # 等）不算数。
+    # 等）不算数。findmnt 的 SOURCE 列是 AppImage 的文件名（不含目录），所以
+    # 按 basename 精确比对，而不是在整行里找绝对路径（首跑即因此误判）。
     MOUNT_POINT="$(findmnt -rn -o TARGET,SOURCE,FSTYPE 2>/dev/null \
-        | awk -v app="$APPIMAGE" '$0 ~ /fuse/ && index($0, app) > 0 { print $1; exit }')"
+        | awk -v app="$APPIMAGE_NAME" '$3 ~ /^fuse/ && $2 == app { print $1; exit }')"
     if [ -n "$MOUNT_POINT" ]; then break; fi
     if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
         fail "appimage-mount" "process exited before any FUSE mount appeared"

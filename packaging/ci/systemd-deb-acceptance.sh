@@ -150,7 +150,9 @@ MAIN_PID="$($SUDO systemctl show -p MainPID --value commandcode-proxy)" \
 echo "  MainPID=$MAIN_PID"
 test "$MAIN_PID" != "0" || fail "systemd-owns-process" "MainPID=0"
 test -d "/proc/$MAIN_PID" || fail "systemd-owns-process" "MainPID=$MAIN_PID is not alive"
-EXE="$(readlink -f "/proc/$MAIN_PID/exe" 2>/dev/null || echo "<none>")"
+# /proc/<pid>/exe 属于服务账号，读它需要 root：普通用户 readlink 会得到
+# EACCES，从而把一次成功的启动误判成「exe 不是打包二进制」（首跑即此）。
+EXE="$($SUDO readlink -f "/proc/$MAIN_PID/exe" 2>/dev/null || echo "<none>")"
 test "$EXE" = "/usr/bin/commandcode-proxy" \
     || fail "systemd-owns-process" "MainPID exe=$EXE, expected /usr/bin/commandcode-proxy"
 RUN_AS="$(ps -o user= -p "$MAIN_PID" 2>/dev/null | tr -d ' ' || true)"

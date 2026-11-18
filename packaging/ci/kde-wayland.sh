@@ -208,7 +208,7 @@ if [ -z "$WAYLAND_DISPLAY_NAME" ]; then
     ls -l "$XDG_RUNTIME_DIR" >"$SHOTS_DIR/runtime-dir.txt" 2>&1 || true
     fail "kwin-socket" "60s 内 $XDG_RUNTIME_DIR 下没有 wayland-* socket；见 runtime-dir.txt 与 kwin.log"
 fi
-ok "kwin-socket ($WAYLAND_DISPLAY_NAME)"
+echo "STEP ok: kwin-socket ($WAYLAND_DISPLAY_NAME)"
 
 export WAYLAND_DISPLAY="$WAYLAND_DISPLAY_NAME"
 # 客户端（plasmashell / spectacle / 托盘）走 wayland 平台插件。
