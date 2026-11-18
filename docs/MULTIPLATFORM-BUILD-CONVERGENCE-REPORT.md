@@ -63,7 +63,8 @@
 
 ## 本轮 Linux 桌面/服务验收（desktop-acceptance workflow）
 
-> 分支 `feat/desktop-acceptance`，HEAD `d34c3b4`；workflow `.github/workflows/desktop-acceptance.yml`，验收脚本 `packaging/ci/`。运行说明与证据读法见 [`DESKTOP-ACCEPTANCE-CI.md`](DESKTOP-ACCEPTANCE-CI.md)。
+> 分支 `feat/desktop-acceptance`，HEAD `81eb487`；workflow `.github/workflows/desktop-acceptance.yml`，验收脚本 `packaging/ci/`。运行说明与证据读法见 [`DESKTOP-ACCEPTANCE-CI.md`](DESKTOP-ACCEPTANCE-CI.md)。
+> 最后一次全绿 run：<https://github.com/CelestNya/commandcode-api-proxy/actions/runs/44303232436>（`81eb487`，七个 job 六个真绿、`self-hosted-kde-lab` skipped）。
 
 ### 新增与收敛
 
@@ -79,11 +80,11 @@
 | `systemd-deb` | ubuntu-24.04 | 18789 | `systemd-evidence` | 真绿 |
 | `appimage-fuse` | ubuntu-24.04 | 18790 | `appimage-evidence` | 真绿（AppImage 首次真绿见 run `44267525735`） |
 | `service-smoke` | ubuntu-24.04 | 18791 | `service-smoke-evidence` | 真绿 |
-| `kde-wayland` | ubuntu-24.04 | 18792 | `kde-wayland-evidence` | 红（根因见下） |
-| `kde-x11` | ubuntu-24.04 | 18793 | `kde-x11-evidence` | 红（根因见下） |
+| `kde-wayland` | ubuntu-24.04 | 18792 | `kde-wayland-evidence` | 真绿（`44303232436`）：面板/托盘/菜单断言全过；截图按「无 render node」诚实跳过 |
+| `kde-x11` | ubuntu-24.04 | 18793 | `kde-x11-evidence` | 真绿（`44303232436`）：含 1920×1080 截图、绿点像素扫描、右键弹窗 |
 | `self-hosted-kde-lab` | `[self-hosted, linux, x64, linux-kde-lab]` | 18789 / 18792 | `self-hosted-lab-evidence` | **未验证**：本轮无该 runner，仅 `workflow_dispatch` 且 `self_hosted=true` 时运行 |
 
-历史 run（仅作证据引用，不声称全绿）：`44261012385`、`44261482899`、`44265393480`、`44266563044`、`44267525735`、`44271281112`、`44272728919`、`44279872249`。其中 `44267525735` 是 AppImage 首次真绿；`44279872249` 为 systemd / AppImage / service-smoke 绿、两个 KDE job 红（exit 124 与 `wait_for` 缺陷）。
+历史 run（仅作证据引用）：`44261012385`、`44261482899`、`44265393480`、`44266563044`、`44267525735`、`44271281112`、`44272728919`、`44279872249`、`44301504976`、`44303232436`。其中 `44267525735` 是 AppImage 首次真绿；`44279872249` 为 systemd / AppImage / service-smoke 绿、两个 KDE job 红（exit 124 与 `wait_for` 缺陷）；`44301504976`（`db57218`）X11 首次真绿、Wayland 红在 `status-notifier-watcher`；`44303232436`（`81eb487`）七个 job 全绿（self-hosted skipped）。
 
 ### 已真绿的验收项
 
@@ -92,14 +93,21 @@
 - **AppImage 真实 FUSE**：直接执行 AppImage 本体（未用 `--appimage-extract-and-run`）；挂载源是 AppImage、运行进程来自挂载点、`/health` 与 `/webui/` 200；退出后挂载释放、端口释放、无残留 `.mount_*` 目录。
 - **systemd 真实 deb 验收**：真实 `apt-get install` 两个 deb，走完 `enable/start/stop/restart/disable/purge`；校验 `/health`、`/webui/`、静态资源、MainPID 存活与 exe 归属 `/usr/bin/commandcode-proxy`、服务账号运行、journal 监听行、隔离端口、日志目录；purge 后状态目录、env 目录与 unit 文件均清除。
 
-### 仍未绿：两个 KDE job（d34c3b4 之前的状态）
+### 两个 KDE job：三次真实红因与最终转绿
 
-KDE Wayland 与 KDE X11 都在 Install 步骤或断言处红，根因已定位为两类：
+两个 KDE job 一共红过三轮，每轮的根因都由真实 run 定位，修一次推一次：
 
-1. **验收脚本自身缺陷**：`wait_for` 未消费调用语法里的 `--` 分隔符，`until "$@"` 去执行名为 `--` 的命令，每次以 127 失败，任何被等待状态都被误判为「等不到」；影响 `activity-manager`、`status-notifier-watcher`、`xvfb`、`plasma-x11` 等断言。
-2. **hosted 区域镜像超时**：`us-east-2.ec2.archive.ubuntu.com` 在 `libqt5webenginecore5`（42.6MB）上十分钟零进展，`apt install` 四次各 600s 全部 exit 124。
+| 轮次 | run | 现象 | 根因 | 修复 |
+|---|---|---|---|---|
+| 1 | `44274422683` | 两个 job 的 `Install Plasma … stack` 都 exit 124 | `kde-plasma-desktop` 元包把整套 KDE 应用（kate/konsole/dolphin/vlc/breeze 72.7MB…400+ 包）拉进来，hosted 吞吐扛不住；两个 KDE job 并行 apt 还互相抢镜像带宽 | `7af79b7` 收敛安装集合并改 `install_retry`；`d34c3b4` 去掉元包；两侧加 job 级并发组串行安装 |
+| 2 | `44279872249` | Wayland 60 次 `kde-wayland.sh: line 119: --: command not found` 后 `STEP fail: activity-manager`；X11 `Install Plasma X11 stack` 连续 4 次 exit 124 | `wait_for` 在 `shift 3` 后仍把调用方的 `--` 留在 `$@`，`until "$@"` 去执行名为 `--` 的命令，任何被等待状态都被误判为「等不到」；`libqt5webenginecore5`（42.6MB）在 runner 默认区域镜像上十分钟零进展 | `fda3053`（`wait_for` 消费 `--`）、`d086749`（遍历三处 apt 源改写为 `azure.archive.ubuntu.com` + `Acquire::ForceIPv4`，Wayland 只认真实 `renderD*` 才截图，X11 断言改名 `tray-menu-popup`） |
+| 3 | `44301504976` | X11 全绿（含截图与点击），Wayland `STEP fail: status-notifier-watcher`：`activity-manager` 之后 90s 无 watcher | `dbus_has_name` 只看 `busctl --user list` 第一列，把「可激活但未运行」的 `(activatable)` 行也算成「名已出现」，于是 `kded-service` 断言在 kded5 还没持有名字时就通过；紧接着的 `loadModule` 退化成 D-Bus activation，dbus-daemon 用它自己的旧环境（没有脚本 export 的 `XDG_RUNTIME_DIR`/`QT_QPA_PLATFORM`）fork 出的 kded5 直接 SIGABRT（日志 `Activated service 'org.kde.kded5' failed: Process org.kde.kded5 received signal 6`），watcher 永远不会出现 | `81eb487`：`dbus_has_name` 只认有真实 owner PID 的行；`loadModule` 重试 3 次并保留输出到 `kded-load-watcher.log`；Wayland 的 host 等待放宽到 120s（该轮 plasmashell 在 llvmpipe 上用了约 85s 才注册 `StatusNotifierHost`） |
 
-修复状态：安装集合已在 commit `d34c3b4` 从 `kde-plasma-desktop` 元包收敛为 `plasma-workspace` + `plasma-desktop` + `kwin-wayland`/`kwin-x11` + `kde-spectacle` 等；`wait_for` 消费 `--`、两个 KDE job 安装前把 `/etc/apt/apt-mirrors.txt` 归档主机改写为 `azure.archive.ubuntu.com` 并加 `Acquire::ForceIPv4` 这两项仍在工作区、尚未 commit/push。**修复后的结果以随后一次 run 为准，文档状态需随该 run 更新。**
+最终结果（run `44303232436`，`81eb487`）：
+
+- **kde-wayland**：`tarball-layout` / `kwin-socket (wayland-0)` / `kded-started` / `activity-manager` / `status-notifier-watcher` / `status-notifier-host` / `proxy-health` / `proxy-webui` / `tray-registered` / `tray-menu` 全 `STEP ok`；`STEP skip: screenshot (no /dev/dri/renderD*)` —— hosted runner 的 kwin virtual 后端只有 llvmpipe、没有 render node，按既定口径如实跳过像素证明，不冒充通过。`kded-load-watcher.log` 里可见 attempt 1 超时、attempt 2 返回 `b true`，说明重试是必需的而不是装饰。
+- **kde-x11**：`xvfb` / `kwin-x11` / `plasma-x11` / `status-notifier-host` / `proxy-health` / `proxy-webui` / `tray-registered` / `tray-menu` / `screenshot` / `tray-pixels` / `tray-menu-popup` 全 `STEP ok`。截图 1920×1080（1,387,705 B），像素扫描在 `bbox=[1564,1049,1581,1066]` 找到 268 个 `#2ECC71` 绿色像素（`green_candidates=2`），即真实面板右下的托盘图标；右键点击后新增 1 个 `IsViewable` 顶层窗口、质心 200px 范围内变化 23,856 像素（阈值 2000），`x11-menu.png` 1,371,962 B 里能看到开出来的菜单。CJK 标签在截图上显示为方框是 runner 缺中文字体，菜单文本本身由 DBusMenu 断言逐字校验，不以截图充数。
+
 
 ### 本轮记录的产品 / 环境发现
 
@@ -110,6 +118,7 @@ KDE Wayland 与 KDE X11 都在 Install 步骤或断言处红，根因已定位�
 ### 未做 / 未覆盖清单
 
 - self-hosted 真实 render node（VKMS / `/dev/dri`）未验：本轮无 `linux-kde-lab` runner。
+- Wayland 的**像素级视觉证明**未做：hosted runner 无 `/dev/dri/renderD*`，`spectacle` 截图会撞 KWin ScreenShot2 崩溃，脚本按既定口径 `STEP skip: screenshot` 并落 `screenshot-unavailable.txt`；Wayland 侧已由 watcher/host/托盘注册/DBusMenu 文本断言证明链路，但不是像素证明。
 - AUR 真实发布未做（容器 `makepkg` 已过；`git push` 到 AUR 需要账号）。
 - 菜单 DBus 语义仍由 `ci.yml` 的 `linux-sni-smoke` 覆盖；desktop-acceptance 只做像素与点击，不重复造 DBus 契约。
 - `release.yml` 未接入 `packaging/ci/` 共享脚本。
@@ -151,6 +160,8 @@ linux artifact 总体积 10,355,490 B。
 | KDE 真实桌面 | 部分推进：hosted Wayland/X11 两个 job 本轮红（脚本 `wait_for` 缺陷 + 区域镜像超时，修复未推送，见上节）；SNI 图标像素、右键菜单/启停视觉与点击尚未由 CI 证明；无头 `sni_contract` 已过 |
 | systemd 真实启停 | **已由 CI 真绿**：hosted ubuntu-24.04 VM 上 deb 真实安装 + `enable/start/stop/restart/disable/purge` + journal/隔离端口/日志目录校验（见上节） |
 | AppImage 真实桌面 | FUSE 真实挂载运行已真绿；真实桌面点按/视觉仍随 KDE job 与 self-hosted lab |
+| KDE 真实桌面（X11） | **已由 CI 真绿**（run `44303232436`）：Xvfb 1080p 下 kwin_x11 + plasmashell 面板真实出图、SNI 图标绿色像素扫描、右键点击开出真实菜单 |
+| KDE 真实桌面（Wayland） | **已由 CI 真绿**（run `44303232436`）：kwin virtual 后端 + plasmashell 面板 + watcher/host/托盘/DBusMenu 全链路；**像素截图按无 render node 诚实跳过**，Wayland 视觉像素仍属未证明项 |
 | Linux proxy 真实运行 | **已由 CI 真绿**：tarball 在隔离 `PORT`/`CC_DATA_DIR`/`CC_LOG_DIR`/`CC_WEBUI_DIR` 下真跑 health/WebUI/静态资源/目录契约 |
 | self-hosted render node | 未验：本轮无 `linux-kde-lab` runner，VKMS/`/dev/dri` 路径未执行 |
 | AUR 真实发布 | 未做：`git push` 到 aur.archlinux.org 需要 Arch 账号；容器 `makepkg` 已过 |

@@ -536,7 +536,7 @@ if [ "$a_ok" -eq 0 ] && [ "$b_ok" -eq 0 ]; then
     echo "STEP fail: tray-menu-popup" >&2
     echo "window: before=$before_count after=$after_count new=${#NEW_IDS[@]} new_viewable=$new_viewable" >&2
     echo "diff: changed_pixels=$changed_pixels (threshold 2000)" >&2
-    dump_evidence "tray-menu"
+    dump_evidence "tray-menu-popup"
     EXIT_STATUS=1
     exit 1
 fi

@@ -475,7 +475,7 @@ cargo doc --workspace --no-deps --locked
 5. Arch 容器 `makepkg` 通过。
 6. SNI 无头契约保持通过；KDE 视觉与点击验收仍按既有 M4 清单，不因打包通过而关闭。
 
-**本轮验收状态（`desktop-acceptance` workflow，分支 `feat/desktop-acceptance`，HEAD `d34c3b4`）**：上述 1/2/3/4 项已由 hosted runner 上的真实运行验收覆盖，不再是静态检查；KDE 视觉与点击（第 6 项的桌面部分）本轮仍未绿。逐项对应：
+**本轮验收状态（`desktop-acceptance` workflow，分支 `feat/desktop-acceptance`，HEAD `81eb487`，全绿 run `44303232436`）**：上述 1/2/3/4 项已由 hosted runner 上的真实运行验收覆盖，不再是静态检查；KDE 的 X11 视觉与点击也已真绿，Wayland 的链路（面板 + watcher + 托盘 + DBusMenu）真绿但其像素截图按「无 render node」诚实跳过。逐项对应：
 
 | §9.4 条目 | 对应 job / 脚本 | 本轮状态 |
 |---|---|---|
@@ -485,7 +485,7 @@ cargo doc --workspace --no-deps --locked
 | 4. AppImage 入口 smoke | `appimage-fuse`（`appimage-fuse-acceptance.sh`，PORT 18790） | 真绿：真实 FUSE 挂载（不用 `--appimage-extract-and-run`），进程来自挂载点，health/WebUI 200，退出后挂载与端口释放 |
 | 5. Arch 容器 `makepkg` | 既有 release dry-run / AUR 脚本 | 保持已过；AUR 真实 `git push` 发布仍未做 |
 | 6. SNI 无头契约 | `ci.yml` `linux-sni-smoke` | 保持通过；菜单 DBus 语义仍归该 job，desktop-acceptance 只做像素与点击 |
-| 6. KDE 视觉与点击 | `kde-wayland`（PORT 18792）、`kde-x11`（PORT 18793） | **红**：两类根因与未推送修复见 §14 与 REPORT「本轮 Linux 桌面/服务验收」；修复结果以随后一次 run 为准 |
+| 6. KDE 视觉与点击 | `kde-wayland`（PORT 18792）、`kde-x11`（PORT 18793） | X11 真绿：1920×1080 截图 + 268 个 `#2ECC71` 托盘像素 + 右键弹窗（新增 1 个 viewable 顶窗、23,856 像素变化）；Wayland 链路真绿（watcher/host/托盘/DBusMenu 全 `STEP ok`），像素证明按无 render node 诚实跳过 |
 
 打包入口收敛到 `packaging/ci/build-linux-artifacts.sh`（一次构建产两个 deb + AppImage + tarball + `SHA256SUMS`/`artifacts.txt`）；`release.yml` 本轮未接入该共享脚本。运行说明见 [`DESKTOP-ACCEPTANCE-CI.md`](DESKTOP-ACCEPTANCE-CI.md)。
 
@@ -648,7 +648,7 @@ cargo doc --workspace --no-deps --locked
 
 **与初稿的偏差（已按 §0.8 记录证据）**：① Linux tarball 资产名无 `v` 前缀（§2.3 已修正）；② deb 未保留 cargo-deb，采用 §6.3 优先方案——xtask 铺 Debian root，runner 上 `dpkg-shlibdeps` + `dpkg-deb --build`；③ 实施顺序上托盘共享（M5）先于 CI 收敛（M4）落地，里程碑内容不变；④ 真实发布包的形态比 §6 初稿多了一组防呆断言（AppDir 根图标、squashfs 锚点、dotfile 上传、精确行匹配），均由 dry-run 实跑暴露后补上。
 
-### 14.1 desktop-acceptance 轮次（`feat/desktop-acceptance`，HEAD `d34c3b4`）
+### 14.1 desktop-acceptance 轮次（`feat/desktop-acceptance`，HEAD `81eb487`，全绿 run `44303232436`）
 
 在上述 dry-run 之后，新增 Linux 桌面/服务验收 workflow `.github/workflows/desktop-acceptance.yml` 与 `packaging/ci/` 下 7 个脚本（`build-linux-artifacts.sh`、`systemd-deb-acceptance.sh`、`appimage-fuse-acceptance.sh`、`service-smoke.sh`、`kde-wayland.sh`、`kde-x11.sh`、`scan-tray-pixels.py`），并新增 `.github/actionlint.yaml` 登记自托管 label `linux-kde-lab`。打包逻辑收敛到 `packaging/ci/build-linux-artifacts.sh`：`build-linux`（ubuntu-22.04）一次构建产两个 deb + AppImage + linux tarball + `SHA256SUMS`/`artifacts.txt`，下游 job 只下载 `linux-desktop` artifact。`release.yml` 本轮未改，未接入该共享脚本。
 
@@ -656,7 +656,12 @@ cargo doc --workspace --no-deps --locked
 
 **已真绿**：`build-linux`；tarball 服务级 smoke（隔离 `PORT`/`CC_DATA_DIR`/`CC_LOG_DIR`/`CC_WEBUI_DIR` 真跑 health/WebUI/静态资源/目录契约/优雅退出）；AppImage 真实 FUSE（挂载源是 AppImage、进程来自挂载点、`/health` 与 `/webui/` 200、退出后挂载与端口释放）；systemd 真实装 deb + `enable/start/stop/restart/disable/purge`（`/health`、`/webui/`、静态资源、MainPID 与 exe 归属、journal、隔离端口、日志目录）。
 
-**仍未绿（d34c3b4 之前的状态）**：KDE Wayland 与 KDE X11 都在 Install 步骤/断言处红，根因两类：(a) 验收脚本 `wait_for` 未消费调用语法里的 `--` 分隔符，`until "$@"` 去执行名为 `--` 的命令，任何被等待状态都被误判为「等不到」（影响 `activity-manager`/`status-notifier-watcher`/`xvfb`/`plasma-x11` 等断言）；(b) hosted 区域镜像 `us-east-2.ec2.archive.ubuntu.com` 在 `libqt5webenginecore5`（42.6MB）上十分钟零进展，`apt install` 四次各 600s 全部 exit 124。修复状态：安装集合已在 commit `d34c3b4` 从 `kde-plasma-desktop` 元包收敛为 `plasma-workspace` + `plasma-desktop` + `kwin-wayland`/`kwin-x11` + `kde-spectacle` 等；`wait_for` 消费 `--`、两个 KDE job 安装前把 `/etc/apt/apt-mirrors.txt` 归档主机改写为 `azure.archive.ubuntu.com` 并加 `Acquire::ForceIPv4` 这两项仍在工作区、尚未 commit/push。**修复后的结果以随后一次 run 为准，文档状态需随该 run 更新。**
+**两个 KDE job：三次红因与最终转绿**（每次都由真实 run 定位，不靠本地猜测）：
+1. `44274422683`——两个 job 的 `Install Plasma … stack` 都 exit 124：`kde-plasma-desktop` 元包把 kate/konsole/dolphin/vlc/breeze 等整套应用拽进来（400+ 包），两个 KDE job 并行 apt 还互抢带宽。修：`7af79b7` 改可续跑安装、`d34c3b4` 去掉元包、两侧加 job 级并发组串行。
+2. `44279872249`——Wayland 反复 `--: command not found` 后 `activity-manager` 判红；X11 连装 4 次全 exit 124（`libqt5webenginecore5` 42.6MB 十分钟零进展）。修：`fda3053` 让 `wait_for` 消费 `--`；`d086749` 遍历三处 apt 源改写为 `azure.archive.ubuntu.com` + `Acquire::ForceIPv4`，Wayland 只认真实 `renderD*` 才截图，X11 弹窗断言改名 `tray-menu-popup`。
+3. `44301504976`——X11 全绿，Wayland 红在 `status-notifier-watcher`：`dbus_has_name` 把 `busctl --user list` 的 `(activatable)` 行当成「名已出现」，`kded-service` 断言在 kded5 尚未持有名字时就通过，随后的 `loadModule` 退化成 D-Bus activation，被 dbus-daemon 用旧环境 fork 的 kded5 直接 SIGABRT（`received signal 6`），watcher 永不出现。修：`81eb487` 只认有真实 owner PID 的行、`loadModule` 重试 3 次并留日志、Wayland host 等待放宽到 120s。
+
+**最终结果（run `44303232436`）**：`kde-wayland` 的 `tarball-layout`/`kwin-socket`/`kded-started`/`activity-manager`/`status-notifier-watcher`/`status-notifier-host`/`proxy-health`/`proxy-webui`/`tray-registered`/`tray-menu` 全 ok，`screenshot` 按「无 `/dev/dri/renderD*`」诚实跳过；`kde-x11` 的 `xvfb`/`kwin-x11`/`plasma-x11`/`status-notifier-host`/`proxy-*`/`tray-registered`/`tray-menu`/`screenshot`/`tray-pixels`/`tray-menu-popup` 全 ok，截图 1920×1080、托盘绿点 268 像素、右键弹窗新增 1 个 viewable 顶窗且 23,856 像素变化。
 
 **本轮记录的产品/环境发现**：deb 的 unit 在 `ProtectSystem=strict` 下更新检测写状态失败 `Read-only file system (os error 30)`（非致命，仅 WARN）；`/var/log/commandcode-proxy` 为 0750，验收脚本必须以 sudo 探测其中的 `proxy.log`。
 
