@@ -189,7 +189,7 @@ jobs:
     name: KDE Plasma Wayland · panel pixel proof
     needs: build-linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -221,7 +221,10 @@ jobs:
             exit 1
           fi
           timeout 300 sudo apt-get update
-          timeout -k 30 900 sudo apt-get install -y \
+          # --no-install-recommends 很关键：kde-plasma-desktop 的 Recommends 会把
+          # bubblewrap/bup/cryfs/clinfo 这类东西一并拉下来，在 hosted runner 的
+          # 镜像吞吐上要下十几分钟（首跑因此撞到 15 分钟上限 exit 124）。
+          timeout -k 30 1800 sudo apt-get install -y --no-install-recommends \
             -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
             -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
             kde-plasma-desktop plasma-workspace-wayland \
@@ -254,7 +257,7 @@ jobs:
     name: KDE Plasma X11 · panel pixel + click proof
     needs: build-linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -277,7 +280,7 @@ jobs:
             exit 1
           fi
           timeout 300 sudo apt-get update
-          timeout -k 30 900 sudo apt-get install -y \
+          timeout -k 30 1800 sudo apt-get install -y --no-install-recommends \
             -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
             -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
             kde-plasma-desktop xvfb xdotool x11-utils imagemagick \

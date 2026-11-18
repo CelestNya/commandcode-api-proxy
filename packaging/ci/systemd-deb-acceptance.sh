@@ -171,11 +171,19 @@ grep -q 'cc-proxy listening on' "$EVIDENCE_DIR/journal-start.log" \
     || fail "journal" "journal has no 'cc-proxy listening on' line"
 ok "journal (listening line present)"
 
-# 进程自己写的日志也必须落在 unit 声明的 CC_LOG_DIR（不是二进制旁边的 logs/）。
-LOG_FILE="$($SUDO find /var/log/commandcode-proxy -maxdepth 2 -name 'proxy.log' -type f | head -1)"
-test -n "$LOG_FILE" || fail "log-dir" "no proxy.log under /var/log/commandcode-proxy"
-test -s "$LOG_FILE" || fail "log-dir" "$LOG_FILE is empty"
-ok "log-dir ($LOG_FILE)"
+# 进程自己写的日志也必须落在 unit 声明的 CC_LOG_DIR（不是二进制旁边的 logs/）-
+# 但文件写入是有缓冲的：服务刚起来 1 秒时文件可能已经创建却还是空的（首跑就
+# 把「空文件」误判成「没有日志」）。这里给一个有界等待，只断言「最终有内容」。
+LOG_FILE="$($SUDO find /var/log/commandcode-proxy -maxdepth 2 -name 'proxy.log' -type f | head -1 || true)"
+test -n "$LOG_FILE" || fail "log-dir" "no proxy.log under /var/log/commandcode-proxy" \
+    "listing: $($SUDO ls -l /var/log/commandcode-proxy 2>&1 | tr '\n' ' ')"
+for ((i = 0; i < 20; i++)); do
+    [ -s "$LOG_FILE" ] && break
+    sleep 1
+done
+test -s "$LOG_FILE" || fail "log-dir" "$LOG_FILE still empty after 20s" \
+    "listing: $($SUDO ls -l /var/log/commandcode-proxy 2>&1 | tr '\n' ' ')"
+ok "log-dir ($LOG_FILE, $($SUDO stat -c%s "$LOG_FILE") bytes)"
 
 # ---- 7. stop → 端口必须真的释放 ----
 $SUDO systemctl stop commandcode-proxy

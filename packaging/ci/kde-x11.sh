@@ -166,13 +166,19 @@ echo "STEP ok: tarball-layout"
 # 4. Xvfb 虚拟 X 服务
 # ---------------------------------------------------------------------------
 export DISPLAY=:99
-Xvfb :99 -screen 0 1920x1080x24 >"$SHOTS_DIR/xvfb.log" 2>&1 &
+# -ac：Xvfb 无 auth 文件时照样可能被 MIT-MAGIC-COOKIE 拒绝，显式放开本地客户
+# 端；-nolisten tcp 只留 unix socket。用 -screen 固定 1920x1080 供截图断言。
+Xvfb :99 -screen 0 1920x1080x24 -ac -nolisten tcp >"$SHOTS_DIR/xvfb.log" 2>&1 &
 XVFB_PID=$!
 PIDS+=("$XVFB_PID")
 
 # 断言：xdpyinfo 能连上 :99——X 服务真实起来了，而不是脚本假设显示可用。
-if ! wait_for "xvfb" 20 0.5 -- xdpyinfo -display :99 >/dev/null 2>&1; then
-    fail "xvfb" "Xvfb :99 20s 内不可用；见 xvfb.log"
+# xdpyinfo 的输出必须落盘：首跑失败时只看到「20s 内不可用」这一个信息，
+# 真正的报错（socket 权限 / 连接被拒）被 /dev/null 吃掉了。
+xvfb_ready() { DISPLAY=:99 xdpyinfo >"$SHOTS_DIR/xdpyinfo.log" 2>&1; }
+if ! wait_for "xvfb" 30 0.5 -- xvfb_ready; then
+    ls -l /tmp/.X11-unix >"$SHOTS_DIR/x11-sockets.txt" 2>&1 || true
+    fail "xvfb" "Xvfb :99 30s 内不可用；见 xdpyinfo.log / xvfb.log / x11-sockets.txt"
 fi
 echo "STEP ok: xvfb"
 
