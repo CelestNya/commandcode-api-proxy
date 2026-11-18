@@ -189,7 +189,8 @@ jobs:
     name: KDE Plasma Wayland · panel pixel proof
     needs: build-linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # 安装阶段有 4 次×10 分钟的尝试预算，脚本本身另有 15 分钟硬上限。
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -222,11 +223,30 @@ jobs:
           fi
           timeout 300 sudo apt-get update
           # --no-install-recommends 很关键：kde-plasma-desktop 的 Recommends 会把
-          # bubblewrap/bup/cryfs/clinfo 这类东西一并拉下来，在 hosted runner 的
-          # 镜像吞吐上要下十几分钟（首跑因此撞到 15 分钟上限 exit 124）。
-          timeout -k 30 1800 sudo apt-get install -y --no-install-recommends \
-            -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
-            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+          # bubblewrap/bup/cryfs/clinfo 这类东西一并拉下来。
+          # 单次安装仍可能整体超时：镜像吞吐不稳时 apt 会卡在某个 Get: 上很久
+          # （实测一次 30 分钟内只下到第 125 个包，被 timeout 杀成 124）。而
+          # /var/cache/apt/archives 是跨调用累积的，所以这里改成「分次尝试」：
+          # 每次一条硬上限，失败后 dpkg --configure -a 兜底再重试，已下载的包
+          # 不会丢，重试是增量的。
+          install_retry() {
+            local attempts=4 i rc=1
+            for ((i = 1; i <= attempts; i++)); do
+              echo "::group::apt install attempt $i/$attempts"
+              rc=0
+              timeout -k 20 600 sudo apt-get install -y --no-install-recommends \
+                -o Acquire::Retries=10 -o Acquire::http::Timeout=20 \
+                -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+                "$@" || rc=$?
+              echo "attempt $i rc=$rc"
+              echo "::endgroup::"
+              [ "$rc" -eq 0 ] && return 0
+              sudo dpkg --configure -a || true
+              sleep $((i * 5))
+            done
+            return "$rc"
+          }
+          install_retry \
             kde-plasma-desktop plasma-workspace-wayland \
             kwin-wayland-backend-virtual kde-spectacle dbus-x11 python3-pil \
             libgl1-mesa-dri qtwayland5 kded5 kactivitymanagerd
@@ -258,7 +278,7 @@ jobs:
     name: KDE Plasma X11 · panel pixel + click proof
     needs: build-linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -281,9 +301,26 @@ jobs:
             exit 1
           fi
           timeout 300 sudo apt-get update
-          timeout -k 30 1800 sudo apt-get install -y --no-install-recommends \
-            -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
-            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+          # 与 Wayland job 同一策略：分次尝试，利用 apt 包缓存做增量重试，
+          # 避免镜像吞吐抖动把整步拖成 exit 124。
+          install_retry() {
+            local attempts=4 i rc=1
+            for ((i = 1; i <= attempts; i++)); do
+              echo "::group::apt install attempt $i/$attempts"
+              rc=0
+              timeout -k 20 600 sudo apt-get install -y --no-install-recommends \
+                -o Acquire::Retries=10 -o Acquire::http::Timeout=20 \
+                -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+                "$@" || rc=$?
+              echo "attempt $i rc=$rc"
+              echo "::endgroup::"
+              [ "$rc" -eq 0 ] && return 0
+              sudo dpkg --configure -a || true
+              sleep $((i * 5))
+            done
+            return "$rc"
+          }
+          install_retry \
             kde-plasma-desktop xvfb xdotool x11-utils imagemagick \
             dbus-x11 python3-pil libgl1-mesa-dri kded5 kactivitymanagerd
           dpkg -l kde-plasma-desktop xvfb kded5 kactivitymanagerd 2>/dev/null \
