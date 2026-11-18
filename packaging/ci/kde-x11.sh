@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 真实 Plasma X11 会话下的托盘验收（CI）。
 #
-# 流程：解包 Linux tarball → Xvfb 虚拟 X 服务 → startplasma-x11 起真实面板 →
+# 流程：解包 Linux tarball → Xvfb 虚拟 X 服务 → kwin_x11 + plasmashell 起真实面板 →
 # 起隔离端口代理 → 起 ksni 托盘 → 截全屏并扫描绿色圆点 → 在图标上右键，
 # 断言托盘右键菜单真实弹出（新映射窗口 或 图标附近区域像素变化，任一成立）。
 #
@@ -56,8 +56,7 @@ cleanup() {
         kill -9 "$pid" 2>/dev/null || true
     done
     # 兜底：匹配本会话显示名/命令行的残留外壳进程。
-    pkill -f 'Xvfb :99' 2>/dev/null || true
-    pkill -f 'startplasma-x11' 2>/dev/null || true
+    pkill -f "Xvfb $DISPLAY" 2>/dev/null || true
     pkill -f 'kwin_x11' 2>/dev/null || true
     pkill -f 'plasmashell' 2>/dev/null || true
     pkill -f 'kded[56]?' 2>/dev/null || true
@@ -114,6 +113,12 @@ fail() {
 wait_for() {
     local name="$1" timeout="$2" interval="$3"
     shift 3
+    # 允许调用方写成 `wait_for name timeout interval -- command`。
+    # 不剥掉这个分隔符，until 会把字面量 `--` 当成命令执行，所有断言
+    # 都会在超时后误报失败（2026-11-18 run 44279872249 的真实根因）。
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
     local deadline=$((SECONDS + timeout))
     until "$@"; do
         if [ "$SECONDS" -ge "$deadline" ]; then
@@ -128,13 +133,48 @@ dbus_has_name() {
     local pattern="$1"
     local names
     if command -v busctl >/dev/null 2>&1; then
-        names="$(busctl --user list 2>/dev/null || true)"
+        # busctl --user list 每行是「服务名 PID 进程 ...」，先只取第一列；
+        # 否则调用方的 ^...$ 锚点永远匹配不到带 PID 的整行。
+        names="$(busctl --user list 2>/dev/null | awk 'NF {print $1}' || true)"
     else
         names="$(dbus-send --session --dest=org.freedesktop.DBus --type=method_call \
             /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null \
-            | grep 'string' || true)"
+            | sed -n 's/.*string "\([^"]*\)".*/\1/p' || true)"
     fi
     printf '%s\n' "$names" | grep -E "$pattern" >/dev/null 2>&1
+}
+
+# tray_service_name：返回 ksni 注册的 SNI well-known 名（不带参数）。
+tray_service_name() {
+    busctl --user list 2>/dev/null \
+        | awk '$1 ~ /^org\.kde\.StatusNotifierItem-/ {print $1; exit}'
+}
+
+# tray_menu_path <service>：读 SNI 的 Menu 属性，得到 DBusMenu 对象路径。
+tray_menu_path() {
+    local service="$1"
+    busctl --user call "$service" /StatusNotifierItem \
+        org.freedesktop.DBus.Properties Get ss org.kde.StatusNotifierItem Menu 2>/dev/null \
+        | sed -n 's/.*o "\([^"]*\)".*/\1/p'
+}
+
+# tray_menu_has_labels：真实读取 DBusMenu 布局并断言关键菜单项存在。
+# 这条断言在无 GPU 的 hosted runner 上替代“截图里能看到右键菜单”：
+# 它证明 SNI 已被面板接受、Menu 指针有效、DBusMenu 布局真的注册了动作，
+# 而不是只看到一个服务名。
+tray_menu_has_labels() {
+    local service path layout label
+    service="$(tray_service_name)" || return 1
+    [ -n "$service" ] || return 1
+    path="$(tray_menu_path "$service")" || return 1
+    [ -n "$path" ] || return 1
+    # 参数里的 -1 会被 busctl/gdbus 当成选项；gdbus 用 `--` 终止选项解析。
+    layout="$(gdbus call --session --dest "$service" --object-path "$path" \
+        --method com.canonical.dbusmenu.GetLayout -- 0 -1 "[]" 2>/dev/null)" || return 1
+    for label in '启动代理' '停止代理' '打开 WebUI' '退出'; do
+        printf '%s\n' "$layout" | grep -Fq "$label" || return 1
+    done
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -165,10 +205,10 @@ echo "STEP ok: tarball-layout"
 # ---------------------------------------------------------------------------
 # 4. Xvfb 虚拟 X 服务
 # ---------------------------------------------------------------------------
-export DISPLAY=:99
+export DISPLAY="${CC_TEST_DISPLAY:-:99}"
 # -ac：Xvfb 无 auth 文件时照样可能被 MIT-MAGIC-COOKIE 拒绝，显式放开本地客户
 # 端；-nolisten tcp 只留 unix socket。用 -screen 固定 1920x1080 供截图断言。
-Xvfb :99 -screen 0 1920x1080x24 -ac -nolisten tcp >"$SHOTS_DIR/xvfb.log" 2>&1 &
+Xvfb "$DISPLAY" -screen 0 1920x1080x24 -ac -nolisten tcp >"$SHOTS_DIR/xvfb.log" 2>&1 &
 XVFB_PID=$!
 PIDS+=("$XVFB_PID")
 
@@ -184,15 +224,15 @@ if ! wait_for "xvfb" 90 1 -- x11_probe; then
             printf '%s: %s\n' "$t" "$(command -v "$t" || echo "(missing)")"
         done
         echo "--- xwininfo -root ---"
-        DISPLAY=:99 xwininfo -root 2>&1 || echo "rc=$?"
+        DISPLAY="$DISPLAY" xwininfo -root 2>&1 || echo "rc=$?"
         echo "--- xdpyinfo (head) ---"
-        DISPLAY=:99 xdpyinfo 2>&1 | head -6 || echo "rc=$?"
+        DISPLAY="$DISPLAY" xdpyinfo 2>&1 | head -6 || echo "rc=$?"
         echo "--- /tmp/.X11-unix ---"
         ls -l /tmp/.X11-unix 2>&1 || true
         echo "--- xvfb.log (tail) ---"
         tail -20 "$SHOTS_DIR/xvfb.log" 2>/dev/null || true
     } >"$SHOTS_DIR/xvfb-diagnostics.txt" 2>&1 || true
-    fail "xvfb" "Xvfb :99 30s 内不可用；见 xvfb-diagnostics.txt"
+    fail "xvfb" "Xvfb $DISPLAY 30s 内不可用；见 xvfb-diagnostics.txt"
 fi
 echo "STEP ok: xvfb ($(grep -m1 dimensions "$SHOTS_DIR/xwininfo-probe.log" 2>/dev/null | tr -s ' ' || echo 'geometry unknown'))"
 
@@ -220,14 +260,28 @@ KDED_PID=$!
 PIDS+=("$KDED_PID")
 echo "STEP ok: kded-started ($KDED_BIN)"
 
+# kded 不会自动加载 statusnotifierwatcher（默认 session 里通常由系统托盘
+# applet 触发）；hosted runner 没有默认面板配置时它永远不会出现。这里
+# 直接让 kded 加载模块，避免把“面板没请求”误判成“托盘没注册”。
+if ! wait_for "kded-service" 15 0.5 -- dbus_has_name '^org\.kde\.kded[56]$'; then
+    fail "kded-service" "15s 内未出现 org.kde.kded5/6；见 kded.log"
+fi
+KDED_SERVICE="$(busctl --user list 2>/dev/null | awk '$1 ~ /^org\.kde\.kded[56]$/ {print $1; exit}')"
+if [ -n "$KDED_SERVICE" ]; then
+    busctl --user call "$KDED_SERVICE" /kded "$KDED_SERVICE" loadModule s statusnotifierwatcher \
+        >"$SHOTS_DIR/kded-load-watcher.log" 2>&1 || true
+fi
+
 # ---------------------------------------------------------------------------
-# 5. startplasma-x11：完整 Plasma X11 面板
+# 5. kwin_x11 + plasmashell：完整 Plasma X11 面板
 # ---------------------------------------------------------------------------
-# startplasma-x11 的 ksmserver 通常自己拉起 kactivitymanagerd，但 hosted
-# runner 上先起它更稳：plasmashell 5.27 在活动管理器缺席时会直接 abort shell
-# load（Wayland 侧已实测到这条）。
-# KDE 的守护进程装在 libexec 里而不是 PATH：包确实装了，但
-# `command -v kactivitymanagerd` 会落空。
+# 不调用 startplasma-x11：它检测到 /run/systemd/system 后会走 systemd user
+# manager 路径；hosted runner 没有可用的 user systemd 实例时，它会连续重试
+# org.freedesktop.systemd1 并永远不启动 kwin/plasmashell（2026-11-18 本地
+# 无头 VM 实测）。直接启动真实 KDE 组件，既避开这个宿主差异，又保留完整
+# X11 compositor + Plasma 面板 + watcher 的验收对象。
+# plasmashell 5.27 在活动管理器缺席时会直接 abort shell load，先起
+# kactivitymanagerd；KDE 守护进程装在 libexec 里而不是 PATH。
 KAMD_BIN=""
 for candidate in kactivitymanagerd /usr/lib/*/libexec/kactivitymanagerd; do
     if [ -x "$candidate" ]; then
@@ -241,7 +295,15 @@ done
 KAMD_PID=$!
 PIDS+=("$KAMD_PID")
 
-startplasma-x11 >"$SHOTS_DIR/plasma-x11.log" 2>&1 &
+kwin_x11 >"$SHOTS_DIR/kwin-x11.log" 2>&1 &
+KWIN_PID=$!
+PIDS+=("$KWIN_PID")
+if ! wait_for "kwin-x11" 30 0.5 -- dbus_has_name '^org\.kde\.KWin$'; then
+    fail "kwin-x11" "30s 内未出现 org.kde.KWin；见 kwin-x11.log"
+fi
+echo "STEP ok: kwin-x11"
+
+plasmashell >"$SHOTS_DIR/plasmashell.log" 2>&1 &
 PLASMA_PID=$!
 PIDS+=("$PLASMA_PID")
 
@@ -263,8 +325,10 @@ if ! wait_for "plasma-x11" 90 0.5 -- plasma_x11_ready; then
         xdotool search --class plasmashell 2>&1 || true
         echo "--- X window tree ---"
         xwininfo -root -tree 2>&1 | head -40 || true
-        echo "--- plasma-x11.log (tail) ---"
-        tail -40 "$SHOTS_DIR/plasma-x11.log" 2>/dev/null || true
+        echo "--- kwin-x11.log (tail) ---"
+        tail -40 "$SHOTS_DIR/kwin-x11.log" 2>/dev/null || true
+        echo "--- plasmashell.log (tail) ---"
+        tail -40 "$SHOTS_DIR/plasmashell.log" 2>/dev/null || true
         echo "--- kactivitymanagerd.log (tail) ---"
         tail -20 "$SHOTS_DIR/kactivitymanagerd.log" 2>/dev/null || true
         echo "--- kded.log ---"
@@ -273,6 +337,12 @@ if ! wait_for "plasma-x11" 90 0.5 -- plasma_x11_ready; then
     fail "plasma-x11" "90s 内 watcher/plasmashell 窗口未就绪；见 plasma-x11-diagnostics.txt"
 fi
 echo "STEP ok: plasma-x11"
+
+# 面板里的系统托盘注册 StatusNotifierHost 后，SNI 图标才会被绘制。
+if ! wait_for "status-notifier-host" 30 0.5 -- dbus_has_name '^org\.kde\.StatusNotifierHost-'; then
+    fail "status-notifier-host" "30s 内未出现 StatusNotifierHost；见 plasmashell.log"
+fi
+echo "STEP ok: status-notifier-host"
 
 # ---------------------------------------------------------------------------
 # 6. 代理：隔离端口 / 隔离数据与日志目录
@@ -334,6 +404,13 @@ if ! wait_for "tray-registered" 30 0.5 -- tray_registered; then
     fail "tray-registered" "托盘 30s 内未注册 SNI；见 tray-stdout.log 与 $TRAY_LOG"
 fi
 echo "STEP ok: tray-registered"
+
+if ! wait_for "tray-menu" 30 0.5 -- tray_menu_has_labels; then
+    fail "tray-menu" "30s 内未读到预期的 DBusMenu 菜单项；见 tray.log 与 dump_evidence"
+fi
+echo "STEP ok: tray-menu"
+
+
 
 sleep 4
 

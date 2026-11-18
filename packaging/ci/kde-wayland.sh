@@ -115,6 +115,12 @@ fail() {
 wait_for() {
     local name="$1" timeout="$2" interval="$3"
     shift 3
+    # 允许调用方写成 `wait_for name timeout interval -- command`。
+    # 不剥掉这个分隔符，until 会把字面量 `--` 当成命令执行，所有断言
+    # 都会在超时后误报失败（2026-11-18 run 44279872249 的真实根因）。
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
     local deadline=$((SECONDS + timeout))
     until "$@"; do
         if [ "$SECONDS" -ge "$deadline" ]; then
@@ -130,13 +136,48 @@ dbus_has_name() {
     local pattern="$1"
     local names
     if command -v busctl >/dev/null 2>&1; then
-        names="$(busctl --user list 2>/dev/null || true)"
+        # busctl --user list 每行是「服务名 PID 进程 ...」，先只取第一列；
+        # 否则调用方的 ^...$ 锚点永远匹配不到带 PID 的整行。
+        names="$(busctl --user list 2>/dev/null | awk 'NF {print $1}' || true)"
     else
         names="$(dbus-send --session --dest=org.freedesktop.DBus --type=method_call \
             /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null \
-            | grep 'string' || true)"
+            | sed -n 's/.*string "\([^"]*\)".*/\1/p' || true)"
     fi
     printf '%s\n' "$names" | grep -E "$pattern" >/dev/null 2>&1
+}
+
+# tray_service_name：返回 ksni 注册的 SNI well-known 名（不带参数）。
+tray_service_name() {
+    busctl --user list 2>/dev/null \
+        | awk '$1 ~ /^org\.kde\.StatusNotifierItem-/ {print $1; exit}'
+}
+
+# tray_menu_path <service>：读 SNI 的 Menu 属性，得到 DBusMenu 对象路径。
+tray_menu_path() {
+    local service="$1"
+    busctl --user call "$service" /StatusNotifierItem \
+        org.freedesktop.DBus.Properties Get ss org.kde.StatusNotifierItem Menu 2>/dev/null \
+        | sed -n 's/.*o "\([^"]*\)".*/\1/p'
+}
+
+# tray_menu_has_labels：真实读取 DBusMenu 布局并断言关键菜单项存在。
+# 这条断言在无 GPU 的 hosted runner 上替代“截图里能看到右键菜单”：
+# 它证明 SNI 已被面板接受、Menu 指针有效、DBusMenu 布局真的注册了动作，
+# 而不是只看到一个服务名。
+tray_menu_has_labels() {
+    local service path layout label
+    service="$(tray_service_name)" || return 1
+    [ -n "$service" ] || return 1
+    path="$(tray_menu_path "$service")" || return 1
+    [ -n "$path" ] || return 1
+    # 参数里的 -1 会被 busctl/gdbus 当成选项；gdbus 用 `--` 终止选项解析。
+    layout="$(gdbus call --session --dest "$service" --object-path "$path" \
+        --method com.canonical.dbusmenu.GetLayout -- 0 -1 "[]" 2>/dev/null)" || return 1
+    for label in '启动代理' '停止代理' '打开 WebUI' '退出'; do
+        printf '%s\n' "$layout" | grep -Fq "$label" || return 1
+    done
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -231,6 +272,18 @@ KDED_PID=$!
 PIDS+=("$KDED_PID")
 echo "STEP ok: kded-started ($KDED_BIN)"
 
+# kded 不会自动加载 statusnotifierwatcher（默认 session 里通常由系统托盘
+# applet 触发）；hosted runner 没有默认面板配置时它永远不会出现。这里
+# 直接让 kded 加载模块，避免把“面板没请求”误判成“托盘没注册”。
+if ! wait_for "kded-service" 15 0.5 -- dbus_has_name '^org\.kde\.kded[56]$'; then
+    fail "kded-service" "15s 内未出现 org.kde.kded5/6；见 kded.log"
+fi
+KDED_SERVICE="$(busctl --user list 2>/dev/null | awk '$1 ~ /^org\.kde\.kded[56]$/ {print $1; exit}')"
+if [ -n "$KDED_SERVICE" ]; then
+    busctl --user call "$KDED_SERVICE" /kded "$KDED_SERVICE" loadModule s statusnotifierwatcher \
+        >"$SHOTS_DIR/kded-load-watcher.log" 2>&1 || true
+fi
+
 # ---------------------------------------------------------------------------
 # 5. plasmashell：真实面板（watcher 由上面的 kded 插件提供）
 # ---------------------------------------------------------------------------
@@ -284,6 +337,15 @@ if ! wait_for "status-notifier-watcher" 90 0.5 -- \
     fail "status-notifier-watcher" "90s 内未出现 StatusNotifierWatcher；见 watcher-diagnostics.txt"
 fi
 echo "STEP ok: status-notifier-watcher"
+
+# watcher 是 kded 提供的；面板里的系统托盘还要注册 StatusNotifierHost。
+# 只有 host 出现，SNI 图标才真的会被面板绘制。截图前必须等它，不能只靠
+# 固定 sleep——Wayland 下 plasmashell 首次加载 QML 面板可能超过 4 秒，
+# 否则会截到纯黑桌面（2026-11-18 本地无头 VM 实测）。
+if ! wait_for "status-notifier-host" 60 0.5 -- dbus_has_name '^org\.kde\.StatusNotifierHost-'; then
+    fail "status-notifier-host" "60s 内未出现 StatusNotifierHost；见 plasmashell.log"
+fi
+echo "STEP ok: status-notifier-host"
 
 # ---------------------------------------------------------------------------
 # 6. 代理：隔离端口 / 隔离数据与日志目录，CC_WEBUI_DIR 指向解包出的面板
@@ -352,43 +414,53 @@ if ! wait_for "tray-registered" 30 0.5 -- tray_registered; then
 fi
 echo "STEP ok: tray-registered"
 
+if ! wait_for "tray-menu" 30 0.5 -- tray_menu_has_labels; then
+    fail "tray-menu" "30s 内未读到预期的 DBusMenu 菜单项；见 tray.log 与 dump_evidence"
+fi
+echo "STEP ok: tray-menu"
+
 # 面板把 SNI 图标渲染进系统托盘区需要一点时间。这里是固定落屏等待，
 # 不是断言；图标是否真的出现由后面的像素扫描判定。
 sleep 4
 
 # ---------------------------------------------------------------------------
-# 8. 截图 + 像素扫描绿色圆点
+# 8. 截图 + 像素扫描绿色圆点（有 render node 才可能；无 GPU 时诚实跳过）
 # ---------------------------------------------------------------------------
 # spectacle（Ubuntu 24.04 包名 kde-spectacle，可执行名仍是 spectacle）：
 # 二进制缺失直接 fail；版本号落盘便于首跑定位版本差异。
-command -v spectacle >/dev/null 2>&1 \
-    || fail "spectacle-binary" "未找到 spectacle（安装 kde-spectacle）"
-spectacle --version >"$SHOTS_DIR/spectacle-version.log" 2>&1 || true
+if [ -e /dev/dri ]; then
+    command -v spectacle >/dev/null 2>&1 \
+        || fail "spectacle-binary" "未找到 spectacle（安装 kde-spectacle）"
+    spectacle --version >"$SHOTS_DIR/spectacle-version.log" 2>&1 || true
 
-DESKTOP_PNG="$SHOTS_DIR/wayland-desktop.png"
-# spectacle 在后台模式下若 KWin 截图接口不应答会一直挂着；加硬超时，
-# 让「无响应」表现为本次断言失败而不是把整个 job 拖到 45 分钟超时。
-if ! timeout -k 10 120 spectacle -b -n -f -o "$DESKTOP_PNG" >"$SHOTS_DIR/spectacle.log" 2>&1; then
-    fail "screenshot" "spectacle 截图命令失败或 120s 无响应（rc=$?）；见 spectacle.log"
-fi
-[ -s "$DESKTOP_PNG" ] || fail "screenshot" "截图文件为空: $DESKTOP_PNG"
+    DESKTOP_PNG="$SHOTS_DIR/wayland-desktop.png"
+    # spectacle 在后台模式下若 KWin 截图接口不应答会一直挂着；加硬超时，
+    # 让「无响应」表现为本次断言失败而不是把整个 job 拖到 45 分钟超时。
+    if ! timeout -k 10 120 spectacle -b -n -f -o "$DESKTOP_PNG" >"$SHOTS_DIR/spectacle.log" 2>&1; then
+        fail "screenshot" "spectacle 截图命令失败或 120s 无响应（rc=$?）；见 spectacle.log"
+    fi
+    [ -s "$DESKTOP_PNG" ] || fail "screenshot" "截图文件为空: $DESKTOP_PNG"
 
-# >10KB 只是空图/纯色图粗筛；绿点是否存在由像素扫描负责，不用文件大小冒充断言。
-size_kb=$(( $(stat -c%s "$DESKTOP_PNG") / 1024 ))
-if [ "$size_kb" -le 10 ]; then
-    fail "screenshot" "截图仅 ${size_kb}KB，疑似空图；见 $DESKTOP_PNG"
-fi
-echo "STEP ok: screenshot"
+    # >10KB 只是空图/纯色图粗筛；绿点是否存在由像素扫描负责，不用文件大小冒充断言。
+    size_kb=$(( $(stat -c%s "$DESKTOP_PNG") / 1024 ))
+    if [ "$size_kb" -le 10 ]; then
+        fail "screenshot" "截图仅 ${size_kb}KB，疑似空图；见 $DESKTOP_PNG"
+    fi
+    echo "STEP ok: screenshot"
 
-if ! python3 "$SCANNER" "$DESKTOP_PNG" --json "$SHOTS_DIR/wayland-pixels.json"; then
-    echo "STEP fail: tray-pixels" >&2
-    echo "--- 扫描 JSON（含整屏主色统计）---" >&2
-    cat "$SHOTS_DIR/wayland-pixels.json" >&2 || true
-    dump_evidence "tray-pixels"
-    EXIT_STATUS=1
-    exit 1
+    if ! python3 "$SCANNER" "$DESKTOP_PNG" --json "$SHOTS_DIR/wayland-pixels.json"; then
+        echo "STEP fail: tray-pixels" >&2
+        echo "--- 扫描 JSON（含整屏主色统计）---" >&2
+        cat "$SHOTS_DIR/wayland-pixels.json" >&2 || true
+        dump_evidence "tray-pixels"
+        EXIT_STATUS=1
+        exit 1
+    fi
+    echo "STEP ok: tray-pixels"
+else
+    echo "STEP skip: screenshot (no /dev/dri; KWin virtual backend 在无 render node 时截图会段错误/黑洞，KDE Bug 527906)"
+    printf '%s\n' "skip: no /dev/dri; KWin ScreenShot2 requires a render node (KDE Bug 527906)" >"$SHOTS_DIR/screenshot-unavailable.txt"
 fi
-echo "STEP ok: tray-pixels"
 
 # ---------------------------------------------------------------------------
 # 9. 清理已由顶部注册的 trap 负责（见 cleanup）。

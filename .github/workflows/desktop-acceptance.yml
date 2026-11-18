@@ -129,7 +129,7 @@ jobs:
             if ! sudo fuser -s /var/lib/dpkg/lock-frontend 2>/dev/null; then break; fi
             sleep 1
           done
-          timeout 300 sudo apt-get update
+          timeout 300 sudo apt-get -o Acquire::ForceIPv4=true update
           timeout -k 20 300 sudo apt-get install -y \
             -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
             libfuse2t64 || timeout -k 20 300 sudo apt-get install -y libfuse2
@@ -203,6 +203,18 @@ jobs:
         with:
           name: linux-desktop
           path: artifacts
+      - name: Prefer a responsive Ubuntu mirror
+        # run 44279872249 实测：默认 us-east-2.ec2.archive.ubuntu.com 上的
+        # libqt5webenginecore5 (42.6 MB) 10 分钟零进度，两个 KDE job 都被
+        # exit 124 拖死。azure.archive.ubuntu.com 在本机 1 MB range 测试中
+        # 约 800 KB/s，是同一批包的可达镜像。
+        run: |
+          set -euo pipefail
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i -E 's#http(s)?://[^ ]*archive\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
+            echo '--- apt mirror after rewrite ---'
+            cat /etc/apt/apt-mirrors.txt
+          fi
       - name: Install Plasma Wayland stack
         # kwin-wayland-backend-virtual 是 KWin 的「虚拟后端」：不需要 /dev/dri
         # 也能起真实 compositor，这正是 hosted runner 上唯一诚实可行的路径。
@@ -227,7 +239,7 @@ jobs:
             echo "dpkg frontend lock still held:"; sudo fuser -v /var/lib/dpkg/lock-frontend || true
             exit 1
           fi
-          timeout 300 sudo apt-get update
+          timeout 300 sudo apt-get -o Acquire::ForceIPv4=true update
           # --no-install-recommends 很关键：kde-plasma-desktop 的 Recommends 会把
           # bubblewrap/bup/cryfs/clinfo 这类东西一并拉下来。
           # 单次安装仍可能整体超时：镜像吞吐不稳时 apt 会卡在某个 Get: 上很久
@@ -240,7 +252,7 @@ jobs:
             for ((i = 1; i <= attempts; i++)); do
               echo "::group::apt install attempt $i/$attempts"
               rc=0
-              timeout -k 20 600 sudo apt-get install -y --no-install-recommends \
+              timeout -k 20 600 sudo apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
                 -o Acquire::Retries=10 -o Acquire::http::Timeout=20 \
                 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
                 "$@" || rc=$?
@@ -295,6 +307,18 @@ jobs:
         with:
           name: linux-desktop
           path: artifacts
+      - name: Prefer a responsive Ubuntu mirror
+        # run 44279872249 实测：默认 us-east-2.ec2.archive.ubuntu.com 上的
+        # libqt5webenginecore5 (42.6 MB) 10 分钟零进度，两个 KDE job 都被
+        # exit 124 拖死。azure.archive.ubuntu.com 在本机 1 MB range 测试中
+        # 约 800 KB/s，是同一批包的可达镜像。
+        run: |
+          set -euo pipefail
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i -E 's#http(s)?://[^ ]*archive\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' /etc/apt/apt-mirrors.txt
+            echo '--- apt mirror after rewrite ---'
+            cat /etc/apt/apt-mirrors.txt
+          fi
       - name: Install Plasma X11 stack + screenshot/input tooling
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -310,7 +334,7 @@ jobs:
             echo "dpkg frontend lock still held:"; sudo fuser -v /var/lib/dpkg/lock-frontend || true
             exit 1
           fi
-          timeout 300 sudo apt-get update
+          timeout 300 sudo apt-get -o Acquire::ForceIPv4=true update
           # 与 Wayland job 同一策略：分次尝试，利用 apt 包缓存做增量重试，
           # 避免镜像吞吐抖动把整步拖成 exit 124。
           install_retry() {
@@ -318,7 +342,7 @@ jobs:
             for ((i = 1; i <= attempts; i++)); do
               echo "::group::apt install attempt $i/$attempts"
               rc=0
-              timeout -k 20 600 sudo apt-get install -y --no-install-recommends \
+              timeout -k 20 600 sudo apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
                 -o Acquire::Retries=10 -o Acquire::http::Timeout=20 \
                 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
                 "$@" || rc=$?
@@ -337,7 +361,7 @@ jobs:
           dpkg -l plasma-workspace plasma-desktop kwin-x11 xvfb kded5 \
             kactivitymanagerd 2>/dev/null \
             | awk '$1 == "ii" {print $2, $3}'
-      - name: Xvfb + startplasma-x11, run tray, screenshot, right-click menu proof
+      - name: Xvfb + kwin_x11/plasmashell, run tray, screenshot, right-click menu proof
         env:
           PORT: '18793'
           WORK_DIR: ${{ runner.temp }}/kde-x11-work
