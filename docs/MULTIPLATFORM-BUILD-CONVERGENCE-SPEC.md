@@ -475,6 +475,20 @@ cargo doc --workspace --no-deps --locked
 5. Arch 容器 `makepkg` 通过。
 6. SNI 无头契约保持通过；KDE 视觉与点击验收仍按既有 M4 清单，不因打包通过而关闭。
 
+**本轮验收状态（`desktop-acceptance` workflow，分支 `feat/desktop-acceptance`，HEAD `d34c3b4`）**：上述 1/2/3/4 项已由 hosted runner 上的真实运行验收覆盖，不再是静态检查；KDE 视觉与点击（第 6 项的桌面部分）本轮仍未绿。逐项对应：
+
+| §9.4 条目 | 对应 job / 脚本 | 本轮状态 |
+|---|---|---|
+| 1. tar.gz 隔离 health/WebUI | `service-smoke`（`service-smoke.sh`，PORT 18791） | 真绿：隔离 `PORT`/`CC_DATA_DIR`/`CC_LOG_DIR`/`CC_WEBUI_DIR` 真跑，health、WebUI、静态资源、目录契约、优雅退出通过 |
+| 2. deb 安装后契约 | `systemd-deb`（`systemd-deb-acceptance.sh`，PORT 18789） | 真绿：真实 `apt-get install` 两个 deb，binary/unit/WebUI/env/服务账号/目录归属随安装流程校验 |
+| 3. 真实 systemctl 启停与 journal | `systemd-deb`（同上） | 真绿：`enable/start/stop/restart/disable/purge` 全流程，MainPID/exe 归属、journal 监听行、隔离端口、日志目录校验通过；容器无 systemd 的限制由该 job 跑在完整 VM 上规避 |
+| 4. AppImage 入口 smoke | `appimage-fuse`（`appimage-fuse-acceptance.sh`，PORT 18790） | 真绿：真实 FUSE 挂载（不用 `--appimage-extract-and-run`），进程来自挂载点，health/WebUI 200，退出后挂载与端口释放 |
+| 5. Arch 容器 `makepkg` | 既有 release dry-run / AUR 脚本 | 保持已过；AUR 真实 `git push` 发布仍未做 |
+| 6. SNI 无头契约 | `ci.yml` `linux-sni-smoke` | 保持通过；菜单 DBus 语义仍归该 job，desktop-acceptance 只做像素与点击 |
+| 6. KDE 视觉与点击 | `kde-wayland`（PORT 18792）、`kde-x11`（PORT 18793） | **红**：两类根因与未推送修复见 §14 与 REPORT「本轮 Linux 桌面/服务验收」；修复结果以随后一次 run 为准 |
+
+打包入口收敛到 `packaging/ci/build-linux-artifacts.sh`（一次构建产两个 deb + AppImage + tarball + `SHA256SUMS`/`artifacts.txt`）；`release.yml` 本轮未接入该共享脚本。运行说明见 [`DESKTOP-ACCEPTANCE-CI.md`](DESKTOP-ACCEPTANCE-CI.md)。
+
 ### 9.5 最终 Release dry-run
 
 - 用 `workflow_dispatch` 跑完整 Release，不发布。
@@ -634,13 +648,27 @@ cargo doc --workspace --no-deps --locked
 
 **与初稿的偏差（已按 §0.8 记录证据）**：① Linux tarball 资产名无 `v` 前缀（§2.3 已修正）；② deb 未保留 cargo-deb，采用 §6.3 优先方案——xtask 铺 Debian root，runner 上 `dpkg-shlibdeps` + `dpkg-deb --build`；③ 实施顺序上托盘共享（M5）先于 CI 收敛（M4）落地，里程碑内容不变；④ 真实发布包的形态比 §6 初稿多了一组防呆断言（AppDir 根图标、squashfs 锚点、dotfile 上传、精确行匹配），均由 dry-run 实跑暴露后补上。
 
-**仍未覆盖的实机验收项（不关闭）**：
+### 14.1 desktop-acceptance 轮次（`feat/desktop-acceptance`，HEAD `d34c3b4`）
 
-- KDE Plasma（X11 + Wayland）真实桌面：SNI 图标出现、右键菜单条目与启停视觉/点击（L1/L3 实机；无头 SNI 契约已过）。
-- systemd 真实 `systemctl start/stop/enable` 启停与 journal 日志（runner 只跑了 `systemd-analyze verify`，无真实 systemd PID 1）。
-- AppImage 在**真实桌面**运行（CI/本机只验证了 `--appimage-extract-and-run` 构建与 squashfs 锚点，未在有 FUSE 的桌面点按）。
-- Linux 侧以独立 `PORT`/`CC_DATA_DIR`/`CC_WEBUI_DIR` **真正运行** Linux proxy（本机复检是 python 静态解包/控制文件检查，没跑 Linux 二进制）。
+在上述 dry-run 之后，新增 Linux 桌面/服务验收 workflow `.github/workflows/desktop-acceptance.yml` 与 `packaging/ci/` 下 7 个脚本（`build-linux-artifacts.sh`、`systemd-deb-acceptance.sh`、`appimage-fuse-acceptance.sh`、`service-smoke.sh`、`kde-wayland.sh`、`kde-x11.sh`、`scan-tray-pixels.py`），并新增 `.github/actionlint.yaml` 登记自托管 label `linux-kde-lab`。打包逻辑收敛到 `packaging/ci/build-linux-artifacts.sh`：`build-linux`（ubuntu-22.04）一次构建产两个 deb + AppImage + linux tarball + `SHA256SUMS`/`artifacts.txt`，下游 job 只下载 `linux-desktop` artifact。`release.yml` 本轮未改，未接入该共享脚本。
+
+七个 job：`systemd-deb`（ubuntu-24.04，PORT 18789）、`appimage-fuse`（24.04，18790）、`service-smoke`（24.04，18791）、`kde-wayland`（24.04，18792）、`kde-x11`（24.04，18793）均 `needs: build-linux`；`self-hosted-kde-lab`（`[self-hosted, linux, x64, linux-kde-lab]`）仅在 `workflow_dispatch` 且 `self_hosted=true` 时跑，本轮无 runner，未执行，状态=未验证。
+
+**已真绿**：`build-linux`；tarball 服务级 smoke（隔离 `PORT`/`CC_DATA_DIR`/`CC_LOG_DIR`/`CC_WEBUI_DIR` 真跑 health/WebUI/静态资源/目录契约/优雅退出）；AppImage 真实 FUSE（挂载源是 AppImage、进程来自挂载点、`/health` 与 `/webui/` 200、退出后挂载与端口释放）；systemd 真实装 deb + `enable/start/stop/restart/disable/purge`（`/health`、`/webui/`、静态资源、MainPID 与 exe 归属、journal、隔离端口、日志目录）。
+
+**仍未绿（d34c3b4 之前的状态）**：KDE Wayland 与 KDE X11 都在 Install 步骤/断言处红，根因两类：(a) 验收脚本 `wait_for` 未消费调用语法里的 `--` 分隔符，`until "$@"` 去执行名为 `--` 的命令，任何被等待状态都被误判为「等不到」（影响 `activity-manager`/`status-notifier-watcher`/`xvfb`/`plasma-x11` 等断言）；(b) hosted 区域镜像 `us-east-2.ec2.archive.ubuntu.com` 在 `libqt5webenginecore5`（42.6MB）上十分钟零进展，`apt install` 四次各 600s 全部 exit 124。修复状态：安装集合已在 commit `d34c3b4` 从 `kde-plasma-desktop` 元包收敛为 `plasma-workspace` + `plasma-desktop` + `kwin-wayland`/`kwin-x11` + `kde-spectacle` 等；`wait_for` 消费 `--`、两个 KDE job 安装前把 `/etc/apt/apt-mirrors.txt` 归档主机改写为 `azure.archive.ubuntu.com` 并加 `Acquire::ForceIPv4` 这两项仍在工作区、尚未 commit/push。**修复后的结果以随后一次 run 为准，文档状态需随该 run 更新。**
+
+**本轮记录的产品/环境发现**：deb 的 unit 在 `ProtectSystem=strict` 下更新检测写状态失败 `Read-only file system (os error 30)`（非致命，仅 WARN）；`/var/log/commandcode-proxy` 为 0750，验收脚本必须以 sudo 探测其中的 `proxy.log`。
+
+### 14.2 仍未覆盖的实机验收项（不关闭）
+
+- KDE Plasma（X11 + Wayland）真实桌面：SNI 图标出现、右键菜单条目与启停视觉/点击——hosted 两个 KDE job 本轮红（根因与未推送修复见 §14.1），L1/L3 实机仍未验；无头 SNI 契约由 `ci.yml` `linux-sni-smoke` 保持通过。
+- systemd 真实 `systemctl start/stop/enable` 启停与 journal 日志——**已由 `systemd-deb` job 在 hosted 24.04 完整 VM 上真绿**（含 stop/start 循环、disable、purge）；剩余仅 self-hosted lab 环境复跑。
+- AppImage 在**真实桌面**运行——FUSE 真实挂载运行已由 `appimage-fuse` job 真绿；桌面点按/视觉仍随 KDE job 与 self-hosted lab。
+- Linux 侧以独立 `PORT`/`CC_DATA_DIR`/`CC_WEBUI_DIR` **真正运行** Linux proxy——**已由 `service-smoke` job 真绿**。
+- self-hosted 真实 render node（VKMS/`/dev/dri`）：本轮无 `linux-kde-lab` runner，未验。
 - AUR 真实 `git push` 发布（本机无 Arch 账号；Arch 容器 `makepkg -f` 已过、`PKGBUILD`/`SRCINFO` 已渲染）。
+- 菜单 DBus 语义仍归 `ci.yml` `linux-sni-smoke`；desktop-acceptance 只做像素与点击，不重复造 DBus 契约。
 - macOS：本期非目标，未做（`compile_error!` 明确指向 CLI）。
 
 以上未做项不替代为“应该没问题”。完整逐命令证据见
