@@ -99,8 +99,8 @@ DEPS="$(printf '%s\n' "$DEPS_RAW" | sed -n 's/^shlibs:Depends=//p')"
 test -n "$DEPS" || { echo "error: empty shlibs:Depends" >&2; exit 1; }
 echo "shlibs:Depends=$DEPS"
 
-# 插到 Description 之前（Debian control 的 canonical 顺序），用临时文件避免
-awk 读到一半写同一文件。
+# 插到 Description 之前（Debian control 的 canonical 顺序）；写临时文件，
+# 避免 awk 一边读一边写同一个文件。
 awk -v d="Depends: $DEPS" '/^Description:/ && !done { print d; done=1 } { print }' \
     "$DEB_PROXY_ROOT/DEBIAN/control" > "$DEB_PROXY_ROOT/DEBIAN/control.new"
 mv "$DEB_PROXY_ROOT/DEBIAN/control.new" "$DEB_PROXY_ROOT/DEBIAN/control"
