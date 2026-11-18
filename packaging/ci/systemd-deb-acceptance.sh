@@ -50,10 +50,22 @@ ok() { echo "STEP ok: $1"; }
 # systemctl 断言都会退化成「命令返回 0 但其实没启动任何东西」。
 test -d /run/systemd/system \
     || fail "systemd-is-pid1" "no /run/systemd/system — this is a container, not a systemd VM"
-STATE="$(systemctl is-system-running 2>/dev/null || true)"
+test "$(ps -o comm= -p 1 | tr -d ' ')" = "systemd" \
+    || fail "systemd-is-pid1" "PID 1 is '$(ps -o comm= -p 1)', not systemd"
+# 机器刚启动时 is-system-running 会返回 startup/starting（单元还在拉起），
+# hosted runner 的 job 常常落在这一段。这里允许有界等待，但必须收敛：
+# 一直停在 starting 说明这台 VM 的系统状态本身异常，后续 start 的结论也不可信。
+STATE=""
+for ((i = 0; i < 90; i++)); do
+    STATE="$(systemctl is-system-running 2>/dev/null || true)"
+    case "$STATE" in
+        running|degraded) break ;;
+    esac
+    sleep 1
+done
 case "$STATE" in
     running|degraded) ;;
-    *) fail "systemd-is-pid1" "systemctl is-system-running reported '$STATE'" ;;
+    *) fail "systemd-is-pid1" "systemctl is-system-running stayed '$STATE' for 90s" ;;
 esac
 ok "systemd-is-pid1 ($(systemctl --version | head -1), state=$STATE)"
 

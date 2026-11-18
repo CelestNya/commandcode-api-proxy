@@ -50,16 +50,37 @@ ORIG_MODE="$(stat -c '%a' "$APPIMAGE")"
 chmod +x "$APPIMAGE"
 ok "appimage-exists (mode was $ORIG_MODE)"
 
-# ---- 1. FUSE 前提：包、模块、设备节点 ----
-# Ubuntu 24.04 把 libfuse2 重命名为 libfuse2t64（time_t 64 位 ABI 迁移）。
-# 两个名字都试，但安装失败必须报错——AppImage 没有 libfuse 就根本 mount 不了。
-if ! command -v fusermount >/dev/null 2>&1 && ! command -v fusermount3 >/dev/null 2>&1; then
+# ---- 1. FUSE 前提：库、设备节点 ----
+# Ubuntu 24.04 把 libfuse2 重命名为 libfuse2t64（time_t 64 位 ABI 迁移），且库
+# 文件可能落在 /usr/lib/x86_64-linux-gnu/libfuse2t64/ 子目录，ldconfig 默认
+# 不收录——AppImage runtime 的 dlopen("libfuse.so.2") 于是失败。因此判据是
+# 「libfuse.so.2 是否在 ldconfig 缓存里」，而不是「fusermount 命令是否存在」：
+# fuse3 的 fusermount3 与 libfuse2 的 .so 是两回事，后者才是 AppImage 要的。
+libfuse_path() {
+    ldconfig -p 2>/dev/null | awk '/libfuse\.so\.2 /{print $NF; exit}' | sed 's/^ */ /' | tr -d ' '
+}
+LIBFUSE="$(libfuse_path)"
+if [ -z "$LIBFUSE" ]; then
     $SUDO apt-get update -qq
-    $SUDO apt-get install -y libfuse2t64 || $SUDO apt-get install -y libfuse2
+    $SUDO apt-get install -y -qq libfuse2t64 2>/dev/null \
+        || $SUDO apt-get install -y -qq libfuse2
+    $SUDO ldconfig
+    LIBFUSE="$(libfuse_path)"
 fi
-{ command -v fusermount || command -v fusermount3; } >/dev/null 2>&1 \
-    || fail "libfuse" "neither fusermount nor fusermount3 available"
-ok "libfuse ($( (command -v fusermount || command -v fusermount3) | head -1 ))"
+if [ -z "$LIBFUSE" ]; then
+    ACTUAL="$(find /usr/lib /lib -maxdepth 4 -name 'libfuse.so.2' 2>/dev/null | head -1)"
+    if [ -n "$ACTUAL" ]; then
+        echo "  libfuse.so.2 在 $ACTUAL，但不在 ldconfig 搜索路径；链接到默认路径"
+        $SUDO ln -sf "$ACTUAL" /usr/lib/x86_64-linux-gnu/libfuse.so.2
+        $SUDO ldconfig
+        LIBFUSE="$(libfuse_path)"
+    fi
+fi
+[ -n "$LIBFUSE" ] || fail "libfuse" \
+    "dlopen('libfuse.so.2') would fail: library absent from ldconfig cache" \
+    "libfuse2t64: $($SUDO dpkg -l libfuse2t64 2>&1 | tail -1)" \
+    "found: $(find /usr/lib /lib -maxdepth 4 -name 'libfuse.so.2*' 2>/dev/null | head -5 | tr '\n' ' ')"
+ok "libfuse ($LIBFUSE)"
 
 $SUDO modprobe fuse 2>/dev/null || true
 [ -e /dev/fuse ] || fail "dev-fuse" "/dev/fuse missing after modprobe fuse (kernel has no fuse module?)"

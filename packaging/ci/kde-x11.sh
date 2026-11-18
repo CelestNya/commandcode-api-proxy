@@ -287,8 +287,8 @@ sleep 4
 # 8. 截全屏 + 扫描绿色圆点
 # ---------------------------------------------------------------------------
 DESKTOP_PNG="$SHOTS_DIR/x11-desktop.png"
-import -window root "$DESKTOP_PNG" >"$SHOTS_DIR/import-desktop.log" 2>&1 \
-    || fail "screenshot" "import 截全屏失败；见 import-desktop.log"
+timeout -k 5 30 import -window root "$DESKTOP_PNG" >"$SHOTS_DIR/import-desktop.log" 2>&1 \
+    || fail "screenshot" "import 截全屏失败或 30s 无响应；见 import-desktop.log"
 [ -s "$DESKTOP_PNG" ] || fail "screenshot" "截图文件为空: $DESKTOP_PNG"
 
 size_kb=$(( $(stat -c%s "$DESKTOP_PNG") / 1024 ))
@@ -325,15 +325,15 @@ xwininfo -root -tree >"$BEFORE_TREE" 2>&1
 
 # 按钮 3 = 右键；--sync 保证移动完成后再点击。点击失败必须显式落证据，
 # 不能让 set -e 静默中断在采集 after 窗口树之前。
-if ! xdotool mousemove --sync "$CX_INT" "$CY_INT" click 3; then
-    fail "tray-click" "xdotool 右键点击质心 ($CX_INT,$CY_INT) 失败"
+if ! timeout -k 5 20 xdotool mousemove --sync "$CX_INT" "$CY_INT" click 3; then
+    fail "tray-click" "xdotool 右键点击质心 ($CX_INT,$CY_INT) 失败或 20s 无响应"
 fi
 # 菜单弹出有一两帧延迟，固定等待落屏；不是断言，断言在后面的窗口/像素比对。
 sleep 2
 
 xwininfo -root -tree >"$AFTER_TREE" 2>&1
-import -window root "$MENU_PNG" >"$SHOTS_DIR/import-menu.log" 2>&1 \
-    || fail "menu-screenshot" "菜单截图失败；见 import-menu.log"
+timeout -k 5 30 import -window root "$MENU_PNG" >"$SHOTS_DIR/import-menu.log" 2>&1 \
+    || fail "menu-screenshot" "菜单截图失败或 30s 无响应；见 import-menu.log"
 
 # --- 断言 a：after 出现 before 没有的、已映射（IsViewable）顶层窗口 ---
 extract_ids() {

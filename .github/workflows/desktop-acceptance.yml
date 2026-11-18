@@ -94,6 +94,7 @@ jobs:
           DEB_DIR: ${{ github.workspace }}/artifacts
           PORT: '18789'
           EVIDENCE_DIR: ${{ runner.temp }}/systemd-evidence
+          DEBIAN_FRONTEND: noninteractive
         run: bash packaging/ci/systemd-deb-acceptance.sh
       - name: Upload systemd evidence (journal, env, ids)
         if: always()
@@ -115,6 +116,27 @@ jobs:
         with:
           name: linux-desktop
           path: artifacts
+      - name: Install libfuse2t64 and assert the FUSE prerequisites
+        # 24.04 上 AppImage runtime 需要的是 libfuse.so.2（由 libfuse2t64 提供），
+        # 不是 fuse3 的 fusermount3。安装失败/库不在搜索路径时，脚本里还会给出
+        # 具体的 dpkg/find 证据，避免这里变成一个笼统的 apt 失败。
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          sudo systemctl stop unattended-upgrades 2>/dev/null || true
+          for i in $(seq 1 120); do
+            if ! sudo fuser -s /var/lib/dpkg/lock-frontend 2>/dev/null; then break; fi
+            sleep 1
+          done
+          timeout 300 sudo apt-get update
+          timeout -k 20 300 sudo apt-get install -y \
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+            libfuse2t64 || timeout -k 20 300 sudo apt-get install -y libfuse2
+          sudo ldconfig
+          echo "ldconfig fuse entries:"; ldconfig -p | grep -i fuse || echo "  none"
+          sudo modprobe fuse || true
+          ls -l /dev/fuse
       - name: Run AppImage through FUSE (no --appimage-extract-and-run)
         env:
           PORT: '18790'
@@ -179,12 +201,35 @@ jobs:
         # 也能起真实 compositor，这正是 hosted runner 上唯一诚实可行的路径。
         # 注意包名：24.04 上截图工具的包叫 kde-spectacle（可执行名仍是
         # spectacle），写 `spectacle` 会 apt 失败。
+        #
+        # 首跑实测：这一步曾在无输出状态下卡 24 分钟（job 45 分钟超时前被杀）。
+        # 原因是 runner 镜像启动期的 apt 定时器/锁，以及 `-qq` 把进度全吃掉。
+        # 因此这里显式停掉 apt 定时器、有界等锁、去掉 -qq 让日志可见、加
+        # Acquire 重试，并用 timeout 把「卡死」变成一次明确的失败。
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          set -euo pipefail
+          sudo systemctl stop unattended-upgrades 2>/dev/null || true
+          sudo systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+          for i in $(seq 1 120); do
+            if ! sudo fuser -s /var/lib/dpkg/lock-frontend 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if sudo fuser -s /var/lib/dpkg/lock-frontend 2>/dev/null; then
+            echo "dpkg frontend lock still held:"; sudo fuser -v /var/lib/dpkg/lock-frontend || true
+            exit 1
+          fi
+          timeout 300 sudo apt-get update
+          timeout -k 30 900 sudo apt-get install -y \
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
             kde-plasma-desktop plasma-workspace-wayland \
             kwin-wayland-backend-virtual kde-spectacle dbus-x11 python3-pil \
             libgl1-mesa-dri qtwayland5 kded5
+          # 安装结果落盘：后续若引用包名/版本出错，证据在 artifact 里。
+          dpkg -l kde-plasma-desktop plasma-workspace-wayland kde-spectacle kded5 2>/dev/null \
+            | awk '$1 == "ii" {print $2, $3}'
       - name: Start kwin_wayland --virtual + plasmashell, run tray, screenshot, scan pixels
         env:
           PORT: '18792'
@@ -193,7 +238,9 @@ jobs:
         run: |
           set -euo pipefail
           TARBALL="$(ls "$GITHUB_WORKSPACE"/artifacts/*.tar.gz)"
-          TARBALL="$TARBALL" bash packaging/ci/kde-wayland.sh
+          # 脚本内部每条断言都有界，但外部仍要一条硬上限：任何未预料的挂起
+          # 都必须表现成「这次验收失败」，而不是把 job 拖到超时被 kill。
+          TARBALL="$TARBALL" timeout -k 30 900 bash packaging/ci/kde-wayland.sh
       - name: Upload Wayland screenshots + logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -215,11 +262,28 @@ jobs:
           name: linux-desktop
           path: artifacts
       - name: Install Plasma X11 stack + screenshot/input tooling
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          set -euo pipefail
+          sudo systemctl stop unattended-upgrades 2>/dev/null || true
+          sudo systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+          for i in $(seq 1 120); do
+            if ! sudo fuser -s /var/lib/dpkg/lock-frontend 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if sudo fuser -s /var/lib/dpkg/lock-frontend 2>/dev/null; then
+            echo "dpkg frontend lock still held:"; sudo fuser -v /var/lib/dpkg/lock-frontend || true
+            exit 1
+          fi
+          timeout 300 sudo apt-get update
+          timeout -k 30 900 sudo apt-get install -y \
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
             kde-plasma-desktop xvfb xdotool x11-utils imagemagick \
             dbus-x11 python3-pil libgl1-mesa-dri kded5
+          dpkg -l kde-plasma-desktop xvfb kded5 2>/dev/null \
+            | awk '$1 == "ii" {print $2, $3}'
       - name: Xvfb + startplasma-x11, run tray, screenshot, right-click menu proof
         env:
           PORT: '18793'
@@ -228,7 +292,7 @@ jobs:
         run: |
           set -euo pipefail
           TARBALL="$(ls "$GITHUB_WORKSPACE"/artifacts/*.tar.gz)"
-          TARBALL="$TARBALL" bash packaging/ci/kde-x11.sh
+          TARBALL="$TARBALL" timeout -k 30 900 bash packaging/ci/kde-x11.sh
       - name: Upload X11 screenshots + logs (before/after menu)
         if: always()
         uses: actions/upload-artifact@v4

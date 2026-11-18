@@ -313,8 +313,10 @@ command -v spectacle >/dev/null 2>&1 \
 spectacle --version >"$SHOTS_DIR/spectacle-version.log" 2>&1 || true
 
 DESKTOP_PNG="$SHOTS_DIR/wayland-desktop.png"
-if ! spectacle -b -n -f -o "$DESKTOP_PNG" >"$SHOTS_DIR/spectacle.log" 2>&1; then
-    fail "screenshot" "spectacle 截图命令退出非 0；见 spectacle.log"
+# spectacle 在后台模式下若 KWin 截图接口不应答会一直挂着；加硬超时，
+# 让「无响应」表现为本次断言失败而不是把整个 job 拖到 45 分钟超时。
+if ! timeout -k 10 120 spectacle -b -n -f -o "$DESKTOP_PNG" >"$SHOTS_DIR/spectacle.log" 2>&1; then
+    fail "screenshot" "spectacle 截图命令失败或 120s 无响应（rc=$?）；见 spectacle.log"
 fi
 [ -s "$DESKTOP_PNG" ] || fail "screenshot" "截图文件为空: $DESKTOP_PNG"
 
