@@ -135,7 +135,12 @@ dbus_has_name() {
     if command -v busctl >/dev/null 2>&1; then
         # busctl --user list 每行是「服务名 PID 进程 ...」，先只取第一列；
         # 否则调用方的 ^...$ 锚点永远匹配不到带 PID 的整行。
-        names="$(busctl --user list 2>/dev/null | awk 'NF {print $1}' || true)"
+        #
+        # PID 列只认真实数字：可激活但尚未启动的服务这一列是
+        # "(activatable)"，把它算作「名已出现」会让断言在服务没起来时就
+        # 通过，随后 busctl call 反而触发 D-Bus activation（见 kde-wayland.sh
+        # 里 run 44301504976 的实测记录）。
+        names="$(busctl --user list 2>/dev/null | awk '$2 ~ /^[0-9]+$/ {print $1}' || true)"
     else
         names="$(dbus-send --session --dest=org.freedesktop.DBus --type=method_call \
             /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null \
@@ -263,13 +268,26 @@ echo "STEP ok: kded-started ($KDED_BIN)"
 # kded 不会自动加载 statusnotifierwatcher（默认 session 里通常由系统托盘
 # applet 触发）；hosted runner 没有默认面板配置时它永远不会出现。这里
 # 直接让 kded 加载模块，避免把“面板没请求”误判成“托盘没注册”。
-if ! wait_for "kded-service" 15 0.5 -- dbus_has_name '^org\.kde\.kded[56]$'; then
-    fail "kded-service" "15s 内未出现 org.kde.kded5/6；见 kded.log"
+# 必须等 kded 真的持有名字（有 owner PID）再 call，否则会退化成
+# D-Bus activation，由 dbus-daemon 用旧环境 fork 出的 kded5 直接崩。
+if ! wait_for "kded-service" 30 0.5 -- dbus_has_name '^org\.kde\.kded[56]$'; then
+    fail "kded-service" "30s 内未出现 org.kde.kded5/6 的真实 owner；见 kded.log"
 fi
-KDED_SERVICE="$(busctl --user list 2>/dev/null | awk '$1 ~ /^org\.kde\.kded[56]$/ {print $1; exit}')"
+KDED_SERVICE="$(busctl --user list 2>/dev/null \
+    | awk '$2 ~ /^[0-9]+$/ && $1 ~ /^org\.kde\.kded[56]$/ {print $1; exit}')"
+: >"$SHOTS_DIR/kded-load-watcher.log"
 if [ -n "$KDED_SERVICE" ]; then
-    busctl --user call "$KDED_SERVICE" /kded "$KDED_SERVICE" loadModule s statusnotifierwatcher \
-        >"$SHOTS_DIR/kded-load-watcher.log" 2>&1 || true
+    for attempt in 1 2 3; do
+        if busctl --user call "$KDED_SERVICE" /kded "$KDED_SERVICE" loadModule s statusnotifierwatcher \
+            >>"$SHOTS_DIR/kded-load-watcher.log" 2>&1; then
+            echo "loadModule statusnotifierwatcher: ok (attempt $attempt)" >>"$SHOTS_DIR/kded-load-watcher.log"
+            break
+        fi
+        echo "loadModule statusnotifierwatcher: attempt $attempt failed" >>"$SHOTS_DIR/kded-load-watcher.log"
+        sleep 2
+    done
+else
+    echo "no live kded owner on the session bus" >>"$SHOTS_DIR/kded-load-watcher.log"
 fi
 
 # ---------------------------------------------------------------------------
@@ -333,6 +351,8 @@ if ! wait_for "plasma-x11" 90 0.5 -- plasma_x11_ready; then
         tail -20 "$SHOTS_DIR/kactivitymanagerd.log" 2>/dev/null || true
         echo "--- kded.log ---"
         cat "$SHOTS_DIR/kded.log" 2>/dev/null || true
+        echo "--- kded-load-watcher.log ---"
+        cat "$SHOTS_DIR/kded-load-watcher.log" 2>/dev/null || true
     } >"$SHOTS_DIR/plasma-x11-diagnostics.txt" 2>&1 || true
     fail "plasma-x11" "90s 内 watcher/plasmashell 窗口未就绪；见 plasma-x11-diagnostics.txt"
 fi

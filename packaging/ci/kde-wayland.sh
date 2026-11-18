@@ -138,7 +138,14 @@ dbus_has_name() {
     if command -v busctl >/dev/null 2>&1; then
         # busctl --user list 每行是「服务名 PID 进程 ...」，先只取第一列；
         # 否则调用方的 ^...$ 锚点永远匹配不到带 PID 的整行。
-        names="$(busctl --user list 2>/dev/null | awk 'NF {print $1}' || true)"
+        #
+        # PID 列只认真实数字：可激活但尚未启动的服务这一列是
+        # "(activatable)"。把它算作「名已出现」会让断言在服务还没起来时
+        # 就通过，随后 busctl call 反而触发 D-Bus activation——run
+        # 44301504976 的 status-notifier-watcher 就是这样假等 90s 后超时，
+        # 且被激活出来的 kded5 继承了 dbus-daemon 的旧环境（没有脚本
+        # export 的 XDG_RUNTIME_DIR / QT_QPA_PLATFORM）而 SIGABRT。
+        names="$(busctl --user list 2>/dev/null | awk '$2 ~ /^[0-9]+$/ {print $1}' || true)"
     else
         names="$(dbus-send --session --dest=org.freedesktop.DBus --type=method_call \
             /org/freedesktop/DBus org.freedesktop.DBus.ListNames 2>/dev/null \
@@ -275,13 +282,31 @@ echo "STEP ok: kded-started ($KDED_BIN)"
 # kded 不会自动加载 statusnotifierwatcher（默认 session 里通常由系统托盘
 # applet 触发）；hosted runner 没有默认面板配置时它永远不会出现。这里
 # 直接让 kded 加载模块，避免把“面板没请求”误判成“托盘没注册”。
-if ! wait_for "kded-service" 15 0.5 -- dbus_has_name '^org\.kde\.kded[56]$'; then
-    fail "kded-service" "15s 内未出现 org.kde.kded5/6；见 kded.log"
+#
+# 前提是 kded 已经真的持有这个名字（有 owner PID）。否则 busctl 这一手
+# 会变成 D-Bus activation：dbus-daemon 用自己启动时的环境 fork 一个
+# kded5，缺 XDG_RUNTIME_DIR 直接 SIGABRT，watcher 永远不会出现
+# （run 44301504976 实测）。
+if ! wait_for "kded-service" 30 0.5 -- dbus_has_name '^org\.kde\.kded[56]$'; then
+    fail "kded-service" "30s 内未出现 org.kde.kded5/6 的真实 owner；见 kded.log"
 fi
-KDED_SERVICE="$(busctl --user list 2>/dev/null | awk '$1 ~ /^org\.kde\.kded[56]$/ {print $1; exit}')"
+KDED_SERVICE="$(busctl --user list 2>/dev/null \
+    | awk '$2 ~ /^[0-9]+$/ && $1 ~ /^org\.kde\.kded[56]$/ {print $1; exit}')"
+: >"$SHOTS_DIR/kded-load-watcher.log"
 if [ -n "$KDED_SERVICE" ]; then
-    busctl --user call "$KDED_SERVICE" /kded "$KDED_SERVICE" loadModule s statusnotifierwatcher \
-        >"$SHOTS_DIR/kded-load-watcher.log" 2>&1 || true
+    # 模块可能已经被加载（返回 AlreadyLoaded 之类错误），失败也重试几次，
+    # 结果全部落盘，失败原因留给后面的 watcher 断言去判。
+    for attempt in 1 2 3; do
+        if busctl --user call "$KDED_SERVICE" /kded "$KDED_SERVICE" loadModule s statusnotifierwatcher \
+            >>"$SHOTS_DIR/kded-load-watcher.log" 2>&1; then
+            echo "loadModule statusnotifierwatcher: ok (attempt $attempt)" >>"$SHOTS_DIR/kded-load-watcher.log"
+            break
+        fi
+        echo "loadModule statusnotifierwatcher: attempt $attempt failed" >>"$SHOTS_DIR/kded-load-watcher.log"
+        sleep 2
+    done
+else
+    echo "no live kded owner on the session bus" >>"$SHOTS_DIR/kded-load-watcher.log"
 fi
 
 # ---------------------------------------------------------------------------
@@ -322,6 +347,8 @@ watcher_diagnostics() {
         ls -1 /usr/share/kservices5/ 2>/dev/null | grep -i statusnotifier || echo "(none)"
         echo "--- kded plugin dir ---"
         ls -1 /usr/lib/x86_64-linux-gnu/qt5/plugins/kf5/kded/ 2>/dev/null || echo "(missing)"
+        echo "--- kded-load-watcher.log ---"
+        cat "$SHOTS_DIR/kded-load-watcher.log" 2>/dev/null || echo "(none)"
         echo "--- kded.log ---"
         cat "$SHOTS_DIR/kded.log" 2>/dev/null || echo "(none)"
         echo "--- plasmashell.log ---"
@@ -342,8 +369,8 @@ echo "STEP ok: status-notifier-watcher"
 # 只有 host 出现，SNI 图标才真的会被面板绘制。截图前必须等它，不能只靠
 # 固定 sleep——Wayland 下 plasmashell 首次加载 QML 面板可能超过 4 秒，
 # 否则会截到纯黑桌面（2026-11-18 本地无头 VM 实测）。
-if ! wait_for "status-notifier-host" 60 0.5 -- dbus_has_name '^org\.kde\.StatusNotifierHost-'; then
-    fail "status-notifier-host" "60s 内未出现 StatusNotifierHost；见 plasmashell.log"
+if ! wait_for "status-notifier-host" 120 0.5 -- dbus_has_name '^org\.kde\.StatusNotifierHost-'; then
+    fail "status-notifier-host" "120s 内未出现 StatusNotifierHost；见 plasmashell.log"
 fi
 echo "STEP ok: status-notifier-host"
 
